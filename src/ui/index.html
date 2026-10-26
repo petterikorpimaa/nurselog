@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nurselog</title>
+  <meta name="theme-color" content="#08090b">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/ui/apple-touch-icon.png">
+  <link rel="stylesheet" href="/ui/board.css">
+  <link rel="stylesheet" href="/ui/graph.css">
+  <link rel="stylesheet" href="/ui/table.css">
+  <link rel="stylesheet" href="/ui/messages.css">
+  <link rel="stylesheet" href="/ui/overview.css">
+  <link rel="stylesheet" href="/ui/branches.css">
+  <script type="module" src="/ui/board.js"></script>
+</head>
+<body>
+  <!-- The board page (design section 15). The script is the tsup bundle of src/ui/board.ts, served from dist/ui; the
+       styles, the web app manifest and the icons are served from src/ui. Same-origin assets only: the CSP is
+       default-src 'self'. -->
+  <div class="page">
+    <header class="topbar" id="topbar"><strong class="topbar-name">Nurselog</strong></header>
+    <main class="board" id="board">
+      <p class="board-note">Loading the board… If this stays, run pnpm build in the Nurselog clone.</p>
+    </main>
+  </div>
+</body>
+</html>

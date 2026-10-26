@@ -1,0 +1,159 @@
+/* The graph of a card (design section 15), ported from the graph styles of reference/demo.html. Items take their
+   colour from `--c` (set by the scene). Continuous motion: the running ring and the flowing edges of work in progress
+   on the run graph; on the session graph a quiet running ring and the pulses of things waiting on the developer.
+   board.css turns all motion off for reduced motion. */
+
+/* The scene sizes the SVG in pixels (one board-wide scale per layout unit, scene.ts); a wider graph scrolls in its host.
+   The host's top padding keeps the halo of a "?" on the plan gate unclipped. */
+.graph { display: block; overflow: visible; }
+.graph-host { padding-top: 10px; }
+
+/* edges */
+.edge { fill: none; stroke-width: 1.5; }
+.edge.pending { stroke: var(--dot); stroke-dasharray: .1 4.2; stroke-linecap: round; stroke-width: 1.8; }
+.edge.done { stroke: var(--c); stroke-opacity: .6; }
+.edge.running { stroke: var(--c); stroke-dasharray: 4 4; animation: graph-flow 1.1s linear infinite; }
+.edge.stale { stroke: var(--c); stroke-dasharray: 4 4; }
+.edge.loop { stroke: var(--warm); stroke-dasharray: 3 3; stroke-opacity: .8; }
+.edge.loop-done { stroke: var(--rev); stroke-opacity: .3; }
+.edge.gate-link, .edge.gate-link-on { stroke: var(--fg-3); stroke-dasharray: 2 3; stroke-width: 1; }
+.edge.gate-link-on { stroke: var(--you); }
+/* the static cue under a stage label waiting for the developer */
+.edge.you-cue { stroke: var(--you); stroke-width: 1.4; stroke-dasharray: 3 2.5; }
+@keyframes graph-flow { to { stroke-dashoffset: -16; } }
+
+/* nodes, by state (nodes.ts) */
+.node .node-outline { fill: var(--card); stroke: var(--c); stroke-width: 1.6; transition: fill .35s, stroke .35s; }
+.node.pending .node-outline { stroke: var(--fg-3); stroke-dasharray: .1 3.6; stroke-linecap: round; stroke-width: 1.8; }
+.node.skipped .node-outline { stroke: var(--dot); stroke-dasharray: .1 3.6; stroke-linecap: round; }
+.node.skipped .node-icon { stroke: var(--fg-3); }
+.node.running .node-outline { fill: var(--c); stroke: var(--c); }
+.node.running .node-ring { fill: none; stroke: var(--c); stroke-width: 1.4; animation: graph-ring 1.8s ease-out infinite; }
+/* a running node whose agent went stale keeps its fill; its ring and the flow into it stop */
+.node.stale .node-ring { display: none; }
+.node.done .node-outline { fill: color-mix(in srgb, var(--c) 16%, var(--card)); }
+.node.approved .node-outline { fill: var(--rev); stroke: var(--rev); }
+.node.changes .node-outline { fill: color-mix(in srgb, var(--warm) 18%, var(--card)); stroke: var(--warm); }
+.node.handed .node-outline { stroke: var(--amber); }
+.node.waiting .node-outline { fill: color-mix(in srgb, var(--you) 7%, var(--card)); stroke: var(--you); stroke-dasharray: 3 2.6; }
+.node.failed .node-outline { fill: color-mix(in srgb, var(--red) 18%, var(--card)); stroke: var(--red); }
+.node .node-half { fill: var(--amber); }
+.node .node-person { fill: var(--you); }
+.node .node-icon { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.node.done .node-icon { stroke: var(--c); }
+.node.approved .node-icon { stroke: var(--ink); }
+.node.changes .node-icon { stroke: var(--warm); }
+.node.waiting .node-icon { stroke: var(--you); }
+.node .node-letter { font: 700 10px var(--f-mono); fill: var(--ink); text-anchor: middle; }
+/* a running node's model icon (model-icons.ts): its glyph follows `color`; its strokes scale with the graph like the
+   state glyphs, 1.5 and 1.3 at fit scale 1 whatever the icon's scale `--k` */
+.node .node-mark { color: var(--ink); }
+.node .node-mark .glyph-stroke { stroke-width: calc(1.5px / var(--k, 1)); }
+.node .node-mark .glyph-thin { stroke-width: calc(1.3px / var(--k, 1)); }
+.node.failed .node-letter { fill: var(--red); }
+/* the part the pop and the finish sweep scale (scene.ts, element.animate) */
+.node .node-core { transform-box: fill-box; transform-origin: center; }
+@keyframes graph-ring { 0% { r: 11; opacity: .9; } 100% { r: 19; opacity: 0; } }
+/* the session graph's running ring: weaker than the waiting pulse (peak .45 against .9, 6 growth against 8) and slower */
+@keyframes graph-ring-quiet { 0% { r: 11; opacity: .45; } 100% { r: 17; opacity: 0; } }
+
+/* package pills */
+.pill rect { fill: color-mix(in srgb, var(--c) 15%, var(--card)); stroke: color-mix(in srgb, var(--c) 55%, transparent); stroke-width: 1; }
+.pill text { fill: var(--c); font: 500 10.5px var(--f-mono); text-anchor: middle; }
+/* the part a pop scales (scene.ts) */
+.pill .pill-core, .join-bar { transform-box: fill-box; transform-origin: center; }
+
+/* the Join bar */
+.join-bar { transition: fill .4s; }
+.join-bar.pending { fill: var(--card-3); }
+.join-bar.partial { fill: var(--fg-2); }
+.join-bar.done { fill: var(--shared); }
+
+/* texts: notes, the Join count, reviewer labels, stage labels, "+ added during build" */
+.graph-text.note { font: 500 10px var(--f-mono); fill: var(--fg-3); }
+.graph-text.join-count { font: 600 10px var(--f-mono); fill: var(--fg-2); }
+.graph-text.reviewer { font: 500 10.5px var(--f-mono); fill: var(--fg-2); }
+.graph-text.reviewer-dim { font: 500 10.5px var(--f-mono); fill: var(--fg-3); }
+.graph-text .sub { fill: var(--fg-3); font-weight: 600; }
+.graph-text.stage, .graph-text.stage-active, .graph-text.stage-you { font: 500 11px var(--f-ui); fill: var(--fg-3); transition: fill .3s; }
+.graph-text.stage-active { fill: var(--fg); font-weight: 600; }
+.graph-text.stage-you { fill: var(--you); font-weight: 600; }
+.graph-text.added { font: 600 9.5px var(--f-mono); fill: var(--amber); }
+
+/* "You" gates: dashed and pulsing while waiting, resolved after */
+.gate rect { fill: var(--card); stroke: var(--fg-3); stroke-width: 1.2; stroke-dasharray: 3 2.6; }
+.gate text { font: 600 10.5px var(--f-ui); fill: var(--fg-3); text-anchor: middle; }
+.gate.waiting rect { fill: color-mix(in srgb, var(--you) 9%, var(--card)); stroke: var(--you); }
+.gate.waiting text { fill: var(--you); }
+.gate.waiting .gate-halo {
+  fill: none; stroke: var(--you); stroke-width: 1; transform-box: fill-box; transform-origin: center;
+  animation: graph-halo 2.2s ease-out infinite;
+}
+.gate.done rect { stroke-dasharray: none; stroke: var(--border-2); }
+.gate.done text { fill: var(--fg-2); }
+@keyframes graph-halo { 0% { opacity: .7; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35, 1.7); } }
+
+/* "?" bubbles, one per target: filled with a halo when any of its questions blocks, else outlined, with the count
+   beside the "?" from two on. A bubble pointed at, or whose questions are pointed at in the questions section, has a
+   ring. */
+.bubble { cursor: pointer; }
+.bubble circle { fill: var(--you); }
+.bubble text { font: 800 11px var(--f-ui); fill: var(--ink); text-anchor: middle; }
+.bubble .bubble-core { transform-box: fill-box; transform-origin: center; }
+.bubble .bubble-halo { fill: none; stroke: var(--you); stroke-width: 1.2; animation: graph-bubble-halo 1.8s ease-out infinite; }
+.bubble.non-blocking circle { fill: var(--card-3); stroke: var(--you); stroke-width: 1.2; }
+.bubble.non-blocking text { fill: var(--you); }
+.bubble .bubble-count { font: 700 9px var(--f-mono); fill: var(--you); text-anchor: start; }
+/* only questions for the main thread (report-block questions): quiet, outlined in grey, never as blocking */
+.bubble.quiet circle { fill: var(--card-3); stroke: var(--fg-3); }
+.bubble.quiet text, .bubble.quiet .bubble-count { fill: var(--fg-2); }
+.bubble.quiet .bubble-ring { stroke: var(--fg-2); }
+.bubble .bubble-ring { fill: none; stroke: var(--you); stroke-width: 1.4; opacity: 0; transition: opacity .2s; }
+.bubble.highlighted .bubble-ring { opacity: 1; }
+@keyframes graph-bubble-halo { 0% { r: 8; opacity: .8; } 100% { r: 17; opacity: 0; } }
+
+/* the delegation dot: a short glowing trail in the colour of what it carries, never in the pointer's way */
+.delegation-dot { pointer-events: none; }
+.delegation-dot circle { fill: currentColor; filter: drop-shadow(0 0 5px currentColor); }
+
+/* The session graph (design section 15, "Session stage map"; SC20): its own wrapper, never scrolled; the SVG is sized
+   by the fit's scale (fit.ts). No edge flow: a running node is filled with its mark and its edge solid, a stale one
+   grey. A running node in a turn has a quiet ring in its own colour; what waits for the developer pulses stronger. */
+.session-graph { padding-top: 10px; overflow: visible; }
+/* clipped only while a fold tween runs, so the items that leave do not draw below the shrinking graph */
+.session-graph .graph.tweening { overflow: hidden; }
+/* a stale edge is solid like a running one: the grey node alone says stale */
+.session-graph .edge.running, .session-graph .edge.stale { stroke: var(--c); stroke-dasharray: none; stroke-opacity: .95; animation: none; }
+.session-graph .edge.waiting { stroke: var(--you); stroke-opacity: .85; stroke-dasharray: .1 4.2; stroke-linecap: round; stroke-width: 1.8; }
+.session-graph .edge.fork { stroke: var(--c); stroke-opacity: .85; stroke-dasharray: 2 3; }
+.session-graph .edge.handed { stroke: var(--amber); stroke-dasharray: 3 3; }
+.session-graph .edge.compact { stroke: var(--fg-3); stroke-opacity: .55; stroke-width: 1.2; }
+.session-graph .node.stale .node-outline { fill: var(--card-2); stroke: var(--fg-3); }
+.session-graph .node.stale .node-letter { fill: var(--fg-3); }
+.session-graph .node.stale .node-mark { color: var(--fg-3); }
+/* the main thread between turns: an outline with its mark in its colour */
+.session-graph .node.running.idle .node-outline { fill: var(--card); }
+.session-graph .node.idle .node-letter { fill: var(--c); }
+.session-graph .node.idle .node-mark { color: var(--c); }
+.session-graph .node.waiting .node-ring { fill: none; stroke: var(--you); stroke-width: 1.2; animation: graph-ring 1.8s ease-out infinite; }
+/* the quiet running ring (the scene draws it only on a running node in a turn); opacity 0 keeps it unseen where the animation is off */
+.session-graph .node.running .node-ring { stroke-width: 1; opacity: 0; animation: graph-ring-quiet 2.4s ease-out infinite; }
+/* a node's hit area, 5 wider than the node */
+.session-graph .node .node-hit { fill: transparent; }
+/* a folded pipeline's compact row: lighter pills with 10 px text */
+.session-graph .pill.compact rect { fill: color-mix(in srgb, var(--c) 8%, var(--card)); }
+.session-graph .pill.compact text { font-size: 10px; }
+.session-graph .graph-rect.separator { fill: var(--border); }
+.session-graph .graph-rect.hit { fill: transparent; cursor: pointer; }
+.session-graph .graph-text.late { font: 500 10px var(--f-mono); fill: var(--rev); }
+.session-graph .graph-text.group { font: 600 10px var(--f-mono); letter-spacing: .02em; fill: var(--fg-3); }
+.session-graph .graph-text.toggle, .session-graph .graph-text.link { cursor: pointer; }
+.session-graph .graph-text.toggle:hover, .session-graph .graph-text.link:hover { fill: var(--fg); }
+/* the nodes and gates that open an agent's table row or the main-thread modal (SESSION_AGENT, SESSION_MAIN) */
+.session-graph .node.clickable, .session-graph .gate.clickable { cursor: pointer; }
+/* the still "You" pill above Plan from the first prompt */
+.session-graph .gate.prompt rect { fill: var(--card-2); stroke: var(--you); stroke-dasharray: none; }
+.session-graph .gate.prompt text { fill: var(--you); }
+/* hover: the items of other agents and branches dim; the opacity moves only around a change of focus */
+.session-graph .graph.dimming > g > * { transition: opacity .2s; }
+.session-graph .graph.focused .dim { opacity: .16 !important; }

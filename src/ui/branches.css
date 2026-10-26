@@ -1,0 +1,82 @@
+/* The branches overview (design section 5, the "Branches overview: ..." rows), ported from the overview styles of
+   reference/demo.html (.brwrap, .tk, .bfork, .bbase, .bseg, .bhead, .mdot, .bprom, .ripple, .tip). The panel box and
+   its header (.overview-head, .overview-sub) are the overview section's (overview.css); this sheet styles what
+   src/ui/branches/view.ts draws inside it. Lane parts take
+   their stage colour from --c (set by the view). The wait ring is the panel's only pulse; board.css turns every CSS
+   animation and transition off for reduced motion, and the view runs no draw, pop or ripple then. */
+
+.branches { position: relative; }
+.branches-wrap { position: relative; }
+.branches-svg { display: block; width: 100%; overflow: visible; }
+
+/* trunk lines, by position: the trunk, the last promote target, any other target (decision 81) */
+.br-trunk { stroke-linecap: round; stroke-width: 1.6; opacity: .75; }
+.br-trunk.trunk { stroke: var(--shared); stroke-width: 3; opacity: .8; }
+.br-trunk.last { stroke: var(--amber); }
+.br-trunk.target { stroke: var(--rev); }
+.br-trunk-name { font: 600 10.5px var(--f-mono); }
+.br-trunk-name.trunk { fill: var(--shared); }
+.br-trunk-name.last { fill: var(--amber); }
+.br-trunk-name.target { fill: var(--rev); }
+
+/* the time axis */
+.br-axis line { stroke: var(--border); }
+.br-axis text { font: 500 10px var(--f-mono); fill: var(--fg-3); text-anchor: middle; }
+
+/* hovering a lane or a promotion dot, or the board link from another panel or a card, dims everything it does not
+   light; a lit promotion keeps its arc and dot */
+.br { transition: opacity .25s; }
+.br-content.has .br:not(.hl) { opacity: .2; }
+/* with the board link (the session view) a click on a lane, a merge dot or a promotion dot opens a session's card; the
+   view marks the hit target it opens from with .opens when the pointer enters it (D12) */
+.branches.linkable .opens { cursor: pointer; }
+
+/* lanes */
+.br-fork, .br-base, .br-merge { fill: none; stroke: var(--fg-3); stroke-width: 1.5; transition: stroke .2s; }
+.br.hl .br-fork, .br.hl .br-base, .br.hl .br-merge { stroke: var(--fg); }
+.br-seg { stroke: var(--c); stroke-width: 3.4; stroke-linecap: round; }
+.br-seg.dashed { stroke-dasharray: 3 3; }
+.br-name { font: 600 9.5px var(--f-mono); fill: var(--fg-2); }
+.br.hl .br-name { fill: var(--fg); }
+.br-hit { fill: transparent; }
+
+/* the head marker: its fill follows a change over 0.3 s; waiting, a dashed core and the pulsing ring; removed, the
+   board's ended ring (board.css .row-dot); a merged lane has none */
+.br-head .br-core { fill: var(--c); transition: fill .3s; }
+.br-head .br-ring { fill: none; stroke: none; }
+.br-head.wait .br-core { fill: var(--card); stroke: var(--st-wait); stroke-width: 1.5; stroke-dasharray: 2 2; }
+.br-head.wait .br-ring { stroke: var(--st-wait); animation: br-ring 1.8s ease-out infinite; }
+.br-head.ended .br-core { fill: var(--card); stroke: var(--fg-3); stroke-width: 1; }
+@keyframes br-ring { 0% { r: 5; opacity: .9; } 100% { r: 12; opacity: 0; } }
+.br-label { font: 500 10.5px var(--f-ui); fill: var(--fg-2); }
+.br-label.wait { fill: var(--you); font-weight: 600; }
+
+/* merge dots on the trunk line and promotion arcs to a target line */
+.br-mdot { fill: var(--shared); transform-box: fill-box; transform-origin: center; transition: transform .2s; }
+.br.hl .br-mdot { transform: scale(1.6); }
+.br-mhit, .br-phit { fill: transparent; }
+.br-arc { fill: none; stroke-width: 1.4; }
+.br-arc.last { stroke: var(--amber); }
+.br-arc.target { stroke: var(--rev); }
+.br-pdot { transform-box: fill-box; transform-origin: center; }
+.br-pdot.last { fill: var(--amber); }
+.br-pdot.target { fill: var(--rev); }
+
+/* a ripple: the view animates it from opacity .9 and scale .6 to nothing at 3.2 */
+.br-ripple { fill: none; stroke: var(--c); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; pointer-events: none; }
+
+/* the tooltip, next to the pointer and inside the panel; as wide as its text up to 280 px wherever it last stood, so the
+   view measures its real width before it places it */
+.branches-tip {
+  position: absolute; left: 0; top: 0; z-index: 5; pointer-events: none; background: var(--card-3); border: 1px solid var(--border-2);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--fg-2); width: max-content; max-width: min(280px, 100%);
+  opacity: 0; transform: translateY(4px); transition: opacity .15s, transform .15s; box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.branches-tip.on { opacity: 1; transform: none; }
+.branches-tip b { display: block; color: var(--fg); font-family: var(--f-mono); }
+.branches-tip span { display: block; }
+.branches-tip em { display: block; font-style: normal; color: var(--fg-3); font-size: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .br-head.wait .br-ring { display: none; }
+}

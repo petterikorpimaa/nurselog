@@ -1,0 +1,156 @@
+/* The main thread's messages (design sections 5 and 15): the main-thread strip on a card (strip.ts), the main-thread
+   modal (modal.ts) with its shell and tag clone, and a question's link to the message of its turn. The tokens are
+   board.css's. Nothing here blinks: only waiting things pulse. */
+
+/* the "main" tag of the strip and the modal header: outlined, a dot in the shared colour */
+.main-tag {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap;
+  font: 600 10.5px var(--f-mono); color: var(--fg-2); border: 1px solid var(--border-2); border-radius: 999px;
+  padding: 1px 8px 1px 6px; background: transparent;
+}
+.main-tag i { width: 6px; height: 6px; border-radius: 50%; background: var(--shared); }
+.main-tag.held { visibility: hidden; }
+
+/* the strip: one quiet line between the agent table and the log line, outside the regions that collapse; transparent
+   until hovered (--card-2, the look the modal's shell leaves and lands on); it slides in with the run's first message as
+   the questions section does. The host is its own formatting context, so the strip's margin counts in its height
+   whether or not it clips while it slides. */
+.main-strip-host { display: flow-root; }
+.main-strip-host.sliding { overflow: hidden; }
+.main-strip {
+  display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); margin: 6px 16px 0; padding: 5px 8px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--fg-2); cursor: pointer; text-align: left;
+  font-size: 12.5px; transition: background-color .2s;
+}
+.main-strip:hover { background: var(--card-2); }
+.main-strip > svg { width: 12px; height: 12px; flex: none; color: var(--fg-3); transform: rotate(90deg); transition: transform .25s var(--ease); }
+.main-strip:hover > svg { transform: translateX(2px) rotate(90deg); }
+.main-strip-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.main-strip-kind, .main-kind { font: 600 10px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-2); white-space: nowrap; }
+.main-strip-time { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
+.main-strip-count { font: 500 10.5px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
+/* "needs you" in the you colour only while it still waits on the developer; afterwards the line reads as the others */
+.main-strip[data-waiting="true"] .main-strip-text, .main-strip[data-waiting="true"] .main-strip-kind { color: var(--you); }
+
+/* a conversation row's line (session-row.ts) is the button that opens the main-thread modal: quiet until hovered, then
+   --card-2 like the strip, the look the modal's shell leaves and lands on */
+button.run-row-line {
+  width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; transition: background-color .2s;
+}
+button.run-row-line:hover { background: var(--card-2); }
+button.run-row-line:focus-visible { outline-offset: -2px; }
+
+/* a question's link to the message of its turn */
+.question-link {
+  align-self: flex-start; border: 0; background: transparent; padding: 0; cursor: pointer; font-size: 12px;
+  color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px;
+}
+.question-link:hover { color: var(--fg); }
+
+/* the modal: a centred box over a backdrop; no blur and no scroll lock, the list scrolls inside */
+.main-modal {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+/* while it closes, the page under it takes clicks again, so a reopen turns the close around */
+.main-modal[data-phase="closing"] { pointer-events: none; }
+.main-modal.instant, .main-modal.instant * { transition: none !important; }
+.main-backdrop { position: absolute; inset: 0; background: rgba(4, 5, 8, .62); }
+.main-box {
+  position: relative; z-index: 2; width: min(760px, 100%); max-height: min(86vh, 920px); display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border-2); border-radius: 16px; box-shadow: 0 30px 90px rgba(0, 0, 0, .65);
+  overflow: hidden;
+}
+/* while the shell carries the box's look (the open until it lands, the close from its start) */
+.main-box.forming { background: transparent; border-color: transparent; box-shadow: none; }
+/* the empty shell that moves between the opener and the box, and the tag clone that rides with it */
+.main-shell { position: fixed; left: 0; top: 0; z-index: 1; border: 1px solid transparent; pointer-events: none; }
+.main-tag-clone { position: fixed; z-index: 3; margin: 0; pointer-events: none; }
+
+.main-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; flex: none; }
+.main-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.main-sub { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.main-rule { height: 1px; flex: none; background: var(--border); }
+.main-scroll {
+  overflow-y: auto; overscroll-behavior: contain; padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 16px;
+  scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
+}
+/* a Tab stop only while it scrolls (modal.ts); its ring stays inside the box's rounded corners */
+.main-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -4px; border-radius: 0 0 15px 15px; }
+/* the board's connection is lost: the modal's content dims as the cards do */
+body:has(.board[data-connection="reconnecting"]) .main-head-text, body:has(.board[data-connection="reconnecting"]) .main-scroll,
+body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.board[data-connection="disconnected"]) .main-scroll {
+  opacity: .6;
+}
+.main-empty { font-size: 13px; color: var(--fg-3); }
+
+/* the newest message in full; a "needs you" one dashed in the you colour */
+.main-message { flex: none; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2); padding: 14px 16px 16px; }
+.main-message[data-kind="ask"] { border: 1.5px dashed var(--you); }
+.main-message.flashed { box-shadow: 0 0 0 3px rgba(255, 255, 255, .24); }
+.main-message-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font: 500 11px var(--f-mono); color: var(--fg-3); }
+.main-message[data-kind="ask"] .main-kind { color: var(--you); }
+.main-ago { margin-left: auto; }
+.main-time { font: 500 11px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.main-cut { margin-top: 10px; font: 500 11px var(--f-mono); color: var(--fg-3); }
+
+/* the message text: paragraphs, leads, lists, inline code and code blocks, built from text nodes */
+.main-text { font-size: 14px; line-height: 1.6; color: var(--fg); overflow-wrap: anywhere; }
+.main-text p { margin: 0 0 8px; }
+.main-text p.lead { margin-top: 12px; font-weight: 600; color: var(--fg-2); }
+.main-text > :first-child { margin-top: 0; }
+.main-text > :last-child { margin-bottom: 0; }
+.main-text ol, .main-text ul { margin: 0 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.main-text li ol, .main-text li ul { margin: 6px 0 0; }
+.main-text li::marker { color: var(--fg-3); }
+.main-text code { font-family: var(--f-mono); font-size: 12px; background: var(--card-3); padding: 0 4px; border-radius: 4px; }
+.main-text pre {
+  margin: 0 0 10px; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+  font: 12px/1.5 var(--f-mono); scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
+}
+.main-text pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; overflow-wrap: normal; }
+
+/* the earlier messages, newest first on a timeline, collapsed behind "Earlier messages (N)" and each expandable */
+.main-earlier-toggle {
+  display: flex; align-items: center; gap: 8px; padding: 4px 2px; border: 0; background: transparent; cursor: pointer;
+  font: 600 10.5px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.main-earlier-toggle:hover { color: var(--fg-2); }
+.main-earlier-toggle svg { width: 11px; height: 11px; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.main-earlier.open .main-earlier-toggle svg { transform: none; }
+.main-earlier-wrap { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s var(--ease), opacity .35s; }
+.main-earlier.open .main-earlier-wrap { grid-template-rows: 1fr; opacity: 1; }
+.main-earlier-wrap > div, .main-earlier-body > div { overflow: hidden; min-height: 0; }
+.main-earlier-list { list-style: none; margin: 6px 0 0 5px; padding: 0; border-left: 1px solid var(--border-2); }
+.main-earlier-item { position: relative; padding-left: 12px; }
+.main-earlier-item.sliding { overflow: hidden; }
+.main-earlier-item::before {
+  content: ""; position: absolute; left: -4px; top: 14px; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3);
+}
+.main-earlier-item[data-kind="plan"]::before { background: var(--shared); }
+.main-earlier-item[data-kind="ask"]::before { background: var(--card); border: 1.5px dashed var(--you); }
+.main-earlier-head {
+  display: grid; grid-template-columns: 44px auto minmax(0, 1fr) 12px; gap: 8px; align-items: baseline; width: 100%;
+  padding: 7px 6px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-2); text-align: left; cursor: pointer;
+  font-size: 12.5px; transition: background-color .2s;
+}
+.main-earlier-head:hover { background: var(--card-2); }
+.main-earlier-head.flashed { background: rgba(255, 255, 255, .12); }
+.main-earlier-head .main-kind { font-size: 9.5px; color: var(--fg-3); }
+.main-earlier-item[data-kind="ask"] .main-earlier-head .main-kind { color: var(--you); }
+.main-earlier-first { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: opacity .2s; }
+.main-earlier-item.open .main-earlier-first { opacity: 0; }
+.main-earlier-head svg { align-self: center; width: 11px; height: 11px; color: var(--fg-3); transform: rotate(90deg); transition: transform .3s var(--ease); }
+.main-earlier-item.open .main-earlier-head svg { transform: rotate(180deg); }
+.main-earlier-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--ease); }
+.main-earlier-item.open .main-earlier-body { grid-template-rows: 1fr; }
+.main-earlier-content { padding: 2px 6px 12px; }
+.main-earlier-content .main-text { font-size: 13px; color: var(--fg-2); }
+
+@media (max-width: 760px) {
+  .main-strip { width: calc(100% - 24px); margin-inline: 12px; }
+  .main-strip-count { display: none; }
+  .main-scroll { padding: 14px 14px 18px; }
+}

@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// The Nurselog CLI: `node "<clone>/bin/nurselog" <command> [--repo <path>]` from any directory, or
+// `pnpm nurselog ...` in this repository. The repository is `--repo` or the git worktree of the current directory.
+// `emit`, `status` and `link` run from hooks/markers.mjs and need no build, so markers from a fresh worktree land and a
+// statusline gets its link at once; `start` (the default), `open`, `init`, `purge`, `fixture` and `insights` run
+// dist/cli.js and build the package once when dist/ is missing (design section 9).
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const io = { cwd: process.cwd(), out: (text) => console.log(text), err: (text) => console.error(text) };
+const [command, ...rest] = process.argv.slice(2);
+
+if (command === 'emit' || command === 'status' || command === 'link') {
+  const markers = await import('../hooks/markers.mjs');
+  const run = { emit: markers.runEmit, status: markers.runStatus, link: markers.runLink }[command];
+  try {
+    process.exitCode = await run(rest, io);
+  } catch (error) {
+    io.err(`nurselog: ${error.message}`);
+    process.exitCode = 1;
+  }
+} else {
+  const cli = resolve(packageDir, 'dist', 'cli.js');
+  if (!existsSync(cli)) {
+    io.err('Nurselog is not built yet; building it once with: pnpm build');
+    const build = spawnSync('pnpm', ['build'], { cwd: packageDir, stdio: 'inherit' });
+    if (build.status !== 0 || !existsSync(cli)) {
+      io.err(`The build failed; run pnpm build in ${packageDir} and try again.`);
+      process.exit(1);
+    }
+  }
+  const { main } = await import(pathToFileURL(cli).href);
+  process.exitCode = await main(process.argv.slice(2));
+}

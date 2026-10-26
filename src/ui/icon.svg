@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="tile"><rect width="64" height="64" rx="14"/></clipPath>
+    <linearGradient id="beam" x1="0" y1="20" x2="56" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9ebf0"/>
+      <stop offset="1" stop-color="#e9ebf0" stop-opacity=".08"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#111318"/>
+  <path d="M0 15 L0 27 L46 64 L64 64 L64 38 Z" fill="url(#beam)" clip-path="url(#tile)"/>
+  <circle cx="44" cy="44" r="6" fill="#7dd8d0"/>
+  <rect id="hairline" x=".5" y=".5" width="63" height="63" rx="13.5" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1"/>
+</svg>

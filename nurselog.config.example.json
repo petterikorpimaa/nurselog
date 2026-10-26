@@ -1,0 +1,66 @@
+{
+  "keyPattern": "PROJ-\\d+",
+  "keyIgnoreCase": false,
+  "branches": { "trunk": "dev", "promote": ["qa", "main"] },
+  "github": {
+    "repo": "acme/acme-shop",
+    "accountPattern": "-acme$",
+    "pollSeconds": 60,
+    "mergeBy": "developer",
+    "promoteTitlePrefix": { "qa": "Promote dev to qa", "main": "Promote dev to main" }
+  },
+  "packages": [
+    { "id": "api", "color": "#8cb4ff", "paths": ["services/api"] },
+    { "id": "web", "color": "#8fe3b8", "paths": ["services/web"] },
+    { "id": "ui", "color": "#f2a7dd", "paths": ["libs/ui"] },
+    { "id": "tools", "color": "#f7c99a", "paths": ["services/tools"] },
+    { "id": "email", "color": "#c4b0ff", "paths": ["libs/email"] }
+  ],
+  "stageColors": {
+    "plan": "#aeb4bf", "build": "#8fa6cc", "review": "#7dd8d0", "fix": "#ff9a7a",
+    "pr": "#e8eaef", "docs": "#e9d28c", "wait": "#ffffff"
+  },
+  "roles": {
+    "implementer": { "stage": "build" },
+    "conventions-checker": { "stage": "review", "short": "conv" },
+    "code-reviewer": { "stage": "review", "short": "code" },
+    "spec-reviewer": { "stage": "review", "short": "spec" },
+    "strapi-reviewer": { "stage": "review", "short": "strapi" },
+    "typescript-reviewer": { "stage": "review", "short": "ts" },
+    "react-reviewer": { "stage": "review", "short": "react" },
+    "silent-failure-hunter": { "stage": "review", "short": "silent" },
+    "security-reviewer": { "stage": "review", "short": "security" },
+    "infra-reviewer": { "stage": "review", "short": "infra" },
+    "web-performance-reviewer": { "stage": "review", "short": "perf" },
+    "design-reviewer": { "stage": "review", "short": "design" },
+    "database-reviewer": { "stage": "review", "short": "db" },
+    "pr-test-analyzer": { "stage": "review", "short": "tests" },
+    "migration-verifier": { "stage": "review", "short": "migration" },
+    "pr-shepherd": { "stage": "pr" },
+    "*": { "stage": "other" }
+  },
+  "docs": {
+    "roles": ["doc-updater"],
+    "tools": ["mcp__wiki__createPage", "mcp__wiki__updatePage"]
+  },
+  "modelLetters": { "claude-haiku": "H", "claude-sonnet": "S", "claude-opus": "O", "claude-fable": "F" },
+  "budgets": {
+    "warnAt": 0.8,
+    "default": { "toolCalls": null, "verifyRounds": null },
+    "roles": { "implementer": { "toolCalls": 80, "verifyRounds": 3 } },
+    "contextLimits": { "default": 200000 }
+  },
+  "verification": {
+    "runners": ["pnpm", "npm", "npx", "yarn", "node", "turbo", "tsc", "eslint", "vitest"],
+    "kinds": {
+      "typecheck": "\\b(typecheck|tsc)\\b",
+      "lint": "\\b(lint|eslint)\\b",
+      "test": "\\b(vitest|test:run)\\b|\\bpnpm\\b.*\\btest\\b"
+    },
+    "fullRunOnly": true
+  },
+  "join": { "pattern": "git diff (?:origin/)?dev\\.\\.\\.[^\\s>]+\\s*>" },
+  "retention": { "indexHours": 6 },
+  "server": { "host": "127.0.0.1" },
+  "features": { "answerFromUi": false }
+}
