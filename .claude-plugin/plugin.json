@@ -1,6 +1,6 @@
 {
   "name": "nurselog",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live local board of Claude Code runs: records hook events per repository and injects the workflow markers and the report block",
   "mcpServers": {
     "nurselog": {

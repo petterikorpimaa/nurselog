@@ -5375,7 +5375,7 @@ var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value
 var OVERHEAD_CHARS_PER_TOKEN = 3;
 var LISTING_CHARS = 513;
 var TOOL_DEFINITION_CHARS = { plan: 1088, gate: 644, question: 1071 };
-var SKILL_BODY_CHARS = 6482;
+var SKILL_BODY_CHARS = 6647;
 var SKILL_NAMES = /* @__PURE__ */ new Set(["nurselog", "nurselog:nurselog"]);
 var MAIN = "main";
 var OVERHEAD_PART_KEYS = ["markers", "reportParagraph", "listing", "toolDefinitions", "markerCalls", "reportBlocks", "skill"];

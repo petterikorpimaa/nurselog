@@ -15,7 +15,7 @@ import { appendSpoolLine, autoOpenLine, autoOpenStartingLine, boardLogPath, buil
 const STDIN_TIMEOUT_MS = 1000;
 /** Buffered stdin is capped here (design section 2.3); the rest is dropped and the line marked truncated. */
 const MAX_STDIN_BYTES = 16 * 1024 * 1024;
-/** The plugin root is the parent of this file's directory: the clone in all three ways of loading, a cache copy only for a future git-source marketplace. */
+/** The plugin root is the parent of this file's directory: the cache copy of a marketplace install, or the clone in the three ways of loading from a clone. */
 const CLI = join(resolve(dirname(fileURLToPath(import.meta.url)), '..'), 'bin', 'nurselog');
 const QUIET_SOURCES = new Set(['compact', 'clear']);
 /** How long a SessionStart that started the board waits for it to answer (design section 9). */

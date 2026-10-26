@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The Nurselog CLI: `node "<clone>/bin/nurselog" <command> [--repo <path>]` from any directory, or
+// The Nurselog CLI: `node "<plugin root>/bin/nurselog" <command> [--repo <path>]` from any directory, or
 // `pnpm nurselog ...` in this repository. The repository is `--repo` or the git worktree of the current directory.
 // `emit`, `status` and `link` run from hooks/markers.mjs and need no build, so markers from a fresh worktree land and a
 // statusline gets its link at once; `start` (the default), `open`, `init`, `purge`, `fixture` and `insights` run

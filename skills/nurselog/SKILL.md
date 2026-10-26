@@ -7,7 +7,7 @@ description: Start and use the Nurselog board, the live local view of the Claude
 
 Nurselog records the hook events of every session in an active repository and draws them as a live board in the
 browser. This skill ships with the plugin to every repository, so the repository's own `docs/` is not Nurselog's: the
-reference is the README of the plugin clone, two levels above this skill's base directory, in `../../README.md`
+reference is the README at the plugin root, two levels above this skill's base directory, in `../../README.md`
 ("Configuration" for the config keys and what `nurselog init` detects, "How it works" for the workflow stages and what
 each part needs). Read a section there when a detail below is not enough.
 
@@ -32,13 +32,15 @@ The first session in a set-up repository normally starts the board itself: the s
 `Nurselog board started: <url>` once, `Nurselog board is starting; log: ~/.local/share/nurselog/board.log`, or
 `Nurselog board did not start; see ...` with the start command when it ended at once (read the log then). That
 board runs in the background with its output in that log and stops with `kill <pid>` (the pid `status` prints). It
-does not happen when the user set `NURSELOG_AUTO_START=0` or the clone is not built; the session then shows the
-start command instead. A user who set `NURSELOG_AUTO_OPEN=app` also gets the board it started in a window of its own;
-if that did not open, the message has a second line with `open --app`.
+does not happen when the user set `NURSELOG_AUTO_START=0` or the plugin root has no build; the session then shows
+the start command instead. A user who set `NURSELOG_AUTO_OPEN=app` also gets the board it started
+in a window of its own; if that did not open, the message has a second line with `open --app`.
 
-`start` and `open` need the build of the clone. A clone of the public repository ships it; a development clone is built
-with `pnpm build`, which the CLI runs once when `dist/` is missing and the session start never does. After a pull of
-the clone, the user restarts the board (in a development clone after `pnpm build`).
+`start` and `open` need the build in `dist/` of the plugin root. A marketplace install and a clone of the public
+repository ship it; a development clone is built with `pnpm build`, which the CLI runs once when `dist/` is missing and
+the session start never does. After `claude plugin update nurselog@nurselog` the old board closes itself and the next
+session start runs the new one; after a pull of a clone, the user restarts the board (in a development clone after
+`pnpm build`).
 
 ## Markers
 

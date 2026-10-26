@@ -76,7 +76,7 @@ import {
   userConfigPath,
   validateMarkerInput,
   writePrivate
-} from "./chunk-6N3R4CZ6.js";
+} from "./chunk-3KGMWC3I.js";
 
 // src/spool/writer.ts
 var createLine = (src, event, data, envelope = {}) => {
@@ -1683,7 +1683,7 @@ var replayFixtures = (paths, speed, onLine) => {
 
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
-import { linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
+import { existsSync as existsSync3, linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
 import { dirname as dirname3, join as join7, resolve as resolve4 } from "path";
 import { setTimeout as delay } from "timers/promises";
 
@@ -2583,6 +2583,12 @@ var BoardRunningError = class extends Error {
     this.state = state;
   }
 };
+var OrphanedCopyError = class extends Error {
+  constructor(marker) {
+    super(`Nurselog does not start from this plugin copy: ${tildeHome(marker)} marks it as replaced or uninstalled`);
+    this.name = "OrphanedCopyError";
+  }
+};
 var PORT_TRIES = 20;
 var stderrLog = (level, message) => console.error(`[nurselog] ${level}: ${stripControlLines(message)}`);
 var keepRunning = (log) => {
@@ -2614,6 +2620,7 @@ var LOCK_STALE_MS = 10 * 1e3;
 var LOCK_RETRY_MS = 25;
 var SCAN_MS = 10 * 1e3;
 var PACKAGE_FILE = join7(PACKAGE_ROOT, "src", "ui", "index.html");
+var ORPHAN_MARKER = join7(PACKAGE_ROOT, ".orphaned_at");
 var packageGone = (path) => {
   try {
     statSync(path);
@@ -2705,8 +2712,12 @@ var startNurselog = async (options = {}) => {
   const warn = (message) => log("warning", message);
   const stateFile = options.stateFile ?? serverStatePath();
   const packageFile = options.packageFile ?? PACKAGE_FILE;
+  const orphanMarker = options.orphanMarker ?? ORPHAN_MARKER;
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const live = !options.replay;
+  if (live && existsSync3(orphanMarker)) {
+    throw new OrphanedCopyError(orphanMarker);
+  }
   const token = live ? ensureBoardToken(join7(dirname3(stateFile), "token")) : randomBytes2(32).toString("base64url");
   const speed = options.replay?.speed ?? 1;
   const contexts = /* @__PURE__ */ new Map();
@@ -2839,15 +2850,25 @@ var startNurselog = async (options = {}) => {
     })();
     return closing;
   };
+  const closeReason = () => {
+    if (packageGone(packageFile)) {
+      return `${tildeHome(packageFile)} is gone, so the package it runs from was removed`;
+    }
+    if (existsSync3(orphanMarker)) {
+      return `${tildeHome(orphanMarker)} marks the plugin copy it runs from as replaced or uninstalled`;
+    }
+    return void 0;
+  };
   const tick = () => {
     if (closing) {
       return;
     }
-    if (!packageGone(packageFile)) {
+    const reason = closeReason();
+    if (reason === void 0) {
       scan();
       return;
     }
-    log("info", `the board closes: ${tildeHome(packageFile)} is gone, so the package it runs from was removed`);
+    log("info", `the board closes: ${reason}`);
     close().then(() => options.onSelfClose?.(), (error) => warn(`closing failed: ${error.message}`));
   };
   const stopAll = () => {
@@ -2899,7 +2920,7 @@ var startNurselog = async (options = {}) => {
 
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
-import { closeSync as closeSync4, constants as constants3, existsSync as existsSync3, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync4, readSync as readSync4 } from "fs";
+import { closeSync as closeSync4, constants as constants3, existsSync as existsSync4, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync4, readSync as readSync4 } from "fs";
 import { join as join8, resolve as resolve5 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
@@ -3071,7 +3092,7 @@ var resolveRepository = (repo, cwd = process.cwd()) => {
     throw new Error("--repo needs a path");
   }
   const start = resolve5(cwd, repo ?? ".");
-  if (!existsSync3(start)) {
+  if (!existsSync4(start)) {
     throw new Error(`${stripControl(start)} does not exist`);
   }
   const root = repositoryRoot(start);
@@ -3284,6 +3305,7 @@ export {
   DEFAULT_PORT,
   alreadyRunningMessage,
   BoardRunningError,
+  OrphanedCopyError,
   startNurselog,
   USAGE,
   parseStream,

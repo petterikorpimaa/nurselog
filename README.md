@@ -15,28 +15,28 @@ Promote, Docs), what waits for you and what it costs. Named after the nurse log,
 
 ## Quick start
 
-Needs Node 24+, git 2.24+, Claude Code 2.1.280+ and macOS or Linux. `gh` is optional (PRs, merges, promotions). There
-is nothing to install or build: the clone ships the build.
+Needs Node 24+, git 2.24+, Claude Code 2.1.292+ and macOS or Linux. `gh` is optional (PRs, merges, promotions). There
+is nothing to build: the plugin ships the build.
 
-1. **Clone.** Any path works; the examples use `~/github/nurselog`.
+1. **Install the plugin** for every repository:
 
    ```console
-   git clone https://github.com/petterikorpimaa/nurselog.git ~/github/nurselog
+   claude plugin install nurselog --marketplace petterikorpimaa/nurselog
    ```
 
-2. **Load the plugin in every session.** Add the clone to `~/.claude/settings.json`:
-
-   ```json
-   { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/github/nurselog" } }
-   ```
-
-3. **Add a shell alias** to `~/.zshrc` or `~/.bashrc`, then open a new shell. Every example below uses it.
+2. **Add a shell function** to `~/.zshrc` or `~/.bashrc`, then open a new shell. It runs the newest installed copy of
+   the plugin, and every example below uses it.
 
    ```sh
-   alias nurselog='node ~/github/nurselog/bin/nurselog'
+   nurselog() {
+     local copy
+     copy=$(command ls -d ~/.claude/plugins/cache/nurselog/nurselog/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | tail -1)
+     [ -n "$copy" ] || { echo 'nurselog: the plugin is not installed' >&2; return 1; }
+     node "${copy}bin/nurselog" "$@"
+   }
    ```
 
-4. **Set up your repository.** This writes a config under `~/.local/share/nurselog`, nothing in the repository.
+3. **Set up your repository.** This writes a config under `~/.local/share/nurselog`, nothing in the repository.
 
    ```console
    cd ~/code/acme-shop
@@ -46,28 +46,31 @@ is nothing to install or build: the clone ships the build.
 
    Or ask Claude in that repository: `/nurselog:nurselog set up this repository`.
 
-5. **Start `claude` in the repository.** The first session starts the board in the background. Open it:
+4. **Start `claude` in the repository.** The first session starts the board in the background. Open it:
 
    ```console
    nurselog open            # or: nurselog open --app, for a window of its own
    ```
 
-**Just looking?** Replay the sample sessions without setting anything up, then open the URL it prints:
+**Just looking?** After steps 1 and 2, replay the sample sessions without setting up a repository, then open the URL
+it prints (from a clone, `node ~/github/nurselog/bin/nurselog` in place of `nurselog`):
 
 ```console
-cd ~/github/nurselog && node bin/nurselog start --replay web-only,api-first,handed-back --speed 50 --port 6799
+nurselog start --replay web-only,api-first,handed-back --speed 50 --port 6799
 ```
 
 ## Load the plugin
 
 | Way | How | Applies to |
 | --- | --- | --- |
-| Every session (recommended) | `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (`:`-separated paths) | Every repository, from the terminal, the IDE extensions and the desktop app |
-| One session | `claude --plugin-dir ~/github/nurselog` | That session |
-| Per repository | `claude plugin marketplace add ~/github/nurselog` once, then `claude plugin install nurselog@nurselog --scope local` in the repository | That repository (`.claude/settings.local.json`) |
+| Marketplace (recommended) | `claude plugin install nurselog --marketplace petterikorpimaa/nurselog` | Every repository, from the terminal, the IDE extensions and the desktop app (`~/.claude/settings.json`) |
+| Every session, from a clone | `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (`:`-separated paths) | Every repository, from the terminal, the IDE extensions and the desktop app |
+| One session, from a clone | `claude --plugin-dir ~/github/nurselog` | That session |
+| Per repository, from a clone | `claude plugin marketplace add ~/github/nurselog` once, then `claude plugin install nurselog@nurselog --scope local` in the repository | That repository (`.claude/settings.local.json`) |
 
-Each way loads the clone in place: after a `git pull`, restart the board. `/plugin` in a session lists `nurselog`
-when it is loaded.
+The marketplace install runs a copy of the release from `~/.claude/plugins/cache/nurselog/nurselog/<version>/`; the
+other ways load a clone in place. A clone loaded with `CLAUDE_CODE_PLUGIN_DIRS` or `--plugin-dir` replaces an installed
+copy in the sessions that load it. `/plugin` in a session lists `nurselog` when it is loaded.
 
 | The plugin | In every repository | In a set-up repository |
 | --- | --- | --- |
@@ -83,14 +86,57 @@ agent files: the instructions are injected at SessionStart (main thread) and Sub
 build, review or pr).
 
 <details>
+<summary>From a clone</summary>
+
+A clone runs the version you check out, for example to pin one. Any path works; the examples use `~/github/nurselog`:
+
+```console
+git clone https://github.com/petterikorpimaa/nurselog.git ~/github/nurselog
+git -C ~/github/nurselog checkout v0.1.0      # optional: pin a release tag
+```
+
+Load it in every session from `~/.claude/settings.json`:
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/github/nurselog" } }
+```
+
+In the terminal, an alias on the clone takes the place of the shell function:
+
+```sh
+alias nurselog='node ~/github/nurselog/bin/nurselog'
+```
+
+After a `git pull`, restart the board so that it runs the new build.
+
+</details>
+
+<details>
+<summary>Update the plugin</summary>
+
+```console
+claude plugin update nurselog@nurselog
+```
+
+New sessions load the new version; a running session keeps the old one until `/reload-plugins` or a restart. The
+board running from the old copy closes itself within 10 seconds, and the next session start starts the new one (or
+run `nurselog open`). To update without asking, choose Enable auto-update for `nurselog` in `/plugin` > Marketplaces;
+it is off for marketplaces outside Anthropic's. From a clone: `git pull`, then restart the board.
+
+</details>
+
+<details>
 <summary>Remove the plugin</summary>
 
 ```console
+claude plugin uninstall nurselog@nurselog                    # the marketplace install
 claude plugin uninstall nurselog@nurselog --scope local      # from one repository
 claude plugin marketplace remove nurselog                    # the marketplace
 ```
 
-With `CLAUDE_CODE_PLUGIN_DIRS` set, delete the entry from the `env` block of `~/.claude/settings.json`.
+A board running from the uninstalled copy closes itself within 10 seconds. With `CLAUDE_CODE_PLUGIN_DIRS` set, delete
+the entry from the `env` block of `~/.claude/settings.json`. Then drop the shell function or the alias from your shell
+profile.
 
 </details>
 
@@ -214,8 +260,7 @@ When a repository's loop differs, the board draws what it can derive and leaves 
 <details>
 <summary>Auto-start and auto-open</summary>
 
-The first session in a set-up repository starts the board in the background when it is down and the clone is built,
-and says so once:
+The first session in a set-up repository starts the board in the background when it is down, and says so once:
 
 - `Nurselog board started: http://127.0.0.1:6767/`
 - `Nurselog board is starting; log: ~/.local/share/nurselog/board.log` when it is not up within 1.5 s
@@ -224,8 +269,9 @@ and says so once:
 The board keeps running after the session ends. Its output goes to `~/.local/share/nurselog/board.log`, overwritten
 at each such start. It inherits the session's environment without `GIT_*`, `CLAUDE*`, `ANTHROPIC_*`, `GH_TOKEN`,
 `GITHUB_TOKEN` and their enterprise forms, and so does a board that `nurselog open` starts. If `gh` is logged in only
-through `GH_TOKEN`, run the board in a terminal with `nurselog start` instead. A board started from a worktree of the Nurselog clone closes itself
-once that worktree is removed. The hook never builds the clone.
+through `GH_TOKEN`, run the board in a terminal with `nurselog start` instead. A board closes itself within 10 seconds
+when the plugin copy it runs from is replaced by an update or uninstalled, or when the worktree of a clone that
+started it is removed; the next session start starts a new one.
 
 | Variable | Effect |
 | --- | --- |
@@ -289,7 +335,11 @@ stdout and exits 1, so the status line stays empty:
 input=$(cat)
 id=$(printf '%s' "$input" | jq -r '.session_id')
 model=$(printf '%s' "$input" | jq -r '.model.display_name')
-printf '%s %s\n' "$model" "$(node ~/github/nurselog/bin/nurselog link --session "$id" --osc8 2>/dev/null)"
+# the newest installed copy; from a clone: copy=~/github/nurselog/
+copy=$(command ls -d ~/.claude/plugins/cache/nurselog/nurselog/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | tail -1)
+link=
+[ -n "$copy" ] && link=$(node "${copy}bin/nurselog" link --session "$id" --osc8 2>/dev/null)
+printf '%s %s\n' "$model" "$link"
 ```
 
 </details>
@@ -305,7 +355,8 @@ printf '%s %s\n' "$model" "$(node ~/github/nurselog/bin/nurselog link --session 
   named by the checkout's directory.
 - While a board runs, a second `start` starts nothing and prints the URL of the current repository's tab
   (`http://127.0.0.1:6767/?repo=acme-shop`); `--repo <path>` names another repository.
-- After a `git pull` of the clone, restart the board so that it runs the new build.
+- After a plugin update the old board closes itself and the next session start runs the new one; after a `git pull`
+  of a clone, restart the board so that it runs the new build.
 - A config change needs a board restart.
 
 </details>
@@ -456,7 +507,7 @@ Arrays such as `packages` replace the default list whole.
 | `verification.failPatterns` | per kind | Matched against the kept stdout tail. Only the default runners and kinds keep a tail. |
 | `verification.fullRunOnly` | `true` | A run with a path argument is not a full run. |
 | `join.pattern` | from the trunk | Regex of the main-thread command that writes the reviewers' diff. |
-| `pricesFrom` `*` | `prices.json` of the clone | Token prices in USD per million tokens per model prefix. |
+| `pricesFrom` `*` | `prices.json` of the plugin | Token prices in USD per million tokens per model prefix. |
 | `spool.dir` `*` | `~/.local/share/nurselog` | Absolute or `~/`; not the home or root directory, not inside the repository. |
 | `spool.readDays` `*` | `7` | Days the board reads at start. |
 | `spool.keepDays` `*` | `14` | Days of day files kept. |
@@ -608,7 +659,7 @@ so it needs no running board.
 | "Nurselog is not set up for this repository" | `nurselog init --write` |
 | `board token missing or changed; restart the board` | Stop the board (`kill <pid>`) and run `nurselog open`. |
 | No PRs, merges or promotions | The top bar shows why: `gh polling off` (no `github.repo`), `gh account mismatch` (log in to an account that matches `github.accountPattern`; Nurselog never switches) or `gh: <error>`. |
-| The board shows the old UI after a pull | Restart the board after a `git pull`. |
+| The board still shows the old version (after an update, or after a `git pull` of a clone) | Stop it with `kill <pid>` (`nurselog status` prints the pid); the next session start starts it from the current copy. |
 | The board did not start | Read `~/.local/share/nurselog/board.log`. |
 
 ## Limits

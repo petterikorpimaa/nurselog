@@ -1,6 +1,6 @@
 {
   "name": "nurselog",
-  "description": "The Nurselog clone as a local directory marketplace: the plugin loads from the clone in place, with its built dist/",
+  "description": "Nurselog, a live local board of Claude Code runs: one plugin that records hook events per repository and injects the workflow markers and the report block",
   "owner": {
     "name": "Nurselog"
   },

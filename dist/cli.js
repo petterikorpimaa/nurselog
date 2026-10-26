@@ -1,6 +1,7 @@
 import {
   BoardRunningError,
   DEFAULT_PORT,
+  OrphanedCopyError,
   SAFE_GIT,
   USAGE,
   alreadyRunningMessage,
@@ -16,11 +17,11 @@ import {
   runLink,
   runStatus,
   startNurselog
-} from "./chunk-BMQ75V6W.js";
+} from "./chunk-ULUUDCIE.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-HYHCMC4I.js";
+} from "./chunk-3275CMAI.js";
 import {
   BRANCH_KEY_PATTERN,
   DEFAULT_CONFIG,
@@ -75,7 +76,7 @@ import {
   userConfigPath,
   validateConfig,
   waitForBoard
-} from "./chunk-6N3R4CZ6.js";
+} from "./chunk-3KGMWC3I.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
@@ -1543,6 +1544,10 @@ var start = async (args, io) => {
     }
     if (error.code === "EADDRINUSE") {
       io.err(portsInUseMessage(port, repository));
+      return 1;
+    }
+    if (error instanceof OrphanedCopyError) {
+      io.err(error.message);
       return 1;
     }
     throw error;
