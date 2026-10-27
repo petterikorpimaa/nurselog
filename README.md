@@ -361,7 +361,8 @@ The board's data is behind a token, so another user of the machine cannot read i
   out of the process list (`ps`), where another user could redeem it first: an app window opens a local file,
   `~/.local/share/nurselog/signin-<random>.html` (mode 0600), that only redirects to the ticket URL, and the macOS
   default browser gets the URL through `osascript`'s standard input. On Linux, `xdg-open` and a snap browser still
-  get the ticket URL as an argument.
+  get the ticket URL as an argument, so there the board redeems a ticket only for a connection of your own user: a
+  sign-in it refuses leaves the page signed out and a `sign-in refused: <reason>` line in the board's log.
 - A foreground `nurselog start` in a terminal prints a ticket URL, valid once for 10 minutes. Without a terminal (a
   log, a pipe) it prints the plain URL and `sign in with: nurselog open`. A replay always prints its ticket URL.
 - `nurselog link` and `nurselog status` print the URL without a ticket: a signed-in browser needs none.

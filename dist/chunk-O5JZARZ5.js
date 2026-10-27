@@ -35,10 +35,10 @@ import {
   ensurePrivateDir,
   expandHome,
   findConfig,
+  firstWorkedCopy,
   gitCommonDir,
   githubRepoOfRemote,
   isBranchName,
-  isTrunkBranch,
   linearRegExp,
   listSpoolFiles,
   literalWord,
@@ -65,7 +65,6 @@ import {
   reportLine,
   repositoryRoot,
   roleConfig,
-  roleStageStarted,
   sameText,
   serverStatePath,
   sessionMetrics,
@@ -83,7 +82,7 @@ import {
   validateMarkerInput,
   worktreeAddOfCommand,
   writePrivate
-} from "./chunk-XP2B7KAR.js";
+} from "./chunk-MMMTGD7O.js";
 
 // src/spool/writer.ts
 var createLine = (src, event, data, envelope = {}) => {
@@ -1286,7 +1285,7 @@ var createUsageFacts = (options) => {
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
-import { readFileSync as readFileSync2 } from "fs";
+import { readFileSync as readFileSync3 } from "fs";
 import { createServer } from "http";
 import { join as join3 } from "path";
 
@@ -1327,6 +1326,101 @@ var runFixtureJob = (workerFile, job, options = {}) => new Promise((resolve7, re
   worker.once("error", (error) => finish(() => reject(error)));
   worker.once("exit", (code) => finish(() => reject(new Error(`the fixture worker exited with code ${code} before it answered`))));
 });
+
+// src/server/peer-uid.ts
+import { readFileSync as readFileSync2 } from "fs";
+import { endianness } from "os";
+var PROC_TABLES = ["/proc/net/tcp", "/proc/net/tcp6"];
+var OVERFLOW_UID = 65534;
+var canonicalAddress = (address) => {
+  const ipv6 = address.includes(":") ? address : `::ffff:${address}`;
+  try {
+    return new URL(`http://[${ipv6}]/`).hostname;
+  } catch {
+    return void 0;
+  }
+};
+var procAddress = (hex, littleEndian) => {
+  if (!/^[0-9A-Fa-f]{8}(?:[0-9A-Fa-f]{24})?$/.test(hex)) {
+    return void 0;
+  }
+  const bytes = [];
+  for (let at = 0; at < hex.length; at += 8) {
+    const word = Buffer.from(hex.slice(at, at + 8), "hex");
+    bytes.push(...littleEndian ? word.reverse() : word);
+  }
+  if (bytes.length === 4) {
+    return canonicalAddress(bytes.join("."));
+  }
+  const groups = [];
+  for (let at = 0; at < bytes.length; at += 2) {
+    groups.push((bytes[at] << 8 | bytes[at + 1]).toString(16));
+  }
+  return canonicalAddress(groups.join(":"));
+};
+var procEnd = (text) => {
+  const [hex, portHex, ...rest] = text.split(":");
+  if (rest.length > 0 || !/^[0-9A-Fa-f]{4}$/.test(portHex ?? "")) {
+    return void 0;
+  }
+  return { hex, port: parseInt(portHex, 16) };
+};
+var clientUid = (table, connection, littleEndian = endianness() === "LE") => {
+  const local = canonicalAddress(connection.localAddress);
+  const remote = canonicalAddress(connection.remoteAddress);
+  if (local === void 0 || remote === void 0) {
+    return void 0;
+  }
+  for (const line of table.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 10 || !/^\d+:$/.test(fields[0]) || !/^\d+$/.test(fields[7]) || !/^\d+$/.test(fields[9])) {
+      continue;
+    }
+    if (Number(fields[9]) === 0) {
+      continue;
+    }
+    const client = procEnd(fields[1]);
+    const server = procEnd(fields[2]);
+    if (client === void 0 || server === void 0 || client.port !== connection.remotePort || server.port !== connection.localPort) {
+      continue;
+    }
+    if (procAddress(client.hex, littleEndian) === remote && procAddress(server.hex, littleEndian) === local) {
+      return Number(fields[7]);
+    }
+  }
+  return void 0;
+};
+var readProc = (path) => readFileSync2(path, "utf8");
+var peerVerdict = (socket, ownUid, read) => {
+  const { localAddress, localPort, remoteAddress, remotePort } = socket;
+  if (localAddress === void 0 || localPort === void 0 || remoteAddress === void 0 || remotePort === void 0) {
+    return { refused: "the connection has no address" };
+  }
+  if (ownUid === void 0) {
+    return { refused: "the board's uid is unknown" };
+  }
+  if (ownUid === OVERFLOW_UID) {
+    return { refused: `the board runs as the overflow uid ${OVERFLOW_UID}, which does not tell users apart` };
+  }
+  const connection = { localAddress, localPort, remoteAddress, remotePort };
+  for (const path of PROC_TABLES) {
+    let table;
+    try {
+      table = read(path);
+    } catch (error) {
+      return { refused: `${path} could not be read (${error.code ?? "no code"})` };
+    }
+    const uid = clientUid(table, connection);
+    if (uid === ownUid) {
+      return "ours";
+    }
+    if (uid !== void 0) {
+      return { refused: `the client socket belongs to uid ${uid}, not the board's uid ${ownUid}` };
+    }
+  }
+  return { refused: `the client socket was not found in ${PROC_TABLES.join(" or ")}` };
+};
+var procPeerCheck = (socket) => peerVerdict(socket, process.getuid?.(), readProc);
 
 // src/server/http.ts
 var THROTTLE_MS = 100;
@@ -1434,7 +1528,7 @@ var UI_ASSETS = /* @__PURE__ */ new Map([
 ]);
 var readAsset = (path) => {
   try {
-    return readFileSync2(path);
+    return readFileSync3(path);
   } catch (error) {
     if (error.code === "ENOENT") {
       return void 0;
@@ -1508,6 +1602,7 @@ var createBoardServer = (options) => {
   const maxClients = options.maxClients ?? MAX_CLIENTS;
   const maxBuffered = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const log = options.log ?? (() => void 0);
+  const peerCheck = options.peerCheck ?? (process.platform === "linux" ? procPeerCheck : void 0);
   const empty = { id: "", name: "", store: createStore(structuredClone(DEFAULT_CONFIG)), uiConfig: () => uiConfig(DEFAULT_CONFIG, void 0), lastLineAt: () => void 0 };
   const streams = /* @__PURE__ */ new Map();
   const followed = /* @__PURE__ */ new Map();
@@ -1742,7 +1837,7 @@ ${message}`);
   const tickets = /* @__PURE__ */ new Map();
   const issueTicket = (ttlMs = TICKET_MS) => {
     const now = Date.now();
-    for (const [ticket2, expires] of tickets) {
+    for (const [ticket2, { expires }] of tickets) {
       if (expires <= now) {
         tickets.delete(ticket2);
       }
@@ -1751,14 +1846,26 @@ ${message}`);
       tickets.delete(tickets.keys().next().value);
     }
     const ticket = randomBytes(32).toString("base64url");
-    tickets.set(ticket, now + ttlMs);
+    tickets.set(ticket, { expires: now + ttlMs, refusalLogged: false });
     return ticket;
   };
-  const redeem = (given) => {
-    for (const [ticket, expires] of tickets) {
+  const redeem = (given, request) => {
+    for (const [ticket, entry] of tickets) {
       if (sameText(given, ticket)) {
+        if (entry.expires <= Date.now()) {
+          tickets.delete(ticket);
+          return false;
+        }
+        const verdict = peerCheck?.(request.socket) ?? "ours";
+        if (verdict !== "ours") {
+          if (!entry.refusalLogged) {
+            entry.refusalLogged = true;
+            log("warning", `sign-in refused: ${verdict.refused}`);
+          }
+          return false;
+        }
         tickets.delete(ticket);
-        return expires > Date.now();
+        return true;
       }
     }
     return false;
@@ -1811,7 +1918,7 @@ ${message}`);
       sendJson(response, 400, { error: "bad-request", message: "The request target is not a path." });
       return;
     }
-    if (request.method === "GET" && target.path === "/" && target.ticket !== null && redeem(target.ticket)) {
+    if (request.method === "GET" && target.path === "/" && target.ticket !== null && redeem(target.ticket, request)) {
       signIn(request, response);
       return;
     }
@@ -1918,9 +2025,9 @@ ${message}`);
 };
 
 // src/server/replay.ts
-import { readFileSync as readFileSync3 } from "fs";
+import { readFileSync as readFileSync4 } from "fs";
 var ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
-var readLines = (path) => readFileSync3(path, "utf8").split("\n").filter((line) => line.trim());
+var readLines = (path) => readFileSync4(path, "utf8").split("\n").filter((line) => line.trim());
 var parse = (text) => {
   try {
     return JSON.parse(text);
@@ -2041,12 +2148,11 @@ var diffTargetOf = (state, agentId) => {
   const copies = [];
   for (const run of Object.values(state.board.runs)) {
     const agent = ownValue(run.agents, agentId);
-    const worked = agent !== void 0 && (roleStageStarted(run, agent) || agent.budget.toolCalls.used > 0);
-    if (worked && !isTrunkBranch(state, run.branch)) {
+    if (agent !== void 0) {
       copies.push({ run, agent });
     }
   }
-  const first = copies.sort((a, b) => time(a.agent.startedAt) - time(b.agent.startedAt) || compareText(a.run.id, b.run.id))[0];
+  const first = firstWorkedCopy(state, copies);
   if (first === void 0 || first.run.branch === "" || first.run.branch === "?" || first.run.worktree === "") {
     return void 0;
   }
@@ -2054,7 +2160,7 @@ var diffTargetOf = (state, agentId) => {
 };
 
 // src/spool/aggregates.ts
-import { closeSync as closeSync2, lstatSync, readdirSync, readFileSync as readFileSync4, readSync as readSync2, renameSync, rmSync, unlinkSync } from "fs";
+import { closeSync as closeSync2, lstatSync, readdirSync, readFileSync as readFileSync5, readSync as readSync2, renameSync, rmSync, unlinkSync } from "fs";
 import { join as join4 } from "path";
 
 // src/insights/percentile.ts
@@ -2325,7 +2431,7 @@ var readText = (path) => withOpened(path, ({ fd, stat: stat2 }) => {
     throw new Error(`${path}: larger than ${MAX_AGGREGATES_BYTES} bytes`);
   }
   try {
-    return readFileSync4(fd, "utf8");
+    return readFileSync5(fd, "utf8");
   } catch (error) {
     throw new Error(`${path}: ${error.message}`);
   }
@@ -2656,7 +2762,7 @@ var createAggregateLog = (options) => {
 
 // src/server/repositories.ts
 import { closeSync as closeSync3, constants as constants2, lstatSync as lstatSync2, openSync as openSync2, readdirSync as readdirSync2, readSync as readSync3 } from "fs";
-import { join as join5, resolve as resolve3, sep as sep2 } from "path";
+import { join as join5, relative, resolve as resolve3, sep as sep2 } from "path";
 var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
 var RECORD_FILE = "repository.json";
 var CONFIG_FILE = "nurselog.config.json";
@@ -2861,7 +2967,11 @@ var pruneOrphanedSpools = (now, onError) => {
     try {
       const keepDays = configKeepDays(config) ?? HOOK_DEFAULTS.spool.keepDays;
       if (spoolDirExists(orphan.dir)) {
-        deleted.push(...pruneSpool(orphan.dir, keepDays, now));
+        const onFailure = (path, error) => {
+          const code = error.code ?? error.message;
+          onError(`orphaned spool ${shown}: ${relative(orphan.dir, path)} not deleted (${code}), the next prune tries it again`);
+        };
+        deleted.push(...pruneSpool(orphan.dir, keepDays, now, onFailure));
       }
     } catch (error) {
       onError(`orphaned spool ${shown} not pruned: ${error.message}`);
@@ -2914,6 +3024,13 @@ var pruneRecordedAggregates = (now, onError) => {
 };
 var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
   let prunedDay = "";
+  const passed = /* @__PURE__ */ new Set();
+  const passOnce = (message) => {
+    if (!passed.has(message)) {
+      onError(message);
+      passed.add(message);
+    }
+  };
   return () => {
     const at = now();
     const today = localDay(at);
@@ -2922,14 +3039,14 @@ var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
     }
     prunedDay = today;
     try {
-      pruneOrphanedSpools(at, onError);
+      pruneOrphanedSpools(at, passOnce);
     } catch (error) {
-      onError(`the orphaned spool directories were not pruned: ${error.message}`);
+      passOnce(`the orphaned spool directories were not pruned: ${error.message}`);
     }
     try {
-      pruneRecordedAggregates(at, onError);
+      pruneRecordedAggregates(at, passOnce);
     } catch (error) {
-      onError(`the session aggregates of the recorded repositories were not pruned: ${error.message}`);
+      passOnce(`the session aggregates of the recorded repositories were not pruned: ${error.message}`);
     }
   };
 };
@@ -3423,7 +3540,7 @@ var startNurselog = async (options = {}) => {
 
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
-import { closeSync as closeSync4, constants as constants3, existsSync as existsSync4, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync5, readSync as readSync4 } from "fs";
+import { closeSync as closeSync4, constants as constants3, existsSync as existsSync4, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync6, readSync as readSync4 } from "fs";
 import { join as join8, resolve as resolve6 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
@@ -3555,7 +3672,7 @@ var questionMarker = (args, readStdin) => {
   return { ...result, data: { ...result.data, id }, output: id };
 };
 var MARKERS = { plan: planMarker, gate: gateMarker, question: questionMarker };
-var readStandardInput = () => readFileSync5(0, "utf8");
+var readStandardInput = () => readFileSync6(0, "utf8");
 var parseMarker = (kind, args, readStdin = readStandardInput) => {
   const marker = Object.hasOwn(MARKERS, kind) ? MARKERS[kind] : void 0;
   if (!marker) {

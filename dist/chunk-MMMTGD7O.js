@@ -1015,7 +1015,8 @@ var writePrivate = (path, text) => {
 var DAY_FILE = /^events-(\d{4}-\d{2}-\d{2})\.ndjson$/;
 var NOTIFIED_DIR = "notified";
 var NOTIFIED_NAME = /^[\w-]+$/;
-var pruneNotified = (dir, oldest) => {
+var pruneNotified = (dir, oldest, onFailure = () => {
+}) => {
   const folder = join(dir, NOTIFIED_DIR);
   if (!ownedEntry(folder, "dir")) {
     return [];
@@ -1035,7 +1036,10 @@ var pruneNotified = (dir, oldest) => {
         unlinkSync(path);
         expired.push(path);
       }
-    } catch {
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        onFailure(path, error);
+      }
     }
   }
   return expired;
@@ -1057,6 +1061,7 @@ var dayFilesBefore = (dir, oldest) => {
   return files.sort((a, b) => a.day.localeCompare(b.day));
 };
 var deleteDaysBefore = (dir, oldest, onFailure = () => {
+}, onMarkerFailure = () => {
 }) => {
   const deleted = [];
   for (const { path } of dayFilesBefore(dir, oldest)) {
@@ -1064,16 +1069,19 @@ var deleteDaysBefore = (dir, oldest, onFailure = () => {
       unlinkSync(path);
       deleted.push(path);
     } catch (error) {
-      onFailure(path, error);
+      if (error.code !== "ENOENT") {
+        onFailure(path, error);
+      }
     }
   }
-  return [...deleted, ...pruneNotified(dir, oldest)];
+  return [...deleted, ...pruneNotified(dir, oldest, onMarkerFailure)];
 };
-var pruneSpool = (dir, keepDays, now = /* @__PURE__ */ new Date()) => {
+var pruneSpool = (dir, keepDays, now = /* @__PURE__ */ new Date(), onFailure) => {
   if (lstatIfPresent(dir) === void 0) {
     return [];
   }
-  return deleteDaysBefore(dir, localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays)));
+  const oldest = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays));
+  return deleteDaysBefore(dir, oldest, onFailure, onFailure);
 };
 var spoolDirExists = (dir) => {
   const stat = lstatIfPresent(dir);
@@ -8206,9 +8214,12 @@ var workedIn = (state, { run, agent }) => {
   const worked = roleStageStarted(run, agent) || agent.budget.toolCalls.used > 0;
   return worked && !isTrunkBranch(state, run.branch);
 };
+var firstWorkedCopy = (state, copies) => {
+  const worked = copies.filter((copy) => workedIn(state, copy));
+  return worked.sort((a, b) => time(a.agent.startedAt) - time(b.agent.startedAt) || compareText(a.run.id, b.run.id))[0];
+};
 var agentBranch = (state, lead, rest) => {
-  const worked = [lead, ...rest].filter((copy) => workedIn(state, copy));
-  const first = worked.sort((a, b) => time(a.agent.startedAt) - time(b.agent.startedAt) || compareText(a.run.id, b.run.id))[0];
+  const first = firstWorkedCopy(state, [lead, ...rest]);
   if (first) {
     return branchWorkKey(first.run);
   }
@@ -9824,7 +9835,7 @@ var readSpoolDays = (dir, onError = () => void 0) => {
   }
   return days;
 };
-var deleteExpiredFiles = (dir, keepDays, now) => pruneSpool(dir, keepDays, now);
+var deleteExpiredFiles = (dir, keepDays, now, onFailure) => pruneSpool(dir, keepDays, now, onFailure);
 var createSpoolReader = (options) => {
   const now = options.now ?? (() => /* @__PURE__ */ new Date());
   const offsets = /* @__PURE__ */ new Map();
@@ -9950,14 +9961,19 @@ var createSpoolReader = (options) => {
   const lastFailure = /* @__PURE__ */ new Map();
   const reportOnce = (source, message) => {
     if (lastFailure.get(source) !== message) {
-      lastFailure.set(source, message);
       report(message);
+      lastFailure.set(source, message);
     }
+  };
+  const reportUndeleted = (path, error) => {
+    const code = error.code ?? error.message;
+    reportOnce(path, `expired ${path} not deleted (${code}), the next day's clean-up tries it again`);
   };
   const cleanUp = () => {
     const today = localDay(now());
     if (today !== cleanedDay) {
-      deleteExpiredFiles(options.dir, options.keepDays, now());
+      const deleted = deleteExpiredFiles(options.dir, options.keepDays, now(), reportUndeleted);
+      deleted.forEach((path) => lastFailure.delete(path));
       options.onCleanUp?.(now());
       cleanedDay = today;
     }
@@ -10143,13 +10159,13 @@ export {
   STALE_AGENT_MS,
   PROGRESS_ITEMS_CAP,
   promoteCarries,
-  roleStageStarted,
   MAIN_AGENT,
   displayState,
   VERIFY_KINDS,
   processedTokens,
   byStart,
   sessionMetrics,
+  firstWorkedCopy,
   blockingForYou,
   createStore,
   createState,

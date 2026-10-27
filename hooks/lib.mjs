@@ -1052,9 +1052,10 @@ const NOTIFIED_NAME = /^[\w-]+$/;
 /**
  * Deletes the `notified/<session_id>` markers of `dir` last written on a day before `oldest` and returns their paths:
  * regular files only (by `lstat`) under the names the hook writes, so nothing else in the folder is touched. An
- * unreadable folder or a marker that cannot be removed stays until the next prune.
+ * unreadable folder stays until the next prune; a marker that cannot be looked up or removed (not one gone since the
+ * listing) goes to `onFailure(path, error)` and stays until the next prune.
  */
-const pruneNotified = (dir, oldest) => {
+const pruneNotified = (dir, oldest, onFailure = () => {}) => {
   const folder = join(dir, NOTIFIED_DIR);
   if (!ownedEntry(folder, 'dir')) {
     return [];
@@ -1074,8 +1075,10 @@ const pruneNotified = (dir, oldest) => {
         unlinkSync(path);
         expired.push(path);
       }
-    } catch {
-      // A marker that cannot be removed stays until the next prune.
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        onFailure(path, error);
+      }
     }
   }
   return expired;
@@ -1108,31 +1111,38 @@ const dayFilesBefore = (dir, oldest) => {
 
 /**
  * Deletes the day files of `dir` dated before `oldest` and the `notified/` markers last written before it; returns the
- * paths deleted. A day file that cannot be deleted goes to `onFailure` and stays; the others are deleted.
+ * paths deleted. A day file that cannot be deleted goes to `onFailure` and stays; the others are deleted; one gone
+ * since the listing (a concurrent prune or purge) is neither reported nor counted. A marker that cannot be deleted goes
+ * to `onMarkerFailure`, which is silent unless given.
  */
-const deleteDaysBefore = (dir, oldest, onFailure = () => {}) => {
+const deleteDaysBefore = (dir, oldest, onFailure = () => {}, onMarkerFailure = () => {}) => {
   const deleted = [];
   for (const { path } of dayFilesBefore(dir, oldest)) {
     try {
       unlinkSync(path);
       deleted.push(path);
     } catch (error) {
-      onFailure(path, error);
+      if (error.code !== 'ENOENT') {
+        onFailure(path, error);
+      }
     }
   }
-  return [...deleted, ...pruneNotified(dir, oldest)];
+  return [...deleted, ...pruneNotified(dir, oldest, onMarkerFailure)];
 };
 
 /**
  * Deletes the day files of `dir` and its `notified/<session_id>` markers (design section 3) older than `keepDays`
  * and returns their paths: a day file by the day in its name, a marker by the day it was last written. A missing `dir`
- * deletes nothing; one that cannot be looked up throws (`dayFilesBefore`).
+ * deletes nothing; one that cannot be looked up throws (`dayFilesBefore`). A day file or a marker that cannot be
+ * deleted goes to `onFailure(path, error)` and stays until the next prune, the others are deleted; without `onFailure`
+ * it stays silently (the hook's prune never writes to the terminal).
  */
-export const pruneSpool = (dir, keepDays, now = new Date()) => {
+export const pruneSpool = (dir, keepDays, now = new Date(), onFailure) => {
   if (lstatIfPresent(dir) === undefined) {
     return [];
   }
-  return deleteDaysBefore(dir, localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays)));
+  const oldest = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays));
+  return deleteDaysBefore(dir, oldest, onFailure, onFailure);
 };
 
 /**
