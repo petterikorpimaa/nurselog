@@ -541,11 +541,25 @@ p { margin: 0; }
 
 /* follow-ups section (followups.ts): between the questions and the agent table, hidden until the first follow-up. Three
    read-only columns, each in its type's colour --c (issue --amber, improvement --rev, fix --warm), the newest four items
-   with the agent table's "Show all (N)". The heading is the questions section's, 4 px under the graph like it. The
-   section and a new item enter in followups.ts; the chip of a new follow-up (.fly-chip) flies from its agent's node to
-   its column's heading, drawn in the card. */
-.followups { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 16px; }
-.followup-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+   with the agent table's "Show all (N)". The heading is the questions section's, 4 px under the graph like it, and a
+   disclosure toggle with the earlier messages toggle's trailing chevron, so the text keeps the columns' edge; the
+   chevron turns when open, and the columns, folded by default, open with the Finished runs panel's grid-rows
+   transition. The section and a new item enter in followups.ts; the chip of a new follow-up (.fly-chip) flies from
+   its agent's node to its column's heading, or to the section's heading while folded, drawn in the card. */
+.followups { display: flex; flex-direction: column; padding: 0 16px 16px; }
+.followups-toggle {
+  position: relative; align-self: flex-start; border: 0; background: transparent; cursor: pointer; padding: 3px 6px; margin: 1px 0 -3px -6px;
+  border-radius: 6px; text-align: left;
+}
+.followups-toggle:hover { background: var(--card-2); color: var(--fg-2); }
+/* inset, as the region's overflow clips the ring's top edge */
+.followups-toggle:focus-visible { outline-offset: -2px; }
+.followups-toggle svg { width: 11px; height: 11px; flex: none; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.followups-toggle[aria-expanded="true"] svg { transform: none; }
+.followups-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.followups-body.open { grid-template-rows: 1fr; }
+.followups-body-inner { overflow: hidden; min-height: 0; }
+.followup-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
 .followup-column {
   display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px;
   background: var(--card-2); border: 1px solid var(--border); border-radius: 10px;

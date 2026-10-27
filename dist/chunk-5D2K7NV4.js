@@ -9,7 +9,9 @@ import {
   MIN_POLL_SECONDS,
   NONCE,
   PACKAGE_ROOT,
+  PROGRESS_ITEMS_CAP,
   RUNNING_CHECK_MS,
+  STALE_AGENT_MS,
   STREAM_ID,
   TOKEN_CHANGED,
   VERIFY_KINDS,
@@ -36,6 +38,7 @@ import {
   gitCommonDir,
   githubRepoOfRemote,
   isBranchName,
+  isTrunkBranch,
   linearRegExp,
   listSpoolFiles,
   literalWord,
@@ -61,6 +64,8 @@ import {
   repoHash,
   reportLine,
   repositoryRoot,
+  roleConfig,
+  roleStageStarted,
   sameText,
   serverStatePath,
   sessionMetrics,
@@ -78,7 +83,7 @@ import {
   validateMarkerInput,
   worktreeAddOfCommand,
   writePrivate
-} from "./chunk-WVTBF6C4.js";
+} from "./chunk-XP2B7KAR.js";
 
 // src/spool/writer.ts
 var createLine = (src, event, data, envelope = {}) => {
@@ -142,9 +147,12 @@ var REMOVES = [
 ];
 var VALUE_OPTIONS = /* @__PURE__ */ new Set(["-b", "-B", "--orphan", "--reason"]);
 var SAFE_GIT = ["-c", "log.showSignature=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
+var SAFE_GIT_ENV = Object.freeze({ GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "none", GIT_TERMINAL_PROMPT: "0" });
 var END_OF_OPTIONS = "--end-of-options";
 var NOT_A_REPO = 128;
 var HEADS = "refs/heads/";
+var DIFF_OPTIONS = ["--cached", "--name-only", "-z", "--no-renames", "--diff-filter=d", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"];
+var NEUTRAL_CWD = "/";
 var lastGroup = (command, match) => {
   const group = match?.[match.length - 1];
   const end = match && match.index !== void 0 ? match.index + match[0].length : 0;
@@ -211,19 +219,22 @@ var createGitFacts = (options) => {
   let refsWarning = "";
   const statWarnings = /* @__PURE__ */ new Set();
   const pendingAdds = /* @__PURE__ */ new Map();
+  const attempts = /* @__PURE__ */ new Map();
+  const historyReviewers = /* @__PURE__ */ new Map();
+  const historyDiffs = /* @__PURE__ */ new Map();
   const emit = (data, worktree) => write(createLine("server", "git.fact", data, { cwd: worktree }));
-  const git = (args) => run("git", [...SAFE_GIT, ...args]);
+  const git = (args, cwd) => run("git", [...SAFE_GIT, ...args], cwd, SAFE_GIT_ENV);
   const quiet = (what) => (error) => {
     if (error.code !== NOT_A_REPO) {
       options.log?.("warning", `${what} failed: ${error.message.split("\n")[0]}`);
     }
     return "";
   };
-  const mergeBase = async (top, branch) => {
+  const mergeBase = async (where, branch, cwd) => {
     try {
-      return await git(["-C", top, "merge-base", END_OF_OPTIONS, trunk, branch]);
+      return await git([...where, "merge-base", END_OF_OPTIONS, trunk, branch], cwd);
     } catch {
-      return git(["-C", top, "merge-base", END_OF_OPTIONS, `origin/${trunk}`, branch]);
+      return git([...where, "merge-base", END_OF_OPTIONS, `origin/${trunk}`, branch], cwd);
     }
   };
   const repoOf = async (path) => {
@@ -242,7 +253,7 @@ var createGitFacts = (options) => {
       return;
     }
     if (!forks.has(branch)) {
-      const sha = await mergeBase(top, branch).catch(quiet(`git merge-base for ${branch}`));
+      const sha = await mergeBase(["-C", top], branch).catch(quiet(`git merge-base for ${branch}`));
       if (sha) {
         forks.add(branch);
         emit({ kind: "fork", branch, base: trunk, sha }, worktree);
@@ -455,6 +466,115 @@ var createGitFacts = (options) => {
     };
     queue = queue.then(check).catch((error) => options.log?.("warning", `worktree removal check failed: ${error.message}`));
   };
+  const knownWorktree = (target) => {
+    if (branches.get(target.worktree) === target.branch) {
+      return target.worktree;
+    }
+    return [...branches].find(([, branch]) => branch === target.branch)?.[0];
+  };
+  const worktreeGitDir = async (top) => {
+    const named = await git(["-C", top, "rev-parse", "--absolute-git-dir"]).catch(quiet(`git rev-parse in ${top}`));
+    const gitDir = named === "" ? void 0 : realPath(named);
+    const inside = common !== void 0 && gitDir !== void 0 && (gitDir === common || gitDir.startsWith(`${common}/worktrees/`));
+    return inside ? gitDir : void 0;
+  };
+  const lookUpDiff = async (agentId, worktree, branch) => {
+    const top = expandHome(worktree);
+    if (!common || !existsSync(top) || !await inThisRepo(top)) {
+      return;
+    }
+    const gitDir = await worktreeGitDir(top);
+    if (gitDir === void 0) {
+      return;
+    }
+    const where = [`--git-dir=${gitDir}`];
+    const current = await git([...where, "branch", "--show-current"], NEUTRAL_CWD).catch(quiet(`git branch in ${top}`));
+    if (current !== branch) {
+      return;
+    }
+    const base = await mergeBase(where, branch, NEUTRAL_CWD).catch(quiet(`git merge-base for ${branch}`));
+    if (!base) {
+      return;
+    }
+    let output;
+    try {
+      output = await git([...where, "diff", ...DIFF_OPTIONS, END_OF_OPTIONS, base, "--"], NEUTRAL_CWD);
+    } catch (error) {
+      quiet(`git diff of ${branch}`)(error);
+      return;
+    }
+    if (stopped) {
+      return;
+    }
+    const files = output.split("\0").filter((file) => file !== "");
+    const total = files.length;
+    const diffLine = (listed) => {
+      const data = { kind: "diff", agentId, worktree, branch, files: listed, total };
+      return createLine("server", "git.fact", data, { cwd: worktree, agentId });
+    };
+    const full = total <= PROGRESS_ITEMS_CAP ? diffLine(files) : void 0;
+    const fits = full !== void 0 && Buffer.byteLength(JSON.stringify(redactValue(full))) < config.spool.maxLineBytes;
+    write(fits ? full : diffLine([]));
+  };
+  const askDiff = (agentId, diffAt, attempt = true) => {
+    if (options.diffTarget === void 0 || !common || attempts.has(agentId)) {
+      return;
+    }
+    let target;
+    try {
+      target = options.diffTarget(agentId);
+    } catch (error) {
+      warnOnce(`the diff target of an agent could not be read: ${error.message}`);
+      return;
+    }
+    if (target === void 0 || !isBranchName(target.branch)) {
+      return;
+    }
+    const key = `${agentId}@${target.legAt}`;
+    if (diffAt !== void 0 && diffAt >= time(target.legAt)) {
+      attempts.set(agentId, key);
+      return;
+    }
+    const worktree = attempt ? knownWorktree(target) : void 0;
+    if (worktree === void 0) {
+      return;
+    }
+    attempts.set(agentId, key);
+    const { branch } = target;
+    const failed = (error) => options.log?.("warning", `git diff lookup of ${branch} failed: ${error.message}`);
+    queue = queue.then(() => lookUpDiff(agentId, worktree, branch)).catch(failed);
+  };
+  const observeAgent = (event) => {
+    const agentId = event.agentId;
+    if (agentId === void 0) {
+      return;
+    }
+    if (event.event === "agent.start" || event.event === "agent.stop") {
+      attempts.delete(agentId);
+    }
+    const review = event.agentType !== void 0 && roleConfig(event.agentType, config).stage === "review";
+    if (!review) {
+      return;
+    }
+    if (!live) {
+      const at = time(event.at);
+      historyReviewers.set(agentId, Math.max(historyReviewers.get(agentId) ?? at, at));
+    } else if (event.event !== "agent.stop") {
+      askDiff(agentId);
+    }
+  };
+  const catchUpDiffs = () => {
+    const now = Date.now();
+    for (const [agentId, newestAt] of historyReviewers) {
+      const diffAt = historyDiffs.get(agentId);
+      const fresh = now - newestAt < STALE_AGENT_MS;
+      if (fresh || diffAt !== void 0) {
+        askDiff(agentId, diffAt, fresh);
+      }
+    }
+    historyReviewers.clear();
+    historyDiffs.clear();
+  };
   const enqueue = (dir, force = false) => {
     if (!live) {
       candidates.add(dir);
@@ -528,9 +648,13 @@ var createGitFacts = (options) => {
           forks.add(data.branch);
         } else if (data.kind === "subject") {
           subjects.add(data.branch);
+        } else if (data.kind === "diff" && !live) {
+          const at = time(event.at);
+          historyDiffs.set(data.agentId, Math.max(historyDiffs.get(data.agentId) ?? at, at));
         }
         return;
       }
+      observeAgent(event);
       if (event.src === "hook" && event.cwd) {
         enqueueOnce(event.cwd);
       }
@@ -554,6 +678,7 @@ var createGitFacts = (options) => {
         enqueue(dir);
       }
       candidates.clear();
+      catchUpDiffs();
       if (!common) {
         options.log?.("info", "the repository's git common directory is unknown, so removed worktrees are not checked");
         pendingAdds.clear();
@@ -682,7 +807,7 @@ var createGhFacts = (options) => {
     remotesCheckedAt = now();
     let found;
     try {
-      found = parseRemotes(await run("git", [...SAFE_GIT, "remote", "-v"], options.root));
+      found = parseRemotes(await run("git", [...SAFE_GIT, "remote", "-v"], options.root, SAFE_GIT_ENV));
     } catch (error) {
       remotesCheckedAt = Number.NEGATIVE_INFINITY;
       const failure = error;
@@ -1372,7 +1497,11 @@ var withoutTicket = (target) => {
   url.searchParams.delete("ticket");
   return `${url.pathname}${url.search}`;
 };
-var withList = (body, listText) => `${body.slice(0, -1)},"repositories":${listText}}`;
+var withList = (body, listText, typicalText = "") => `${body.slice(0, -1)},"repositories":${listText}${typicalText === "" ? "" : `,"typical":${typicalText}`}}`;
+var typicalTextOf = (repository, view) => {
+  const typical = view === "sessions" ? repository.typical?.() : void 0;
+  return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
+};
 var createBoardServer = (options) => {
   const uiDir = options.uiDir ?? join3(PACKAGE_ROOT, "src", "ui");
   const builtUiDir = options.builtUiDir ?? join3(PACKAGE_ROOT, "dist", "ui");
@@ -1427,7 +1556,7 @@ var createBoardServer = (options) => {
     }
     return fresh;
   };
-  const snapshotText = (repository, view, listText = JSON.stringify(summaries())) => withList(bodyOf(repository, view), listText);
+  const snapshotText = (repository, view, listText = JSON.stringify(summaries())) => withList(bodyOf(repository, view), listText, typicalTextOf(repository, view));
   const broadcast = () => {
     pending = void 0;
     sentAt = Date.now();
@@ -1901,18 +2030,98 @@ import { setTimeout as delay } from "timers/promises";
 // src/server/context.ts
 import { join as join6, resolve as resolve4 } from "path";
 
+// src/facts/diff-target.ts
+var diffTargetOf = (state, agentId) => {
+  const homeId = ownValue(state.index.agentRuns, agentId);
+  const homeRun = homeId === void 0 ? void 0 : ownValue(state.board.runs, homeId);
+  const home = homeRun === void 0 ? void 0 : ownValue(homeRun.agents, agentId);
+  if (home === void 0 || home.endedAt !== void 0 || home.stage !== "review") {
+    return void 0;
+  }
+  const copies = [];
+  for (const run of Object.values(state.board.runs)) {
+    const agent = ownValue(run.agents, agentId);
+    const worked = agent !== void 0 && (roleStageStarted(run, agent) || agent.budget.toolCalls.used > 0);
+    if (worked && !isTrunkBranch(state, run.branch)) {
+      copies.push({ run, agent });
+    }
+  }
+  const first = copies.sort((a, b) => time(a.agent.startedAt) - time(b.agent.startedAt) || compareText(a.run.id, b.run.id))[0];
+  if (first === void 0 || first.run.branch === "" || first.run.branch === "?" || first.run.worktree === "") {
+    return void 0;
+  }
+  return { branch: first.run.branch, worktree: first.run.worktree, legAt: home.resumedAt ?? home.startedAt };
+};
+
 // src/spool/aggregates.ts
 import { closeSync as closeSync2, lstatSync, readdirSync, readFileSync as readFileSync4, readSync as readSync2, renameSync, rmSync, unlinkSync } from "fs";
 import { join as join4 } from "path";
+
+// src/insights/percentile.ts
+var percentile = (values, p) => {
+  if (values.length === 0) {
+    return void 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(p / 100 * sorted.length) - 1)];
+};
+
+// src/insights/typical.ts
+var TYPICAL_RUNS = 50;
+var TYPICAL_MIN_RUNS = 5;
+var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var addRuns = (byRole, agents) => {
+  if (!Array.isArray(agents)) {
+    return;
+  }
+  for (const agent of agents) {
+    if (!isObject(agent)) {
+      continue;
+    }
+    const { role, startedAt, callsAtFirstStop: calls } = agent;
+    if (typeof role !== "string" || typeof startedAt !== "string" || Number.isNaN(time(startedAt))) {
+      continue;
+    }
+    if (calls === null || typeof calls !== "number" || !Number.isInteger(calls) || calls < 0) {
+      continue;
+    }
+    const runs = byRole.get(role) ?? [];
+    runs.push({ startedAt: time(startedAt), calls });
+    byRole.set(role, runs);
+  }
+};
+var lengthOf = (runs) => {
+  const window = [...runs].sort((a, b) => b.startedAt - a.startedAt).slice(0, TYPICAL_RUNS);
+  if (window.length < TYPICAL_MIN_RUNS) {
+    return void 0;
+  }
+  const calls = window.map((run) => run.calls);
+  const p25 = percentile(calls, 25) ?? 0;
+  const p75 = percentile(calls, 75) ?? 0;
+  const p90 = percentile(calls, 90) ?? 0;
+  return p90 < 1 ? void 0 : { runs: window.length, p25, p75, p90 };
+};
+var typicalLengths = (entries) => {
+  const byRole = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    addRuns(byRole, entry.agents);
+  }
+  const lengths = {};
+  for (const [role, runs] of byRole) {
+    const length = lengthOf(runs);
+    if (length !== void 0) {
+      ownEntry(lengths, role, () => length);
+    }
+  }
+  return lengths;
+};
 
 // src/model/aggregate.ts
 var WORK_SESSION_CALLS = 5;
 var DIALOG_ORIGINS = /* @__PURE__ */ new Set(["marker", "ask-tool", "permission"]);
 var isDialog = (question) => question.audience === "user" && DIALOG_ORIGINS.has(question.origin);
-var subagentsOf = (session, stage) => {
-  const subagents = Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT && agent.stage === stage);
-  return subagents.sort(byStart);
-};
+var allSubagents = (session) => Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT).sort(byStart);
+var subagentsOf = (session, stage) => allSubagents(session).filter((agent) => agent.stage === stage);
 var buildOf = (agent) => {
   const { toolCalls, verifyRounds } = agent.budget;
   const commands = VERIFY_KINDS.reduce((sum, kind) => sum + verifyRounds.commands[kind], 0);
@@ -1920,6 +2129,7 @@ var buildOf = (agent) => {
   const callLimit = toolCalls.limit > 0 ? toolCalls.limit : null;
   return { role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, callLimit, commands, failed };
 };
+var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null });
 var reviewOf = (agent) => {
   const block = agent.report?.block;
   const fixItems = block ? block.followups.filter((item) => item.type === "fix").length : null;
@@ -1975,6 +2185,7 @@ var sessionAggregate = (session) => {
     main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit },
     builds: subagentsOf(session, "build").map(buildOf),
     reviews: subagentsOf(session, "review").map(reviewOf),
+    agents: allSubagents(session).map(agentOf),
     rows: session.rows.map(rowOf),
     questions: questionsOf(session),
     developerWait: { waits, totalMs, breaks }
@@ -2004,7 +2215,8 @@ var OPTIONAL_FIELDS = [
   ["builds", Array.isArray],
   ["reviews", Array.isArray],
   ["rows", Array.isArray],
-  ["questions", Array.isArray]
+  ["questions", Array.isArray],
+  ["agents", Array.isArray]
 ];
 var lineCount = (count) => count === 1 ? "1 line" : `${count} lines`;
 var completeLines = (text) => text.split("\n").slice(0, -1).filter((line) => line.trim() !== "");
@@ -2303,9 +2515,21 @@ var createAggregateLog = (options) => {
   const now = options.now ?? (() => /* @__PURE__ */ new Date());
   const onInfo = options.onInfo ?? (() => void 0);
   const path = join4(dir, AGGREGATES_FILE);
-  const written = /* @__PURE__ */ new Map();
+  const known = /* @__PURE__ */ new Map();
   const pending = /* @__PURE__ */ new Map();
   let appendFailure;
+  let typical = {};
+  const recompute = () => {
+    try {
+      typical = typicalLengths([...known.values()]);
+    } catch (error) {
+      typical = {};
+      onError(`typical lengths not computed: ${error.message}`);
+    }
+  };
+  const keep = ({ id, finishedAt, agents }) => {
+    known.set(id, { finishedAt, agents: Array.isArray(agents) ? agents : void 0 });
+  };
   const load = (report) => {
     let refused = false;
     const stored = readAggregates(dir, (message, isRefused) => {
@@ -2322,15 +2546,16 @@ var createAggregateLog = (options) => {
       return false;
     }
     for (const aggregate of stored) {
-      written.set(aggregate.id, aggregate.finishedAt);
+      keep(aggregate);
     }
+    recompute();
     return true;
   };
   let loaded = load(true);
   const write = (store, sessionId) => {
     const session = store.session(sessionId);
     const finishedAt = session?.finishedAt;
-    if (session === void 0 || finishedAt === void 0 || written.get(sessionId) === finishedAt || !begunInWindow(store, session, windowStartMs)) {
+    if (session === void 0 || finishedAt === void 0 || known.get(sessionId)?.finishedAt === finishedAt || !begunInWindow(store, session, windowStartMs)) {
       return true;
     }
     if (Date.parse(finishedAt) < pruneCutoff(keepDays, now())) {
@@ -2361,7 +2586,8 @@ var createAggregateLog = (options) => {
       appendFailure = void 0;
       onInfo(`session aggregates written to ${path} again`);
     }
-    written.set(sessionId, finishedAt);
+    keep(aggregate);
+    recompute();
     return true;
   };
   const flush = (store) => {
@@ -2397,12 +2623,21 @@ var createAggregateLog = (options) => {
       pending.set(sessionId, finishedAt);
     },
     flush,
+    typical: () => typical,
     prune(at) {
       try {
         pruneAggregates(dir, keepDays, at);
       } catch (error) {
         onError(`${AGGREGATES_FILE} not pruned: ${error.message}`);
         return;
+      }
+      const cutoff = pruneCutoff(keepDays, at);
+      const dropped = [...known].filter(([, entry]) => !(Date.parse(entry.finishedAt) >= cutoff));
+      for (const [id] of dropped) {
+        known.delete(id);
+      }
+      if (dropped.length > 0) {
+        recompute();
       }
       if (!loaded && load(false)) {
         loaded = true;
@@ -2731,7 +2966,8 @@ var createSpoolContext = (options) => {
   const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, root, write, log: ghLog, wanted: pollWanted }) : void 0;
   let lines = () => 0;
   try {
-    const git = options.facts ? createGitFacts({ config, write, log, repoCommonDir: gitCommonDir(root) }) : void 0;
+    const diffTarget = (agentId) => diffTargetOf(store.peek(), agentId);
+    const git = options.facts ? createGitFacts({ config, write, log, repoCommonDir: gitCommonDir(root), diffTarget }) : void 0;
     const usage = options.facts ? createUsageFacts({ prices: loadPrices(resolve4(root, expandHome(config.pricesFrom)), log), write, log }) : void 0;
     if (git && usage) {
       observers.push((event) => git.observe(event), (event, payload) => usage.observe(event, payload));
@@ -2791,6 +3027,7 @@ var createSpoolContext = (options) => {
     },
     uiConfig: () => ({ ...uiConfig(config, root), repo: name, sessionFixtures: true }),
     lastLineAt: () => lastLineAt2,
+    typical: () => aggregates.typical(),
     seen(nextName, at) {
       name = nextName;
       lastLineAt2 = at;
@@ -2817,6 +3054,7 @@ var createReplayContext = (options) => {
     store,
     uiConfig: () => options.ui,
     lastLineAt: () => lastLineAt2,
+    typical: () => ({}),
     seen: () => void 0,
     lines: () => count,
     nudge: () => void 0,
@@ -3203,6 +3441,7 @@ var USAGE = `Usage: nurselog <command> [--repo <path>]
   fixture <session id or prefix> [--out <file>]          print one session's spool lines as a replay fixture (a prefix of 8+ characters names it), or write them to a new file with --out
   insights [--json]                                      workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data
   install-cli [--remove]                                 write the terminal command ~/.local/bin/nurselog, which runs the newest installed plugin copy (from a clone, the clone); --remove deletes it; a file Nurselog did not write is never touched
+  uninstall [--yes] [--keep-data]                        remove Nurselog from this machine: stop the board, delete the terminal command and every repository's recorded data (kept with --keep-data), remove the plugin from Claude Code; lists what you added by hand; asks first unless --yes
 --repo <path> names the repository; the default is the git worktree of the current directory.
 Quote free text in single quotes; a value that starts with - needs the = form: --text='-5 files'.`;
 var FLAG_NAMES = {
@@ -3550,6 +3789,7 @@ export {
   runCommand,
   createBashTracker,
   SAFE_GIT,
+  SAFE_GIT_ENV,
   worktreeAddPath,
   createGitFacts,
   PR_FIELDS,
@@ -3563,6 +3803,7 @@ export {
   shiftTimes,
   mergeFixtures,
   replayFixtures,
+  percentile,
   readAggregates,
   purgeableAggregates,
   purgeAggregates,

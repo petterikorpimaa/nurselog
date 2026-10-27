@@ -3,11 +3,13 @@ import {
   DEFAULT_PORT,
   OrphanedCopyError,
   SAFE_GIT,
+  SAFE_GIT_ENV,
   USAGE,
   alreadyRunningMessage,
   boardTab,
   listOrphanedSpools,
   listRepositories,
+  percentile,
   purgeAggregates,
   purgeableAggregates,
   readAggregates,
@@ -17,21 +19,21 @@ import {
   runLink,
   runStatus,
   startNurselog
-} from "./chunk-VGB744M5.js";
+} from "./chunk-5D2K7NV4.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-ODEVUTYB.js";
+} from "./chunk-X3W7DKXE.js";
 import {
   BRANCH_KEY_PATTERN,
   DEFAULT_CONFIG,
   LINUX_APP_BROWSERS,
   MAC_APP_BROWSERS,
-  MAC_OPEN,
   MAX_CONFIG_BYTES,
   PACKAGE_ROOT,
   RUNNING_CHECK_MS,
   STREAM_ID,
+  SignInFileError,
   UNTIL_EXIT,
   boardLogPath,
   branchKey,
@@ -56,6 +58,7 @@ import {
   notSetUpMessage,
   openAppWindow,
   ownEntry,
+  ownValue,
   purgeSpool,
   purgeableDayFiles,
   readHookConfig,
@@ -68,6 +71,7 @@ import {
   serverStatePath,
   shellWord,
   signInBoard,
+  spoolDirExists,
   spoolDirFor,
   startBoardDetached,
   stripControl,
@@ -75,13 +79,14 @@ import {
   time,
   userConfigPath,
   validateConfig,
-  waitForBoard
-} from "./chunk-WVTBF6C4.js";
+  waitForBoard,
+  writeSignInFile
+} from "./chunk-XP2B7KAR.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
-import { dirname as dirname4, join as join3, resolve as resolve3 } from "path";
-import { parseArgs as parseArgs7 } from "util";
+import { dirname as dirname5, join as join4, resolve as resolve4 } from "path";
+import { parseArgs as parseArgs8 } from "util";
 
 // src/cli/fixture.ts
 import { writeFileSync } from "fs";
@@ -139,15 +144,15 @@ Usage: ${SYNOPSIS}`);
     return 1;
   }
   const matches = matchSessions(spoolSessionIds(days), wanted);
-  const shown = stripControl(wanted);
+  const shown2 = stripControl(wanted);
   if (matches.length > 1) {
-    io.err(`nurselog fixture: ${shown} matches ${matches.length} sessions; name one of them:
+    io.err(`nurselog fixture: ${shown2} matches ${matches.length} sessions; name one of them:
 ${matches.map((id) => `  ${stripControl(id)}`).join("\n")}`);
     return 1;
   }
   const fixture = matches.length === 1 ? sessionFixture(days, matches[0], config) : void 0;
   if (!fixture) {
-    io.err(`nurselog fixture: no session ${shown} in the spool of ${stripControl(tildeHome(root))}`);
+    io.err(`nurselog fixture: no session ${shown2} in the spool of ${stripControl(tildeHome(root))}`);
     return 1;
   }
   if (values.out === void 0) {
@@ -199,7 +204,7 @@ var attempt = async (detect) => {
   }
 };
 var detectTrunk = async (root, run) => {
-  const git = (args) => run("git", [...SAFE_GIT, ...args], root);
+  const git = (args) => run("git", [...SAFE_GIT, ...args], root, SAFE_GIT_ENV);
   const head = await attempt(() => git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]));
   const remote = head?.replace(/^(?:remotes\/)?origin\//, "");
   if (remote && remote !== head && isBranchName(remote)) {
@@ -214,7 +219,7 @@ var detectTrunk = async (root, run) => {
 };
 var githubRepoOf = (url) => githubRepoOfRemote(url, "github.com");
 var detectRepo = async (root, run) => {
-  const url = await attempt(() => run("git", [...SAFE_GIT, "remote", "get-url", "origin"], root));
+  const url = await attempt(() => run("git", [...SAFE_GIT, "remote", "get-url", "origin"], root, SAFE_GIT_ENV));
   return url ? githubRepoOf(url) : void 0;
 };
 var detectAccountPattern = async (root, run) => {
@@ -392,7 +397,7 @@ var keyPatternOf = (branches) => {
 };
 var detectKeyPattern = async (root, run) => {
   const args = ["for-each-ref", "--sort=-committerdate", `--count=${RECENT_BRANCHES}`, "--format=%(refname)", "refs/heads", "refs/remotes"];
-  const refs = await attempt(() => run("git", [...SAFE_GIT, ...args], root));
+  const refs = await attempt(() => run("git", [...SAFE_GIT, ...args], root, SAFE_GIT_ENV));
   const branches = (refs ?? "").split("\n").map((ref) => ref.replace(/^refs\/heads\//, "").replace(/^refs\/remotes\/[^/]+\//, ""));
   return keyPatternOf(branches);
 };
@@ -517,14 +522,14 @@ var runInit = async (args, io, run = runCommand, backup = {}) => {
   const userPath = userConfigPath(root);
   const repositoryPath = join(root, "nurselog.config.json");
   const target = values["repo-file"] ? repositoryPath : userPath;
-  const shown = stripControl(tildeHome(target));
+  const shown2 = stripControl(tildeHome(target));
   const text = `${printableJson(proposal)}
 `;
   if (!values.write) {
     io.out(text.trimEnd());
-    io.out(`Would write: ${shown}`);
+    io.out(`Would write: ${shown2}`);
     if (exists(target)) {
-      io.err(`nurselog init: ${shown} already exists; --write would not replace it`);
+      io.err(`nurselog init: ${shown2} already exists; --write would not replace it`);
     }
     return 0;
   }
@@ -533,10 +538,10 @@ var runInit = async (args, io, run = runCommand, backup = {}) => {
   }
   const written = exists(target) ? false : writeNew2(target, text, values["repo-file"] ? 420 : 384);
   if (!written) {
-    io.err(`nurselog init: ${shown} already exists; edit it or remove it first`);
+    io.err(`nurselog init: ${shown2} already exists; edit it or remove it first`);
     return 1;
   }
-  io.out(`Wrote ${shown}`);
+  io.out(`Wrote ${shown2}`);
   if (!values["repo-file"] && exists(repositoryPath)) {
     io.out(`The user config now replaces ${stripControl(tildeHome(repositoryPath))}: the first config found is used whole.`);
   }
@@ -686,13 +691,6 @@ var readSession = (aggregate, finished) => {
 var pad = (value) => String(value).padStart(2, "0");
 var localDay2 = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 var sum = (values) => values.reduce((total, value) => total + value, 0);
-var percentile = (values, p) => {
-  if (values.length === 0) {
-    return void 0;
-  }
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(0, Math.ceil(p / 100 * sorted.length) - 1)];
-};
 var median = (values) => percentile(values, 50);
 var count = (value, noun) => `${value} ${value === 1 ? noun[0] : noun[1]}`;
 var percent = (fraction) => Math.round(fraction * 100);
@@ -1271,6 +1269,14 @@ var foreignReason = (path, stat) => {
   const ownerLine = readSmallFile(path, HEAD_BYTES, { head: true }).split("\n")[1];
   return ownerLine === OWNER_LINE ? void 0 : "was not written by nurselog install-cli";
 };
+var terminalCommandState = (path = terminalCommandPath()) => {
+  const stat = lstatOf(path);
+  if (stat === void 0) {
+    return { kind: "missing" };
+  }
+  const reason = foreignReason(path, stat);
+  return reason === void 0 ? { kind: "own" } : { kind: "foreign", reason };
+};
 var replaceFile = (target, text) => {
   const temporary = join2(dirname2(target), `.nurselog-${randomBytes(6).toString("hex")}`);
   try {
@@ -1286,21 +1292,20 @@ var replaceFile = (target, text) => {
 var runInstallCli = (args, io, deps = {}) => {
   const { values } = parseArgs4({ args, options: { remove: { type: "boolean" } } });
   const target = terminalCommandPath();
-  const shown = stripControl(tildeHome(target));
-  const stat = lstatOf(target);
-  const reason = stat === void 0 ? void 0 : foreignReason(target, stat);
-  if (reason !== void 0) {
+  const shown2 = stripControl(tildeHome(target));
+  const state = terminalCommandState(target);
+  if (state.kind === "foreign") {
     const action = values.remove ? "not removed" : "not replaced; move it away first to let Nurselog write that path";
-    io.err(`nurselog install-cli: ${shown} ${reason}; ${action}`);
+    io.err(`nurselog install-cli: ${shown2} ${state.reason}; ${action}`);
     return 1;
   }
   if (values.remove) {
-    if (stat === void 0) {
-      io.out(`Nothing to remove: ${shown} does not exist`);
+    if (state.kind === "missing") {
+      io.out(`Nothing to remove: ${shown2} does not exist`);
       return 0;
     }
     unlinkSync(target);
-    io.out(`Removed ${shown}`);
+    io.out(`Removed ${shown2}`);
     return 0;
   }
   const root = deps.packageRoot ?? PACKAGE_ROOT;
@@ -1310,8 +1315,8 @@ var runInstallCli = (args, io, deps = {}) => {
   const cloneBin = stripControl(tildeHome(join2(root, "bin", "nurselog")));
   const newestCopy = `the newest installed plugin copy in ${stripControl(tildeHome(cache ?? root))}`;
   const runs = cache === void 0 ? cloneBin : newestCopy;
-  const verb = stat === void 0 ? "Installed" : "Updated";
-  io.out(`${verb} ${shown}: it runs ${runs}`);
+  const verb = state.kind === "missing" ? "Installed" : "Updated";
+  io.out(`${verb} ${shown2}: it runs ${runs}`);
   if (cache === void 0 && lstatOf(join2(root, ".git"))?.isFile() === true) {
     io.err(`nurselog install-cli: ${stripControl(tildeHome(root))} is a linked git worktree; the terminal command now runs it and stops working when the worktree is removed`);
   }
@@ -1326,13 +1331,15 @@ import { existsSync as existsSync2 } from "fs";
 import { parseArgs as parseArgs5 } from "util";
 var OPEN_WAIT_MS = 5e3;
 var XDG_OPEN_GRACE_MS = 1e3;
+var MAC_OSASCRIPT = "/usr/bin/osascript";
 var DEFAULT_DEPS = {
   platform: process.platform,
   launch,
   resolve: (command) => resolveCommand(command),
   exists: (path) => existsSync2(path),
+  signInFile: (signIn) => writeSignInFile(signIn),
   startBoard: () => startBoardDetached(),
-  waitForBoard: (timeoutMs, exited) => waitForBoard(timeoutMs, { exited }),
+  waitForBoard: (timeoutMs, exited2) => waitForBoard(timeoutMs, { exited: exited2 }),
   signInBoard: () => signInBoard()
 };
 var boardAddress = async (io, deps) => {
@@ -1367,12 +1374,29 @@ var boardAddress = async (io, deps) => {
   io.err(started.status === "unproven" ? `The board did not open: ${notProvenMessage(started.port)}` : `The board stopped answering; log: ${log}`);
   return void 0;
 };
+var appleScriptString = (text) => `"${text.replace(/[\\"]/g, (char) => `\\${char}`)}"`;
 var openDefaultBrowser = async (url, deps) => {
   if (deps.platform === "darwin") {
-    return deps.launch(MAC_OPEN, [url], UNTIL_EXIT);
+    return deps.launch(MAC_OSASCRIPT, [], UNTIL_EXIT, { input: `open location ${appleScriptString(url)}
+` });
   }
   const xdgOpen = deps.resolve("xdg-open");
   return xdgOpen !== void 0 && await deps.launch(xdgOpen, [url], XDG_OPEN_GRACE_MS);
+};
+var openApp = async (signIn, deps) => {
+  try {
+    const browser = await openAppWindow(signIn, deps);
+    if (browser !== void 0) {
+      return { browser };
+    }
+  } catch (error) {
+    if (!(error instanceof SignInFileError)) {
+      throw error;
+    }
+    return { fallback: `No sign-in file for the app window (${error.reason}); opening the default browser.` };
+  }
+  const tried = deps.platform === "darwin" ? MAC_APP_BROWSERS : LINUX_APP_BROWSERS;
+  return { fallback: `No Chromium browser for an app window (tried ${tried.join(", ")}); opening the default browser.` };
 };
 var runOpen = async (args, io, deps = DEFAULT_DEPS) => {
   const { values } = parseArgs5({ args, options: { app: { type: "boolean" } } });
@@ -1390,13 +1414,12 @@ var runOpen = async (args, io, deps = DEFAULT_DEPS) => {
     return 0;
   }
   if (values.app) {
-    const browser = await openAppWindow(signIn, deps);
-    if (browser !== void 0) {
-      io.out(`Opened ${url} in an app window of ${browser}`);
+    const app = await openApp(signIn, deps);
+    if ("browser" in app) {
+      io.out(`Opened ${url} in an app window of ${app.browser}`);
       return 0;
     }
-    const tried = deps.platform === "darwin" ? MAC_APP_BROWSERS : LINUX_APP_BROWSERS;
-    io.err(`No Chromium browser for an app window (tried ${tried.join(", ")}); opening the default browser.`);
+    io.err(app.fallback);
   }
   if (await openDefaultBrowser(signIn, deps)) {
     io.out(`Opened ${url} in the default browser`);
@@ -1516,7 +1539,7 @@ var runPurge = async (args, io, deps = {}) => {
         io.err(`nurselog purge: ${name}: its session aggregates are left alone: ${stripControl(error.message)}`);
         failed = true;
       }
-      const shown = stripControl(tildeHome(dir));
+      const shown2 = stripControl(tildeHome(dir));
       const none = before2 === void 0 ? "no day files" : `no day files before ${before2}`;
       const days = files.length === 0 ? none : `${dayFiles(files.length)}, ${daySpan(files)},`;
       let listing = days;
@@ -1525,7 +1548,7 @@ var runPurge = async (args, io, deps = {}) => {
       } else if (countOf(stored) > 0) {
         listing = `${days} and ${aggregates(countOf(stored))}`;
       }
-      io.out(`${name}: ${listing} in ${shown}`);
+      io.out(`${name}: ${listing} in ${shown2}`);
       found.push({ name, dir, files, aggregates: stored });
     } catch (error) {
       io.err(`nurselog purge: ${name}: ${stripControl(error.message)}`);
@@ -1597,6 +1620,450 @@ var runPurge = async (args, io, deps = {}) => {
   return failed || undeleted > 0 ? 1 : 0;
 };
 
+// src/cli/uninstall.ts
+import { spawnSync } from "child_process";
+import { lstatSync as lstatSync3, readFileSync as readFileSync2, rmdirSync, rmSync as rmSync2, statSync, unlinkSync as unlinkSync2 } from "fs";
+import { homedir as homedir2 } from "os";
+import { dirname as dirname4, join as join3, resolve as resolve3, sep as sep2 } from "path";
+import { setTimeout as delay } from "timers/promises";
+import { parseArgs as parseArgs7 } from "util";
+var CLAUDE_REMOVALS = [["plugin", "uninstall", "nurselog@nurselog"], ["plugin", "marketplace", "remove", "nurselog"]];
+var LOCAL_SCOPE_REMOVAL = "claude plugin uninstall nurselog@nurselog --scope local";
+var SESSIONS_LINE = "Close other Claude Code sessions first: their hooks keep recording and can restart the board until they end.";
+var PROFILES = [".zshenv", ".zshrc", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".profile", join3(".config", "fish", "config.fish")];
+var STOP_WAIT_MS = 5e3;
+var STOP_POLL_MS = 200;
+var MAX_LISTED_BYTES = 1024 * 1024;
+var NAMES_NURSELOG = /nurselog/i;
+var PRUNE_STAMP = ".pruned";
+var NOTIFIED_DIR = "notified";
+var BACKUP_MARKER = ".backup-excluded";
+var shown = (path) => plainText(tildeHome(path));
+var messageOf = (error) => plainText(error.message);
+var commandText = (command, args) => [shown(command), ...args].join(" ");
+var within = (dir, root) => dir === root || dir.startsWith(`${root}${sep2}`);
+var objectAt = (value, key) => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return void 0;
+  }
+  const entry = ownValue(value, key);
+  return typeof entry === "object" && entry !== null && !Array.isArray(entry) ? entry : void 0;
+};
+var readListed = (path) => {
+  const stat = statSync(path, { throwIfNoEntry: false });
+  if (stat === void 0) {
+    return void 0;
+  }
+  if (!stat.isFile() || stat.size > MAX_LISTED_BYTES) {
+    throw new Error(`${path} is not a regular file of at most 1 MiB`);
+  }
+  return readFileSync2(path, "utf8");
+};
+var listedLine = (path, index, line) => `${shown(path)}:${index + 1}: ${plainText(line.trim())}`;
+var profileLines = (path) => {
+  const lines = readListed(path)?.split("\n") ?? [];
+  return lines.flatMap((line, index) => NAMES_NURSELOG.test(line) ? [listedLine(path, index, line)] : []);
+};
+var lineWith = (path, lines, key, from, fallback) => {
+  const pattern = new RegExp(`${escapeRegExp(JSON.stringify(key))}\\s*:`);
+  const index = lines.findIndex((line, at) => at >= from && pattern.test(line));
+  return index === -1 ? `${shown(path)}: ${fallback}` : listedLine(path, index, lines[index]);
+};
+var settingsLines = (path) => {
+  const text = readListed(path);
+  if (text === void 0) {
+    return [];
+  }
+  const settings = JSON.parse(text);
+  const lines = text.split("\n");
+  const env = objectAt(settings, "env") ?? {};
+  const keys = Object.keys(env).filter((key) => key === "CLAUDE_CODE_PLUGIN_DIRS" || key.startsWith("NURSELOG_"));
+  const found = keys.map((key) => lineWith(path, lines, key, 0, `env.${plainText(key)}`));
+  const command = ownValue(objectAt(settings, "statusLine") ?? {}, "command");
+  if (typeof command === "string" && NAMES_NURSELOG.test(command)) {
+    const statusLine = lines.findIndex((line) => /"statusLine"\s*:/.test(line));
+    found.push(lineWith(path, lines, "command", Math.max(statusLine, 0), "statusLine.command"));
+  }
+  return found;
+};
+var baseLines = (base) => {
+  const marked = lstatSync3(join3(base, BACKUP_MARKER), { throwIfNoEntry: false }) !== void 0;
+  const marker = marked ? `; delete its ${BACKUP_MARKER} marker by hand once nothing else is in it` : "";
+  return [`${shown(base)}: a spool.dir, left in place${marker}`];
+};
+var settingsPath = (env) => {
+  const configDir = env.CLAUDE_CONFIG_DIR;
+  return configDir ? join3(resolve3(configDir), "settings.json") : join3(homedir2(), ".claude", "settings.json");
+};
+var handListing = (roots, bases, env, io) => {
+  const listed2 = [];
+  const collect = (path, read) => {
+    try {
+      listed2.push(...read(path));
+    } catch (error) {
+      io.err(`nurselog uninstall: cannot read ${shown(path)}, so it is not listed; check it by hand: ${messageOf(error)}`);
+    }
+  };
+  for (const profile of PROFILES) {
+    collect(join3(homedir2(), profile), profileLines);
+  }
+  collect(settingsPath(env), settingsLines);
+  for (const root of roots) {
+    const config = join3(root, "nurselog.config.json");
+    collect(config, (path) => lstatSync3(path, { throwIfNoEntry: false }) === void 0 ? [] : [`${shown(path)}: a repository config`]);
+  }
+  for (const base of bases) {
+    collect(base, baseLines);
+  }
+  listed2.push(`A --scope local install: run ${LOCAL_SCOPE_REMOVAL} in each repository that has one.`);
+  listed2.push("An installed board app: remove it from the browser or the Dock.");
+  return listed2;
+};
+var claudeStep = (root, path) => {
+  if (cacheDirOf(root) === void 0) {
+    return { mode: "clone", root };
+  }
+  const claude = resolveCommand("claude", path);
+  return claude === void 0 ? { mode: "print" } : { mode: "run", claude };
+};
+var boardLine = (plan) => {
+  const board = plan.board;
+  if (board.status === "proven") {
+    return `Board: stop pid ${board.pid} on port ${board.port} and wait for it to exit.`;
+  }
+  if (board.status === "unproven") {
+    return `Board: leave pid ${board.pid} on port ${board.port} running, as it does not prove the board token; stop it by hand.`;
+  }
+  if (plan.stale !== void 0) {
+    return `Board: none answers; leave pid ${plan.stale.pid} of server.json alone, as it may be another process by now.`;
+  }
+  return "Board: none runs.";
+};
+var commandLine = (plan) => {
+  const path = shown(terminalCommandPath());
+  if (plan.command.kind === "own") {
+    return `Terminal command: delete ${path}.`;
+  }
+  if (plan.command.kind === "foreign") {
+    return `Terminal command: keep ${path}, which ${plan.command.reason}.`;
+  }
+  if (plan.command.kind === "error") {
+    return `Terminal command: ${path} cannot be checked: ${plan.command.message}.`;
+  }
+  return `Terminal command: none at ${path}.`;
+};
+var spoolLine = (spool) => {
+  const where = spool.dir === void 0 ? "its spool directory cannot be looked up" : shown(spool.dir);
+  return `     ${plainText(spool.name)}: ${where}`;
+};
+var dataLines = (plan, keepData) => {
+  const root = defaultRoot();
+  if (keepData) {
+    return ["Recorded data: keep it (--keep-data)."];
+  }
+  if (plan.board.status === "unproven") {
+    return [`Recorded data: keep it while pid ${plan.board.pid} runs.`];
+  }
+  if (plan.spools.length === 0 && plan.orphans === 0) {
+    return ["Recorded data: none is recorded."];
+  }
+  const orphans = plan.orphans === 1 ? "1 orphaned spool directory" : `${plan.orphans} orphaned spool directories`;
+  const outside = plan.spools.some((spool) => spool.dir !== void 0 && !within(spool.dir, root));
+  return [
+    "Recorded data, once the board is stopped: delete the day files, notified markers and session aggregates, as nurselog purge --all does, of",
+    ...plan.spools.map(spoolLine),
+    ...plan.orphans > 0 ? [`     ${orphans} in ${shown(root)}`] : [],
+    ...outside ? [`     and then each emptied spool directory outside ${shown(root)}.`] : []
+  ];
+};
+var rootLine = (plan, keepData) => {
+  const root = shown(defaultRoot());
+  if (keepData) {
+    return `Data directory: keep ${root}, with the repository records, user configs and board token (--keep-data).`;
+  }
+  if (plan.board.status === "unproven") {
+    return `Data directory: keep ${root} while pid ${plan.board.pid} runs.`;
+  }
+  if (!plan.rootExists) {
+    return `Data directory: none at ${root}.`;
+  }
+  return `Data directory, once the purge succeeded: delete ${root} whole: repository records, user configs, session aggregates, board token, server.json and board.log.`;
+};
+var claudePlanLine = (step) => {
+  if (step.mode === "run") {
+    const commands2 = CLAUDE_REMOVALS.map((args) => commandText(step.claude, args)).join(", then ");
+    return `Claude Code: run ${commands2}.`;
+  }
+  const commands = CLAUDE_REMOVALS.map((args) => commandText("claude", args)).join(", then ");
+  if (step.mode === "print") {
+    return `Claude Code: claude is not on PATH, so print ${commands}.`;
+  }
+  return `Claude Code: change nothing, as this runs from the clone ${shown(step.root)}; print what to remove.`;
+};
+var printPlan = (plan, keepData, io) => {
+  const steps = [[boardLine(plan)], [commandLine(plan)], dataLines(plan, keepData), [rootLine(plan, keepData)], [claudePlanLine(plan.claude)]];
+  io.out("nurselog uninstall removes Nurselog from this machine:");
+  steps.forEach((lines, index) => {
+    io.out(`  ${index + 1}. ${lines[0]}`);
+    lines.slice(1).forEach((line) => io.out(line));
+  });
+  io.out(SESSIONS_LINE);
+  io.out("Listed only, never changed; remove them by hand:");
+  plan.listed.forEach((line) => io.out(`  ${line}`));
+};
+var makePlan = async (deps, keepData, io) => {
+  let failed = false;
+  const board = await (deps.checkBoard ?? defaultCheck)();
+  const state = board.status === "none" ? readServerState(serverStatePath()) : void 0;
+  let command;
+  try {
+    command = terminalCommandState();
+  } catch (error) {
+    command = { kind: "error", message: messageOf(error) };
+  }
+  let repositories = [];
+  let orphans = 0;
+  try {
+    repositories = listRepositories();
+    orphans = listOrphanedSpools().length;
+  } catch (error) {
+    io.err(`nurselog uninstall: cannot list the recorded repositories: ${messageOf(error)}`);
+    failed = true;
+  }
+  const spools = repositories.map((repository) => {
+    try {
+      return { name: repository.name, dir: spoolDirFor(readHookConfig(repository.root), repository.root) };
+    } catch {
+      return { name: repository.name };
+    }
+  });
+  const root = defaultRoot();
+  const outside = spools.flatMap((spool) => spool.dir !== void 0 && !within(spool.dir, root) ? [dirname4(spool.dir)] : []);
+  const bases = keepData ? [] : [...new Set(outside)];
+  const rootExists = lstatSync3(root, { throwIfNoEntry: false }) !== void 0;
+  const claude = claudeStep(deps.packageRoot ?? PACKAGE_ROOT, deps.path ?? process.env.PATH ?? "");
+  const roots = repositories.map((repository) => repository.root);
+  const listed2 = handListing(roots, bases, deps.env ?? process.env, io);
+  const stale = state === void 0 ? void 0 : { pid: state.pid, port: state.port };
+  return { plan: { board, stale, command, spools, orphans, rootExists, claude, listed: listed2 }, failed };
+};
+var defaultCheck = () => checkBoard(serverStatePath(), RUNNING_CHECK_MS);
+var defaultKill = (pid, signal) => {
+  process.kill(pid, signal);
+};
+var defaultRun = (command, args) => {
+  const result = spawnSync(command, args, { stdio: "inherit" });
+  return result.error === void 0 ? result.status : null;
+};
+var exited = (kill, pid) => {
+  try {
+    kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+};
+var stopBoard = async (deps, io) => {
+  const board = await (deps.checkBoard ?? defaultCheck)();
+  if (board.status === "none") {
+    const state = readServerState(serverStatePath());
+    if (state === void 0) {
+      io.out("No board runs.");
+    } else {
+      io.out(`No board answers on port ${state.port}; pid ${state.pid} of the stale server.json is left alone.`);
+    }
+    return true;
+  }
+  if (board.status === "unproven") {
+    io.err(`nurselog uninstall: pid ${board.pid} on port ${board.port} does not prove the board token, so it was not stopped; stop it by hand`);
+    return false;
+  }
+  const kill = deps.kill ?? defaultKill;
+  try {
+    kill(board.pid, "SIGTERM");
+  } catch (error) {
+    if (error.code !== "ESRCH") {
+      io.err(`nurselog uninstall: cannot stop the board, pid ${board.pid}: ${messageOf(error)}`);
+      return false;
+    }
+  }
+  const sleep = deps.sleep ?? ((ms) => delay(ms).then(() => void 0));
+  for (let waited = 0; waited < STOP_WAIT_MS; waited += STOP_POLL_MS) {
+    await sleep(STOP_POLL_MS);
+    if (exited(kill, board.pid)) {
+      io.out(`Stopped the board, pid ${board.pid}.`);
+      return true;
+    }
+  }
+  io.err(`nurselog uninstall: the board, pid ${board.pid}, did not exit within ${STOP_WAIT_MS / 1e3} s; stop it with: kill ${board.pid}`);
+  return false;
+};
+var removeTerminalCommand = (io) => {
+  const target = terminalCommandPath();
+  try {
+    const state = terminalCommandState(target);
+    if (state.kind === "missing") {
+      io.out(`No terminal command at ${shown(target)}.`);
+    } else if (state.kind === "foreign") {
+      io.out(`Kept ${shown(target)}: it ${state.reason}.`);
+    } else {
+      unlinkSync2(target);
+      io.out(`Removed ${shown(target)}`);
+    }
+    return true;
+  } catch (error) {
+    io.err(`nurselog uninstall: cannot remove ${shown(target)}: ${messageOf(error)}`);
+    return false;
+  }
+};
+var removeEmptiedSpool = (dir, io) => {
+  if (!spoolDirExists(dir)) {
+    return;
+  }
+  const stamp = join3(dir, PRUNE_STAMP);
+  if (lstatSync3(stamp, { throwIfNoEntry: false })?.isFile() === true) {
+    unlinkSync2(stamp);
+  }
+  for (const folder of [join3(dir, NOTIFIED_DIR), dir]) {
+    try {
+      rmdirSync(folder);
+    } catch (error) {
+      const code = error.code;
+      if (code === "ENOTEMPTY" || code === "EEXIST") {
+        io.out(`Kept ${shown(folder)}: it holds files the purge did not delete.`);
+        return;
+      }
+      if (code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+  io.out(`Removed ${shown(dir)}`);
+};
+var purgeData = async (spools, io) => {
+  let purged;
+  try {
+    purged = await runPurge(["--all", "--yes"], io, { boardRunning: () => false });
+  } catch (error) {
+    io.err(`nurselog uninstall: the purge failed: ${messageOf(error)}`);
+    return false;
+  }
+  let failed = purged !== 0;
+  const root = defaultRoot();
+  for (const spool of spools) {
+    if (spool.dir === void 0 || within(spool.dir, root)) {
+      continue;
+    }
+    try {
+      removeEmptiedSpool(spool.dir, io);
+    } catch (error) {
+      io.err(`nurselog uninstall: ${plainText(spool.name)}: cannot remove ${shown(spool.dir)}: ${messageOf(error)}`);
+      failed = true;
+    }
+  }
+  return !failed;
+};
+var removeDataRoot = (io) => {
+  const root = defaultRoot();
+  try {
+    const stat = lstatSync3(root, { throwIfNoEntry: false });
+    if (stat === void 0) {
+      io.out(`Nothing to delete: ${shown(root)} does not exist.`);
+      return true;
+    }
+    if (!stat.isDirectory()) {
+      io.err(`nurselog uninstall: ${shown(root)} is not a directory (a symlink is refused); not deleted`);
+      return false;
+    }
+    rmSync2(root, { recursive: true, force: true });
+    io.out(`Deleted ${shown(root)}`);
+    return true;
+  } catch (error) {
+    io.err(`nurselog uninstall: cannot delete ${shown(root)}: ${messageOf(error)}`);
+    return false;
+  }
+};
+var removeData = async (spools, boardStopped, io) => {
+  const root = shown(defaultRoot());
+  if (!boardStopped) {
+    io.err(`nurselog uninstall: kept the recorded data and ${root}, as the board was not stopped`);
+    return true;
+  }
+  if (!await purgeData(spools, io)) {
+    io.err(`nurselog uninstall: kept ${root}, as the purge did not succeed and its user configs name the spool directories still to purge`);
+    return false;
+  }
+  return removeDataRoot(io);
+};
+var removeFromClaudeCode = (step, deps, io) => {
+  const commands = CLAUDE_REMOVALS.map((args) => `  ${commandText("claude", args)}`);
+  if (step.mode === "print") {
+    io.out("claude is not on PATH; remove the plugin from Claude Code with:");
+    commands.forEach((line) => io.out(line));
+    return true;
+  }
+  if (step.mode === "clone") {
+    io.out(`This runs from the clone ${shown(step.root)}: delete it from CLAUDE_CODE_PLUGIN_DIRS, or stop passing --plugin-dir. A marketplace install is removed with:`);
+    commands.forEach((line) => io.out(line));
+    return true;
+  }
+  let ok = true;
+  for (const args of CLAUDE_REMOVALS) {
+    const text = commandText(step.claude, args);
+    io.out(`Running ${text}`);
+    const status = (deps.run ?? defaultRun)(step.claude, args);
+    if (status !== 0) {
+      const outcome = status === null ? "did not run to the end" : `exited with ${status}`;
+      io.err(`nurselog uninstall: ${text} ${outcome}`);
+      ok = false;
+    }
+  }
+  return ok;
+};
+var runUninstall = async (args, io, deps = {}) => {
+  const options = { yes: { type: "boolean" }, "keep-data": { type: "boolean" } };
+  let values;
+  try {
+    values = parseArgs7({ args, options }).values;
+  } catch (error) {
+    io.err(`nurselog uninstall: ${error.message}`);
+    return 2;
+  }
+  const keepData = values["keep-data"] === true;
+  const { plan, failed: planFailed } = await makePlan(deps, keepData, io);
+  printPlan(plan, keepData, io);
+  if ((deps.env ?? process.env).CLAUDECODE) {
+    io.err("nurselog uninstall: refused inside Claude Code, as it would remove the plugin under the running session, so nothing was removed; run nurselog uninstall from a terminal outside Claude Code");
+    return 1;
+  }
+  if (!values.yes) {
+    const isTty = deps.isTty ?? (() => process.stdin.isTTY === true);
+    if (!isTty()) {
+      io.err("nurselog uninstall: stdin is not a terminal to ask on, so nothing was removed; pass --yes to remove without the question");
+      return 1;
+    }
+    const answer = await (deps.ask ?? askOnTerminal)("Remove Nurselog from this machine? [y/N] ");
+    if (!/^y(es)?$/i.test(answer.trim())) {
+      io.out("Nothing removed.");
+      return planFailed ? 1 : 0;
+    }
+  }
+  const boardStopped = await stopBoard(deps, io);
+  const results = [boardStopped, removeTerminalCommand(io)];
+  if (!keepData) {
+    results.push(await removeData(plan.spools, boardStopped, io));
+  }
+  results.push(removeFromClaudeCode(plan.claude, deps, io));
+  if (planFailed || results.includes(false)) {
+    const retry = cliCommand(void 0, "uninstall", join3(deps.packageRoot ?? PACKAGE_ROOT, "bin", "nurselog"));
+    io.err(`nurselog uninstall: not every step succeeded; see the messages above, then run it again with: ${retry}`);
+    return 1;
+  }
+  const kept = keepData ? `, its data kept in ${shown(defaultRoot())}` : "";
+  io.out(`Nurselog is removed from this machine${kept}; remove what is listed above by hand.`);
+  return 0;
+};
+
 // src/cli.ts
 var defaultIo = () => ({
   cwd: process.cwd(),
@@ -1605,12 +2072,12 @@ var defaultIo = () => ({
   tty: process.stdout.isTTY === true
 });
 var fixturePath = (name) => {
-  const candidates = [resolve3(name), join3(PACKAGE_ROOT, "fixtures", name), join3(PACKAGE_ROOT, "fixtures", `${name}.ndjson`)];
-  return candidates.find((path) => existsSync3(path)) ?? resolve3(name);
+  const candidates = [resolve4(name), join4(PACKAGE_ROOT, "fixtures", name), join4(PACKAGE_ROOT, "fixtures", `${name}.ndjson`)];
+  return candidates.find((path) => existsSync3(path)) ?? resolve4(name);
 };
 var fixturePaths = (list) => list.split(",").map((name) => name.trim()).filter(Boolean).map(fixturePath);
 var replayConfig = (replay, root) => {
-  const beside = join3(dirname4(replay), "nurselog.config.json");
+  const beside = join4(dirname5(replay), "nurselog.config.json");
   if (existsSync3(beside)) {
     return { path: beside, kind: "repository" };
   }
@@ -1626,7 +2093,7 @@ var runningMessage = async (state, root) => {
 };
 var start = async (args, io) => {
   const options = { replay: { type: "string" }, speed: { type: "string" }, port: { type: "string" }, repo: { type: "string" } };
-  const { values } = parseArgs7({ args, options });
+  const { values } = parseArgs8({ args, options });
   const speed = values.speed === void 0 ? 1 : Number(values.speed);
   if (!(speed > 0)) {
     io.err("--speed must be a positive number");
@@ -1646,7 +2113,7 @@ var start = async (args, io) => {
   const port = values.port === void 0 ? void 0 : Number(values.port);
   let replayStart;
   if (replay) {
-    const root = repository ?? resolve3(cwd);
+    const root = repository ?? resolve4(cwd);
     const found = replayConfig(replay[0], repository);
     replayStart = { fixtures: replay, speed, root, config: loadConfig(found, root, (message) => io.err(`nurselog: ${message}`)) };
   } else {
@@ -1729,6 +2196,9 @@ var main = async (argv, io = defaultIo()) => {
     }
     if (first === "install-cli") {
       return runInstallCli(rest, io);
+    }
+    if (first === "uninstall") {
+      return await runUninstall(rest, io);
     }
     if (first === "help" || first === "--help" || first === "-h") {
       io.out(USAGE);

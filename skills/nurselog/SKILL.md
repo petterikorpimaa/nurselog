@@ -110,3 +110,10 @@ setup needed) or agrees. Pass on what it prints: a refusal (a file it did not wr
 for `~/.zshrc` or `~/.bashrc`, which the user adds; never edit a shell file. After a PATH line, hand over
 `~/.local/bin/nurselog <command>` until the user has added it: your Bash tool always finds the plugin's `nurselog`, so it
 cannot tell.
+
+## Uninstall
+
+Never run `nurselog uninstall`: it would remove the plugin under the running session, and it refuses inside Claude
+Code. When the user asks to remove Nurselog, hand over `nurselog uninstall` for a terminal outside Claude Code; it shows
+its plan and asks first. Without the terminal command,
+hand over `node <path> uninstall` with the path `command -v nurselog` prints in your Bash tool.

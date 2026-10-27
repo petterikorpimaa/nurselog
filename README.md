@@ -116,17 +116,54 @@ it is off for marketplaces outside Anthropic's. From a clone: `git pull`, then r
 <details>
 <summary>Remove the plugin</summary>
 
+A Claude Code plugin uninstall removes the plugin only: the terminal command, the recorded data and what you added by
+hand stay. To remove everything, close your other Claude Code sessions first (their hooks keep recording and can
+restart the board until they end), then run in a terminal outside Claude Code, where the command refuses to remove the
+plugin under a running session:
+
 ```console
-claude plugin uninstall nurselog@nurselog                    # the marketplace install
-claude plugin uninstall nurselog@nurselog --scope local      # from one repository
-claude plugin marketplace remove nurselog                    # the marketplace
+nurselog uninstall
 ```
 
-When you remove the plugin everywhere, run `nurselog install-cli --remove` first to delete the terminal command (after
-the uninstall it finds no copy to run, so delete `~/.local/bin/nurselog` by hand); a `--scope local` removal from one
-repository keeps it. A board running from the uninstalled copy closes itself
-within 10 seconds. With `CLAUDE_CODE_PLUGIN_DIRS` set, delete the entry from the `env` block of
-`~/.claude/settings.json`. Then drop a shell function or an alias from your shell profile.
+It prints its plan and asks before it removes anything (`--yes` skips the question). It stops the board, deletes the
+terminal command, the recorded data of every repository (a `spool.dir` elsewhere included) and
+`~/.local/share/nurselog`, then runs `claude plugin uninstall nurselog@nurselog` and
+`claude plugin marketplace remove nurselog`, or prints them when `claude` is not on PATH or Nurselog runs from a clone.
+The data stays while a board it could not stop runs, and `~/.local/share/nurselog` stays when the purge failed; a
+failed run ends with the command to run it again. `--keep-data` keeps the data, the configs and the board token for a
+later reinstall. It never edits what you added by hand: it lists the lines of your shell profiles that name Nurselog,
+the `env.CLAUDE_CODE_PLUGIN_DIRS` and `env.NURSELOG_*` entries and a `statusLine.command` that names Nurselog in
+`~/.claude/settings.json`, each repository config and the board app, for you to remove. Without the terminal command,
+run
+`node ~/.claude/plugins/cache/nurselog/nurselog/<version>/bin/nurselog uninstall`, or from a clone
+`node ~/github/nurselog/bin/nurselog uninstall`.
+
+By hand, the same in this order:
+
+1. Delete the terminal command while the plugin is still installed: `nurselog install-cli --remove`. After the
+   uninstall it finds no copy to run, so then delete `~/.local/bin/nurselog` by hand.
+2. Uninstall the plugin and remove the marketplace. From a clone, delete the `CLAUDE_CODE_PLUGIN_DIRS` entry from the
+   `env` block of `~/.claude/settings.json` instead.
+
+   ```console
+   claude plugin uninstall nurselog@nurselog                    # the marketplace install
+   claude plugin marketplace remove nurselog                    # the marketplace
+   ```
+
+   A board running from the uninstalled copy closes itself within 10 seconds; a board started from a clone keeps
+   running, so stop it with `kill <pid>` (the pid `nurselog status` prints). Claude Code deletes the uninstalled copy
+   under `~/.claude/plugins/cache/nurselog/` after 14 days.
+3. Delete the recorded data, the user configs, the board token and the log, which cannot be undone:
+   `rm -rf ~/.local/share/nurselog` ([Data and retention](#data-and-retention)).
+4. Remove what you added yourself:
+   - a shell function or an alias from your shell profile; keep the `~/.local/bin` PATH line when other commands use
+     it (Claude Code's native install puts `claude` there);
+   - a status line command and `NURSELOG_*` variables from `~/.claude/settings.json` or the shell profile;
+   - a repository config `nurselog.config.json` that `nurselog init --repo-file` wrote;
+   - the board app, if you installed it, from the browser or the Dock ([Opening the board](#opening-the-board)).
+
+`claude plugin uninstall nurselog@nurselog --scope local` removes the plugin from one repository only and keeps all of
+the above.
 
 </details>
 
@@ -319,16 +356,20 @@ The board's data is behind a token, so another user of the machine cannot read i
 
 - The token is `~/.local/share/nurselog/token` (mode 0600), made by the first live board start. It never appears in a
   URL.
-- `nurselog open` and the auto-open ask the board for a single-use ticket and open `http://127.0.0.1:6767/?ticket=...`,
-  which sets the cookie and drops the ticket from the address bar.
+- `nurselog open` and the auto-open ask the board for a single-use ticket, valid for 60 seconds, and open
+  `http://127.0.0.1:6767/?ticket=...`, which sets the cookie and drops the ticket from the address bar. The ticket stays
+  out of the process list (`ps`), where another user could redeem it first: an app window opens a local file,
+  `~/.local/share/nurselog/signin-<random>.html` (mode 0600), that only redirects to the ticket URL, and the macOS
+  default browser gets the URL through `osascript`'s standard input. On Linux, `xdg-open` and a snap browser still
+  get the ticket URL as an argument.
 - A foreground `nurselog start` in a terminal prints a ticket URL, valid once for 10 minutes. Without a terminal (a
   log, a pipe) it prints the plain URL and `sign in with: nurselog open`. A replay always prints its ticket URL.
 - `nurselog link` and `nurselog status` print the URL without a ticket: a signed-in browser needs none.
 - To rotate the token: delete the file, restart the board, run `nurselog open`. While a board runs whose token is not
   the file's, `status` and `link` say `board token missing or changed; restart the board`, and `open` and `start`
   refuse with the reason.
-- `nurselog open` waits up to 5 seconds for the board and opens the default browser (`open` on macOS, `xdg-open` on
-  Linux). `--app` uses Google Chrome, Microsoft Edge, Brave Browser or Chromium (on Linux `google-chrome`, `chromium`
+- `nurselog open` waits up to 5 seconds for the board and opens the default browser (`osascript` on macOS, `xdg-open`
+  on Linux). `--app` uses Google Chrome, Microsoft Edge, Brave Browser or Chromium (on Linux `google-chrome`, `chromium`
   or `microsoft-edge` on PATH) and falls back to the default browser with a line that says so. Elsewhere it prints
   the URL.
 
@@ -441,10 +482,11 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, commands and reports included, so check it before you share it). |
 | `nurselog purge [--before <day>] [--all] [--yes]` | Deletes recorded data. |
 | `nurselog install-cli [--remove]` | Writes the [terminal command](#terminal-command) `~/.local/bin/nurselog`, or deletes it. |
+| `nurselog uninstall [--yes] [--keep-data]` | Removes Nurselog from this machine and lists what you added by hand ("Remove the plugin" under [Load the plugin](#load-the-plugin)). |
 | `nurselog help` | Usage. |
 
-Every command except `open`, `install-cli` and `help` takes `--repo <path>`; the default is the git worktree of the
-current directory.
+Every command except `open`, `install-cli`, `uninstall` and `help` takes `--repo <path>`; the default is the git
+worktree of the current directory.
 
 ## Configuration
 
@@ -619,6 +661,7 @@ worktrees).
 | Session aggregates for `insights` | `<repo-hash>/aggregates.ndjson` | 365 days (`insights.keepDays`), pruned while a board runs |
 | Repository record and user config | `<repo-hash>/repository.json`, `nurselog.config.json` | Until you delete them |
 | Board token, `server.json`, `board.log` | top level | The token until deleted, `server.json` while the board runs, the log until the next background start |
+| Sign-in files | top level, `signin-<random>.html` | Each redirects once to a single-use ticket URL; removed at the next sign-in once older than 60 seconds |
 
 ```console
 nurselog purge                         # this repository's day files and aggregates (asks first)

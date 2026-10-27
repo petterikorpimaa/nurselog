@@ -265,7 +265,7 @@ import { Agent, request as httpRequest } from "http";
 import { connect } from "net";
 import { homedir } from "os";
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 var HOOK_DEFAULTS = { spool: { dir: "~/.local/share/nurselog", maxLineBytes: 65536, keepDays: 14 } };
 var DEFAULT_ROLES = {
   implementer: { stage: "build" },
@@ -1503,8 +1503,9 @@ var LINUX_APP_BROWSERS = ["google-chrome", "chromium", "microsoft-edge"];
 var MAC_OPEN = "/usr/bin/open";
 var UNTIL_EXIT = Number.POSITIVE_INFINITY;
 var LINUX_LAUNCH_GRACE_MS = 300;
-var launch = (command, args, waitMs, { env, cwd } = {}) => new Promise((done) => {
-  const child = spawn(command, args, { detached: true, stdio: "ignore", env, cwd });
+var launch = (command, args, waitMs, { env, cwd, input } = {}) => new Promise((done) => {
+  const stdio = input === void 0 ? "ignore" : ["pipe", "ignore", "ignore"];
+  const child = spawn(command, args, { detached: true, stdio, env, cwd });
   let timer;
   const finish = (opened) => {
     clearTimeout(timer);
@@ -1513,6 +1514,10 @@ var launch = (command, args, waitMs, { env, cwd } = {}) => new Promise((done) =>
   };
   child.once("error", () => finish(false));
   child.once("exit", (code) => finish(code === 0));
+  if (input !== void 0) {
+    child.stdin?.on("error", () => void 0);
+    child.stdin?.end(input);
+  }
   if (Number.isFinite(waitMs)) {
     child.once("spawn", () => {
       timer = setTimeout(() => finish(true), waitMs);
@@ -1533,10 +1538,72 @@ var resolveCommand = (command, path = process.env.PATH ?? "") => {
   return void 0;
 };
 var macAppPaths = (browser) => [`/Applications/${browser}.app`, join(homedir(), "Applications", `${browser}.app`)];
-var openAppWindow = async (url, { platform = process.platform, launch: run = launch, resolve: find = resolveCommand, exists = existsSync, launchOptions } = {}) => {
+var SIGN_IN_FILE_MS = 6e4;
+var SIGN_IN_FILE = /^signin-[\w-]{16}\.html$/;
+var escapeHtml = (text) => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+var sweepSignInFiles = (root, now) => {
+  let names;
+  try {
+    names = readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names.filter((entry) => SIGN_IN_FILE.test(entry))) {
+    const path = join(root, name);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isFile() && now - stat.mtimeMs > SIGN_IN_FILE_MS) {
+        unlinkSync(path);
+      }
+    } catch {
+    }
+  }
+};
+var writeSignInFile = (signIn, { root = defaultRoot(), now = Date.now() } = {}) => {
+  ensurePrivateDir(root);
+  sweepSignInFiles(root, now);
+  const path = join(root, `signin-${randomBytes(12).toString("base64url")}.html`);
+  const target = escapeHtml(signIn);
+  const head = `<meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><title>Nurselog</title>`;
+  const body = `<a href="${target}">Open the Nurselog board</a>`;
+  writePrivate(path, `<!doctype html>
+<html><head>${head}</head>
+<body>${body}</body></html>
+`);
+  return pathToFileURL(path).href;
+};
+var SignInFileError = class extends Error {
+  constructor(cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(`the sign-in file could not be written (${reason})`, { cause });
+    this.name = "SignInFileError";
+    this.reason = reason;
+  }
+};
+var carriesTicket = (url) => URL.canParse(url) ? new URL(url).searchParams.has("ticket") : url.includes("ticket=");
+var SNAP_ROOTS = ["/snap/", "/var/lib/snapd/snap/"];
+var isSnap = (command) => SNAP_ROOTS.some((root) => command.startsWith(root));
+var openAppWindow = async (url, deps = {}) => {
+  const { platform = process.platform, launch: run = launch, resolve: find = resolveCommand, exists = existsSync, launchOptions } = deps;
+  const signInFile = deps.signInFile ?? ((target) => writeSignInFile(target));
+  const ticketed = carriesTicket(url);
+  let fileUrl;
+  const signInUrl = () => {
+    if (!ticketed) {
+      return url;
+    }
+    if (fileUrl === void 0) {
+      try {
+        fileUrl = signInFile(url);
+      } catch (error) {
+        throw new SignInFileError(error);
+      }
+    }
+    return fileUrl;
+  };
   if (platform === "darwin") {
     for (const browser of MAC_APP_BROWSERS.filter((name) => macAppPaths(name).some((path) => exists(path)))) {
-      if (await run(MAC_OPEN, ["-na", browser, "--args", `--app=${url}`], UNTIL_EXIT, launchOptions)) {
+      if (await run(MAC_OPEN, ["-na", browser, "--args", `--app=${signInUrl()}`], UNTIL_EXIT, launchOptions)) {
         return browser;
       }
     }
@@ -1544,7 +1611,11 @@ var openAppWindow = async (url, { platform = process.platform, launch: run = lau
   }
   for (const browser of LINUX_APP_BROWSERS) {
     const command = find(browser);
-    if (command !== void 0 && await run(command, [`--app=${url}`], LINUX_LAUNCH_GRACE_MS, launchOptions)) {
+    if (command === void 0) {
+      continue;
+    }
+    const target = isSnap(command) ? url : signInUrl();
+    if (await run(command, [`--app=${target}`], LINUX_LAUNCH_GRACE_MS, launchOptions)) {
       return browser;
     }
   }
@@ -2184,12 +2255,26 @@ var GIT_FIELDS = {
   worktree: ["worktree", "branch"],
   fork: ["branch", "base", "sha"],
   subject: ["branch", "subject"],
-  "worktree-removed": ["worktree", "branch"]
+  "worktree-removed": ["worktree", "branch"],
+  diff: ["agentId", "worktree", "branch"]
 };
-var gitProblem = (data) => {
+var diffProblem = (data, record) => {
+  if (record?.agentId !== data.agentId) {
+    return "data.agentId must equal the envelope agentId";
+  }
+  if (!isStringList2(data.files)) {
+    return "data.files must be a list of strings";
+  }
+  return isCount(data.total) ? void 0 : "data.total must be a whole number of at least 0";
+};
+var gitProblem = (data, record) => {
   const kind = String(data.kind);
   const fields = Object.hasOwn(GIT_FIELDS, kind) ? GIT_FIELDS[kind] : void 0;
-  return fields ? stringFields(data, fields) : `unknown git fact kind ${kind}`;
+  if (!fields) {
+    return `unknown git fact kind ${kind}`;
+  }
+  const problem = stringFields(data, fields);
+  return problem ?? (kind === "diff" ? diffProblem(data, record) : void 0);
 };
 var isRepoMismatch = (value) => isFields(value) && isString(value.repo) && isStringList2(value.remotes);
 var ghProblem = (data) => {
@@ -2280,7 +2365,8 @@ var DATA_IDS = {
   "tool.pre": ["toolUseId"],
   "tool.post": ["toolUseId", "agentId"],
   "tool.fail": ["toolUseId"],
-  "usage.fact": ["requestId"]
+  "usage.fact": ["requestId"],
+  "git.fact": ["agentId"]
 };
 var isReservedId = (value) => isString(value) && isReservedKey(value);
 var reservedIdProblem = (record, data) => {
@@ -2313,7 +2399,7 @@ var checkEvent = (record) => {
   if (!isFields(record.data)) {
     return "missing data";
   }
-  const problem = DATA_CHECKS[record.event]?.(record.data);
+  const problem = DATA_CHECKS[record.event]?.(record.data, record);
   return problem ? `${String(record.event)}: ${problem}` : reservedIdProblem(record, record.data);
 };
 var parseSpoolLine = (line) => {
@@ -3025,6 +3111,19 @@ var relativePath = (run, path) => {
   return isInside2(normalized, run.worktree) ? normalized.slice(run.worktree.length + 1) : normalized;
 };
 var packageOf = (relative, config) => config.packages.find((pkg) => pkg.paths.some((path) => relative === path || relative.startsWith(`${path}/`)))?.id;
+var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
+var ownEntry = (map, key, create) => {
+  if (Object.hasOwn(map, key)) {
+    return map[key];
+  }
+  const entry = create();
+  if (key !== "__proto__") {
+    map[key] = entry;
+  }
+  return entry;
+};
+var isTrunkLike = (branch, config) => branch === config.branches.trunk || config.branches.promote.includes(branch);
+var agentFix = (run, agentId) => [...run.fixes].reverse().find((fix) => fix.agentId === agentId);
 var SHELL_EXPANSION = /[$`*?[{\\'"]|.~|^~[^/]/;
 var literalWord = (word) => {
   if (word === void 0) {
@@ -3148,6 +3247,18 @@ var shellWords = (segment) => {
   const words = [...segment.code.matchAll(/\S+/g)];
   return words.map((match) => segment.text.slice(match.index, match.index + match[0].length));
 };
+var PREFIX_WORD = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*|command)$/;
+var gitArgs = (words) => {
+  const start = words.findIndex((word) => !PREFIX_WORD.test(word));
+  if (start < 0 || !/(?:^|\/)git$/.test(words[start])) {
+    return void 0;
+  }
+  let at = start + 1;
+  while (at < words.length && words[at].startsWith("-")) {
+    at += words[at] === "-C" || words[at] === "-c" ? 2 : 1;
+  }
+  return words.slice(at);
+};
 
 // src/model/config-cache.ts
 var compiledConfigs = /* @__PURE__ */ new WeakMap();
@@ -3199,17 +3310,6 @@ var MESSAGE_TEXT_BUDGET = 64e3;
 var RECENT_CAP = 20;
 var WARNING_CAP = 50;
 var factStamp = (at) => ({ at, sessionId: "" });
-var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
-var ownEntry = (map, key, create) => {
-  if (Object.hasOwn(map, key)) {
-    return map[key];
-  }
-  const entry = create();
-  if (key !== "__proto__") {
-    map[key] = entry;
-  }
-  return entry;
-};
 var emptyCounts = () => ({ requests: 0, input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, usd: 0 });
 var newMeter = (limit) => ({ used: 0, limit: limit ?? 0, level: "ok" });
 var newBudget = (role, config) => {
@@ -3269,7 +3369,6 @@ var logRun = (run, line, text, tone = "normal", agentId, origin) => {
     run.log.shift();
   }
 };
-var isTrunkLike = (branch, config) => branch === config.branches.trunk || config.branches.promote.includes(branch);
 var newAgent = (agentKey, event, config) => {
   const role = agentKey === "main" ? "main" : event.agentType ?? "unknown";
   return { id: agentKey, role, stage: agentKey === "main" ? "other" : roleConfig(role, config).stage, state: "running", background: false, startedAt: event.at, recent: [], budget: newBudget(role, config), filesChanged: [] };
@@ -3454,7 +3553,6 @@ var checkReview = (run, at) => {
     setStage(run, "review", "done", at);
   }
 };
-var agentFix = (run, agentId) => [...run.fixes].reverse().find((fix) => fix.agentId === agentId);
 var checkFix = (run, at) => {
   if (run.fixes.length === 0) {
     return;
@@ -4583,7 +4681,6 @@ var resolveFrom = (base, path) => {
   }
   return base === void 0 ? void 0 : resolvePath(base, path);
 };
-var PREFIX_WORD = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*|command)$/;
 var stepsOfLine = /* @__PURE__ */ new WeakMap();
 var bashSteps = (session, event) => {
   const command = event.data.input.command ?? "";
@@ -4618,17 +4715,6 @@ var splitSteps = (command, base) => {
   return steps;
 };
 var REBASE_CONTROL = /* @__PURE__ */ new Set(["--abort", "--quit", "--skip", "--edit-todo"]);
-var gitArgs = (words) => {
-  const start = words.findIndex((word) => !PREFIX_WORD.test(word));
-  if (start < 0 || !/(?:^|\/)git$/.test(words[start])) {
-    return void 0;
-  }
-  let at = start + 1;
-  while (at < words.length && words[at].startsWith("-")) {
-    at += words[at] === "-C" || words[at] === "-c" ? 2 : 1;
-  }
-  return words.slice(at);
-};
 var runsRebase = (command) => shellSegments(command).some((segment) => {
   const args = gitArgs(shellWords(segment));
   return args?.[0] === "rebase" && !args.slice(1).some((word) => REBASE_CONTROL.has(word));
@@ -5063,6 +5149,278 @@ var onWorktreeRemoved = (state, data, at) => {
   return [run];
 };
 
+// src/model/progress.ts
+var PROGRESS_SEGMENTS = 12;
+var PROGRESS_ITEMS_CAP = 200;
+var PROGRESS_SEEN_CAP = 400;
+var PHASE_SHARES = { build: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
+var READ = 0;
+var EDIT = 1;
+var VERIFY = 2;
+var PUSH = 0;
+var PR_OPEN = 1;
+var FINISHING = 2;
+var PROGRESS_STAGES = /* @__PURE__ */ new Set(["build", "review", "pr"]);
+var REDACTED2 = "[redacted]";
+var itemsProgress = (kind, matched) => {
+  const progress = { kind, total: matched.length, done: matched.filter(Boolean).length };
+  if (matched.length > PROGRESS_SEGMENTS) {
+    return progress;
+  }
+  progress.parts = [...matched];
+  const current = matched.indexOf(false);
+  if (current >= 0) {
+    progress.current = current;
+  }
+  return progress;
+};
+var phaseProgress = (kind, current) => {
+  const parts = [0, 1, 2].map((part) => part < current);
+  return { kind, total: 3, done: current, parts, current };
+};
+var LINE_SUFFIX = /(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L\d+)?)$/;
+var fixItemFile = (file, worktree) => {
+  const bare = file.trim().replace(LINE_SUFFIX, "").replace(/^(?:\.\/)+/, "");
+  if (!isAbsolute2(bare)) {
+    return bare;
+  }
+  const path = normalizePath(bare);
+  return path !== worktree && isInside2(path, worktree) ? path.slice(worktree.length + 1) : bare;
+};
+var itemPath = (worktree, item) => {
+  if (item.includes(REDACTED2)) {
+    return void 0;
+  }
+  return isAbsolute2(item) ? normalizePath(item) : normalizePath(`${worktree}/${item}`);
+};
+var runsGitPush = (command) => shellSegments(command).some((segment) => gitArgs(shellWords(segment))?.[0] === "push");
+var homeOf = (state, agentId) => {
+  const runId = ownValue(state.index.agentRuns, agentId);
+  const run = runId === void 0 ? void 0 : ownValue(state.board.runs, runId);
+  const agent = run ? ownValue(run.agents, agentId) : void 0;
+  return run && agent ? { run, agent } : void 0;
+};
+var runningEntry = (state, agentId, stage) => {
+  const entry = ownValue(state.index.agentProgress, agentId);
+  const home = entry ? homeOf(state, agentId) : void 0;
+  if (!entry || !home || home.agent.endedAt !== void 0 || home.agent.stage !== stage) {
+    return void 0;
+  }
+  return { entry, agent: home.agent, run: home.run };
+};
+var touch = (entry, at) => {
+  const atMs = time(at);
+  if (Number.isNaN(entry.atMs) || atMs > entry.atMs) {
+    entry.at = at;
+    entry.atMs = atMs;
+  }
+};
+var clearItems = (entry) => {
+  delete entry.worktree;
+  delete entry.items;
+  delete entry.matched;
+};
+var markItems = (entry, path) => {
+  const { worktree, items, matched } = entry;
+  if (worktree === void 0 || !items || !matched) {
+    return false;
+  }
+  let changed = false;
+  items.forEach((item, index) => {
+    if (!matched[index] && itemPath(worktree, item) === path) {
+      matched[index] = true;
+      changed = true;
+    }
+  });
+  return changed;
+};
+var knowsPr = (run, agentId, config) => {
+  const holds = Object.hasOwn(run.agents, agentId) && !isTrunkLike(run.branch, config);
+  return holds || run.pr?.openedBy?.agentId === agentId;
+};
+var fixPackage = (run, fix, config) => {
+  const streamId = fix.streamId;
+  if (streamId === void 0) {
+    return void 0;
+  }
+  const stream = run.streams.find((item) => item.id === streamId) ?? run.plan?.streams.find((item) => item.id === streamId);
+  const id = stream?.package ?? streamId;
+  const pkg = config.packages.find((item) => item.id === id);
+  return pkg && pkg.paths.length > 0 ? pkg.id : void 0;
+};
+var fixItems = (run, fix, config) => {
+  const reviewers = run.reviewers.filter((reviewer) => reviewer.state === "changes");
+  const followups = reviewers.flatMap((reviewer) => ownValue(run.agents, reviewer.agentId)?.report?.block?.followups ?? []);
+  const files = followups.flatMap((item) => item.type === "fix" && item.file ? [fixItemFile(item.file, run.worktree)] : []).filter((file) => file !== "");
+  const pkg = fixPackage(run, fix, config);
+  const inPackage = pkg === void 0 ? [] : files.filter((file) => packageOf(file, config) === pkg);
+  return (inPackage.length > 0 ? inPackage : files).slice(0, PROGRESS_ITEMS_CAP);
+};
+var fixTarget = (run, home, agentId, config) => {
+  const fixRun = agentFix(run, agentId) ? run : home;
+  const fix = agentFix(fixRun, agentId);
+  const items = fix ? fixItems(fixRun, fix, config) : [];
+  return items.length > 0 ? { worktree: fixRun.worktree, items } : void 0;
+};
+var matchedPaths = (entry) => {
+  const paths = /* @__PURE__ */ new Set();
+  const { worktree, items = [], matched = [] } = entry;
+  items.forEach((item, index) => {
+    const path = worktree === void 0 ? void 0 : itemPath(worktree, item);
+    if (matched[index] && path !== void 0) {
+      paths.add(path);
+    }
+  });
+  return paths;
+};
+var openedPaths = (entry) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry)]);
+var matchesOf = (worktree, items, paths) => items.map((item) => paths.has(itemPath(worktree, item) ?? ""));
+var setFixItems = (entry, agent, target) => {
+  if (!target) {
+    clearItems(entry);
+    if (agent.progress?.kind !== "build") {
+      agent.progress = phaseProgress("build", READ);
+    }
+    return;
+  }
+  const before = matchedPaths(entry);
+  entry.worktree = target.worktree;
+  entry.items = target.items;
+  entry.matched = matchesOf(target.worktree, target.items, before);
+  agent.progress = itemsProgress("fixes", entry.matched);
+};
+var beginLeg = (state, run, agentId, at, config) => {
+  const home = agentId === "main" ? void 0 : homeOf(state, agentId);
+  const agent = home?.agent;
+  if (!home || !agent || agent.endedAt !== void 0 || !PROGRESS_STAGES.has(agent.stage)) {
+    return;
+  }
+  const legAt = agent.resumedAt ?? agent.startedAt;
+  const kept = ownValue(state.index.agentProgress, agentId);
+  if (kept?.legAt === legAt) {
+    touch(kept, at);
+    return;
+  }
+  if (kept) {
+    delete state.index.agentProgress[agentId];
+  }
+  const entry = ownEntry(state.index.agentProgress, agentId, () => ({ legAt, at, atMs: time(at) }));
+  delete agent.progress;
+  if (agent.stage === "build") {
+    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config));
+  } else if (agent.stage === "pr") {
+    const known = Object.values(state.board.runs).some((item) => item.pr !== void 0 && knowsPr(item, agentId, config));
+    agent.progress = phaseProgress("pr", known ? FINISHING : PUSH);
+  }
+};
+var refreshFixItems = (state, run, agentId, at, config) => {
+  const found = runningEntry(state, agentId, "build");
+  if (!found) {
+    return;
+  }
+  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config));
+  touch(found.entry, at);
+};
+var noteRead = (state, agentId, filePath, at) => {
+  const found = runningEntry(state, agentId, "review");
+  if (!found || !isAbsolute2(filePath)) {
+    return;
+  }
+  const { entry, agent } = found;
+  const path = normalizePath(filePath);
+  touch(entry, at);
+  if (entry.items && entry.matched) {
+    if (markItems(entry, path)) {
+      agent.progress = itemsProgress("files", entry.matched);
+    }
+    return;
+  }
+  const seen = entry.seen ?? [];
+  if (!seen.includes(path) && seen.length < PROGRESS_SEEN_CAP) {
+    seen.push(path);
+  }
+  entry.seen = seen;
+};
+var noteEdit = (state, agentId, filePath, at) => {
+  const found = runningEntry(state, agentId, "build");
+  if (!found || !isAbsolute2(filePath)) {
+    return;
+  }
+  const { entry, agent } = found;
+  touch(entry, at);
+  if (entry.items && entry.matched) {
+    if (markItems(entry, normalizePath(filePath))) {
+      agent.progress = itemsProgress("fixes", entry.matched);
+    }
+    return;
+  }
+  if (agent.progress?.kind === "build" && agent.progress.current !== EDIT) {
+    agent.progress = phaseProgress("build", EDIT);
+  }
+};
+var noteVerification = (state, agentId, at) => {
+  const found = runningEntry(state, agentId, "build");
+  if (!found) {
+    return;
+  }
+  touch(found.entry, at);
+  if (found.agent.progress?.kind === "build" && found.agent.progress.current === EDIT) {
+    found.agent.progress = phaseProgress("build", VERIFY);
+  }
+};
+var movePrPhase = (state, agentId, phase, at) => {
+  const found = runningEntry(state, agentId, "pr");
+  const progress = found?.agent.progress;
+  const current = progress?.kind === "pr" ? progress.done : PUSH;
+  if (!found || current >= phase) {
+    return;
+  }
+  found.agent.progress = phaseProgress("pr", phase);
+  touch(found.entry, at);
+};
+var notePush = (state, agentId, at) => movePrPhase(state, agentId, PR_OPEN, at);
+var notePrCreated = (state, agentId, at) => movePrPhase(state, agentId, FINISHING, at);
+var notePrKnown = (state, run, at, config) => {
+  for (const agentId of Object.keys(state.index.agentProgress)) {
+    if (knowsPr(run, agentId, config)) {
+      movePrPhase(state, agentId, FINISHING, at);
+    }
+  }
+};
+var applyDiff = (state, data, at, truncated) => {
+  const found = truncated ? void 0 : runningEntry(state, data.agentId, "review");
+  if (!found || time(at) < time(found.entry.legAt)) {
+    return void 0;
+  }
+  const { entry, agent, run } = found;
+  touch(entry, at);
+  const counted = data.total >= 1 && data.total <= PROGRESS_ITEMS_CAP && data.files.length === data.total;
+  const opened = openedPaths(entry);
+  if (!counted) {
+    entry.seen = [...opened].slice(0, PROGRESS_SEEN_CAP);
+    clearItems(entry);
+    delete agent.progress;
+    return run;
+  }
+  const worktree = normalizePath(data.worktree);
+  const items = [...data.files];
+  entry.worktree = worktree;
+  entry.items = items;
+  entry.matched = matchesOf(worktree, items, opened);
+  delete entry.seen;
+  agent.progress = itemsProgress("files", entry.matched);
+  return run;
+};
+var endProgress = (state, agentId) => {
+  if (Object.hasOwn(state.index.agentProgress, agentId)) {
+    delete state.index.agentProgress[agentId];
+  }
+  const home = homeOf(state, agentId);
+  if (home) {
+    delete home.agent.progress;
+  }
+};
+
 // src/model/github.ts
 var prFromUrl = (text) => {
   const match = /\/pull\/(\d+)/.exec(text);
@@ -5275,7 +5633,11 @@ var onGhFact = (state, event, config) => {
   if (pr.baseRefName === config.branches.trunk) {
     onTrunkPr(state, pr, event.at, config);
   }
-  return Object.values(state.board.runs).filter((run) => run.branch === pr.headRefName);
+  const heads = Object.values(state.board.runs).filter((run) => run.branch === pr.headRefName);
+  for (const run of heads) {
+    notePrKnown(state, run, event.at, config);
+  }
+  return heads;
 };
 
 // src/model/markers.ts
@@ -5514,7 +5876,7 @@ var addMainMessage = (state, event, run) => {
 var OVERHEAD_CHARS_PER_TOKEN = 3;
 var LISTING_CHARS = 513;
 var TOOL_DEFINITION_CHARS = { plan: 1088, gate: 644, question: 1071 };
-var SKILL_BODY_CHARS = 7593;
+var SKILL_BODY_CHARS = 7995;
 var SKILL_NAMES = /* @__PURE__ */ new Set(["nurselog", "nurselog:nurselog"]);
 var MAIN = "main";
 var OVERHEAD_PART_KEYS = ["markers", "reportParagraph", "listing", "toolDefinitions", "markerCalls", "reportBlocks", "skill"];
@@ -6189,6 +6551,7 @@ var onPrompt = (state, event, config, answered) => {
     startRoleStageAtEnd(state, run2, agent, event, config);
     finalizeAgent(run2, agent, event, config);
     endCopies(state, run2, agent, event, config);
+    endProgress(state, agent.id);
     return run2;
   }
   if (data.kind === "handback") {
@@ -6239,6 +6602,7 @@ var onAgentStop = (state, event, config) => {
   startRoleStageAtEnd(state, run, agent, event, config);
   finalizeAgent(run, agent, event, config);
   endCopies(state, run, agent, event, config);
+  endProgress(state, agentId);
   return run;
 };
 
@@ -6326,6 +6690,9 @@ var rebindSpawn = (state, run, spawn2, data, line, config) => {
       rederiveImplementer(state, run, agent, spawn2, line, config);
     }
   }
+  for (const id of previousId ? [agentId, previousId] : [agentId]) {
+    refreshFixItems(state, run, id, at, config);
+  }
   if (agent) {
     agent.spawnToolUseId = spawn2.toolUseId;
     agent.background = spawn2.background;
@@ -6349,10 +6716,11 @@ var startWorkStage = (state, run, agent, line, config) => {
       agent.budget.toolCallsAtFirstStop = 0;
     }
   }
-  if (roleStageStarted(run, agent) || homeId === run.id && roleStageStartedInRuns(state, agent.id, run)) {
-    return;
+  const started = roleStageStarted(run, agent) || homeId === run.id && roleStageStartedInRuns(state, agent.id, run);
+  if (!started) {
+    startRoleStageIn(state, run, agent, line, config);
   }
-  startRoleStageIn(state, run, agent, line, config);
+  beginLeg(state, run, agent.id, line.at, config);
 };
 var onAgentStart = (state, event, config) => {
   const agentId = event.agentId;
@@ -6407,10 +6775,12 @@ var onAgentStart = (state, event, config) => {
   if (resumed) {
     resumeRoleStage(run, agent, event);
     resumeCopies(state, run, agentId, event);
+    beginLeg(state, run, agentId, event.at, config);
   } else if (stoppedAt) {
     const stopped = { at: stoppedAt, sessionId: event.sessionId };
     startRoleStageAtEnd(state, run, agent, stopped, config);
     finalizeAgent(run, agent, stopped, config);
+    endProgress(state, agentId);
   }
   const parentAgent = spawn2 ? state.board.runs[spawn2.runId]?.agents[spawn2.parentAgent] : void 0;
   const parentCall = parentAgent?.recent.find((call) => call.toolUseId === spawn2?.toolUseId);
@@ -6454,6 +6824,13 @@ var pruneOlder = (entries, floor) => {
     }
   }
 };
+var pruneProgress = (state, floor) => {
+  for (const [agentId, entry] of Object.entries(state.index.agentProgress)) {
+    if (entry.atMs < floor) {
+      endProgress(state, agentId);
+    }
+  }
+};
 var finiteTime = (at) => {
   const ms = parsedTime(at);
   return Number.isFinite(ms) ? ms : void 0;
@@ -6489,6 +6866,7 @@ var pruneIndex = (state, at, config) => {
   pruneOlder(state.index.pendingStops, floor);
   pruneOlder(state.index.agentStreams, floor);
   pruneOlder(state.index.prOpeners, floor);
+  pruneProgress(state, floor);
   pruneBranches(state.board.branches, now);
 };
 
@@ -6988,6 +7366,10 @@ var onToolPre2 = (state, event, config, touched) => {
   }
   if (EDIT_TOOLS.has(tool) && input.filePath) {
     onEditPre(state, run, agent, input.filePath, event, config);
+    noteEdit(state, agentKey, input.filePath, event.at);
+  }
+  if (tool === "Read" && input.filePath) {
+    noteRead(state, agentKey, input.filePath, event.at);
   }
   if (tool === "Agent" || tool === "Task") {
     onAgentPre(state, run, agentKey, event, config);
@@ -7049,6 +7431,9 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   if (verify.length > 0) {
     callIndex.verify = verify;
   }
+  if (match && match.kinds.length > 0) {
+    noteVerification(state, agent.id, event.at);
+  }
   const own = agent.id === "main" ? mainOf(state, event.sessionId) : void 0;
   const mainVerify = own ? countMainVerification(own, match, config.budgets.warnAt) : [];
   if (mainVerify.length > 0) {
@@ -7080,6 +7465,9 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   }
   if (agent.id === "main" && runsGitWork(command)) {
     callIndex.gitWork = true;
+  }
+  if (agent.id !== "main" && agent.stage === "pr" && runsGitPush(command)) {
+    callIndex.gitPush = true;
   }
   if (/\bgh\s+pr\s+create\b/.test(command)) {
     const head = prHead(command);
@@ -7190,6 +7578,7 @@ var onToolEnd = (state, event, config, touched) => {
       startRoleStageAtEnd(state, run, spawned, event, config);
       finalizeAgent(run, spawned, event, config);
       endCopies(state, run, spawned, event, config);
+      endProgress(state, spawned.id);
     }
     if (spawn3) {
       retireSpawn(state, spawn3.toolUseId);
@@ -7211,6 +7600,9 @@ var onToolEnd = (state, event, config, touched) => {
   }
   if (index?.gitWork && succeeded) {
     noteBranchWork(state, event.sessionId, run, "git", event.at);
+  }
+  if (index?.gitPush && succeeded) {
+    notePush(state, agentKey, event.at);
   }
   if (index?.rebase && succeeded && !isTrunkLike(run.branch, config)) {
     run.rebases.push({ at: event.at, sessionId: event.sessionId });
@@ -7270,11 +7662,17 @@ var onPrCreated = (state, run, index, event, call, succeeded, touched, config) =
   if (target && number !== void 0) {
     openPr(target, { number, url, title, createdAt: event.at }, event, config);
   }
+  if (succeeded) {
+    notePrCreated(state, index.agentKey, event.at);
+  }
   const landed = run.branch === "?" ? void 0 : run.branch;
   const branch = index.prHead ? target?.branch ?? index.prHead : landed;
   if (succeeded && branch) {
     const opener = { agentId: index.agentKey, sessionId: event.sessionId, at: event.at, atMs: time(event.at) };
     notePrOpener(state, branch, number === void 0 ? opener : { ...opener, number });
+  }
+  if (target?.pr) {
+    notePrKnown(state, target, event.at, config);
   }
   if (target && target !== run) {
     touched.push(target);
@@ -7475,6 +7873,7 @@ var createState = (config) => ({
     rankKeys: {},
     rankDirty: {},
     agentSessions: {},
+    agentProgress: {},
     branchSessions: {},
     prOpeners: {}
   }
@@ -7649,6 +8048,9 @@ var applyEvent = (state, event, config) => {
     case "git.fact":
       if (event.data.kind === "worktree-removed") {
         touched = onWorktreeRemoved(state, event.data, event.at);
+      } else if (event.data.kind === "diff") {
+        const home = applyDiff(state, event.data, event.at, event.truncated === true);
+        touched = home ? [home] : [];
       } else {
         touched = onGitFact(state, event.data, config);
       }
@@ -9245,6 +9647,7 @@ var createStore = (config, options = {}) => {
       return board;
     },
     state: current,
+    peek: () => live,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -9686,10 +10089,11 @@ export {
   waitForBoard,
   MAC_APP_BROWSERS,
   LINUX_APP_BROWSERS,
-  MAC_OPEN,
   UNTIL_EXIT,
   launch,
   resolveCommand,
+  writeSignInFile,
+  SignInFileError,
   openAppWindow,
   patternInput,
   linearRegExp,
@@ -9725,17 +10129,21 @@ export {
   isBlockError,
   time,
   compareText,
+  ownValue,
+  ownEntry,
   literalWord,
   cdTarget,
   shellCode,
-  ownValue,
-  ownEntry,
+  roleConfig,
   isTrunkBranch,
   recordOf,
   sessionRunIds,
   sessionsAffected,
   worktreeAddOfCommand,
+  STALE_AGENT_MS,
+  PROGRESS_ITEMS_CAP,
   promoteCarries,
+  roleStageStarted,
   MAIN_AGENT,
   displayState,
   VERIFY_KINDS,

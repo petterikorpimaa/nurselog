@@ -8,7 +8,7 @@ import { Agent, request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { FAILURE_ERROR_CHARS, keptStdout } from './verification.mjs';
 
 export const HOOK_DEFAULTS = { spool: { dir: '~/.local/share/nurselog', maxLineBytes: 65536, keepDays: 14 } };
@@ -1883,10 +1883,13 @@ export const LINUX_LAUNCH_GRACE_MS = 300;
  * Runs the program at the absolute path `command` with an argument array, never through a shell, as a detached child
  * with stdio ignored, unreferenced once it has an answer. Resolves whether it opened: false when it fails to spawn or
  * exits non-zero within `waitMs` (`UNTIL_EXIT`: until it exits), true when it exits 0 or still runs after `waitMs`.
- * `env` and `cwd` are the child's, the caller's own by default.
+ * `env` and `cwd` are the child's, the caller's own by default. With `input` its stdin is a pipe that gets `input` and
+ * is closed, so a text the process list must not show (the URL of `nurselog open` for osascript) never enters argv; a
+ * write error of a child that exited first is dropped, and the exit code decides as without it.
  */
-export const launch = (command, args, waitMs, { env, cwd } = {}) => new Promise((done) => {
-  const child = spawn(command, args, { detached: true, stdio: 'ignore', env, cwd });
+export const launch = (command, args, waitMs, { env, cwd, input } = {}) => new Promise((done) => {
+  const stdio = input === undefined ? 'ignore' : ['pipe', 'ignore', 'ignore'];
+  const child = spawn(command, args, { detached: true, stdio, env, cwd });
   let timer;
   const finish = (opened) => {
     clearTimeout(timer);
@@ -1895,6 +1898,11 @@ export const launch = (command, args, waitMs, { env, cwd } = {}) => new Promise(
   };
   child.once('error', () => finish(false));
   child.once('exit', (code) => finish(code === 0));
+  if (input !== undefined) {
+    // EPIPE of a child that exits before it reads its stdin: its exit code already says whether it opened.
+    child.stdin?.on('error', () => undefined);
+    child.stdin?.end(input);
+  }
   if (Number.isFinite(waitMs)) {
     child.once('spawn', () => {
       timer = setTimeout(() => finish(true), waitMs);
@@ -1924,19 +1932,110 @@ export const resolveCommand = (command, path = process.env.PATH ?? '') => {
 /** The places an application is looked for on macOS: `/Applications` and the user's own `~/Applications`. */
 const macAppPaths = (browser) => [`/Applications/${browser}.app`, join(homedir(), 'Applications', `${browser}.app`)];
 
+/** How long a sign-in file is kept: the 60 s a sign-in ticket is valid (`TICKET_MS` of `src/server/http.ts`; design section 9, "Sign-in"). */
+const SIGN_IN_FILE_MS = 60_000;
+
+/** The names `writeSignInFile` gives: `signin-` and 16 base64url characters (12 random bytes). */
+const SIGN_IN_FILE = /^signin-[\w-]{16}\.html$/;
+
+/** `text` with the characters that end or open an HTML attribute or element written as character references. */
+const escapeHtml = (text) => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+/**
+ * Removes the sign-in files of `root` older than `SIGN_IN_FILE_MS` at `now`: regular files only (by `lstat`) under the
+ * names `writeSignInFile` gives, so nothing else in the root is touched. Their tickets are used or expired; a file that
+ * cannot be removed stays and is tried again at the next sign-in.
+ */
+const sweepSignInFiles = (root, now) => {
+  let names;
+  try {
+    names = readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names.filter((entry) => SIGN_IN_FILE.test(entry))) {
+    const path = join(root, name);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isFile() && now - stat.mtimeMs > SIGN_IN_FILE_MS) {
+        unlinkSync(path);
+      }
+    } catch {
+      // A sign-in file that cannot be removed stays until the next sign-in.
+    }
+  }
+};
+
+/**
+ * Writes the sign-in file of the ticket URL `signIn` (design section 9, "Sign-in") and returns its `file://` URL: a
+ * page that only redirects to `signIn` with a meta refresh (no script, so the ticket is redeemed once) and links to it,
+ * at `<root>/signin-<12 random bytes base64url>.html` with mode 0600 in the private root (`writePrivate`). A browser
+ * opened on the file URL redeems the ticket without the ticket in any argv. It first removes the sign-in files older
+ * than 60 s (`sweepSignInFiles`), so no timer is needed. Throws when the root or the file cannot be written.
+ */
+export const writeSignInFile = (signIn, { root = defaultRoot(), now = Date.now() } = {}) => {
+  ensurePrivateDir(root);
+  sweepSignInFiles(root, now);
+  const path = join(root, `signin-${randomBytes(12).toString('base64url')}.html`);
+  const target = escapeHtml(signIn);
+  const head = `<meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><title>Nurselog</title>`;
+  const body = `<a href="${target}">Open the Nurselog board</a>`;
+  writePrivate(path, `<!doctype html>\n<html><head>${head}</head>\n<body>${body}</body></html>\n`);
+  return pathToFileURL(path).href;
+};
+
+/** The error `openAppWindow` throws when the sign-in file cannot be written; `reason` is the message of the failed write. */
+export class SignInFileError extends Error {
+  constructor(cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(`the sign-in file could not be written (${reason})`, { cause });
+    this.name = 'SignInFileError';
+    this.reason = reason;
+  }
+}
+
+/** Whether `url` carries a `ticket` query parameter; a URL that does not parse counts when it holds `ticket=` anywhere. */
+const carriesTicket = (url) => (URL.canParse(url) ? new URL(url).searchParams.has('ticket') : url.includes('ticket='));
+
+/** Where snapd puts its commands: `/snap/bin` on Debian and Ubuntu, `/var/lib/snapd/snap/bin` on Fedora, Arch and openSUSE. */
+const SNAP_ROOTS = ['/snap/', '/var/lib/snapd/snap/'];
+
+/** Whether a Linux browser is a snap, by its resolved path: snap confinement cannot read the hidden root of the sign-in file. */
+const isSnap = (command) => SNAP_ROOTS.some((root) => command.startsWith(root));
+
 /**
  * Opens `url` in an app window (a Chromium window without tabs or address bar) of the first browser that launches,
  * shared by `nurselog open --app` and the SessionStart hook: on macOS `/usr/bin/open -na <App> --args --app=<url>` for
  * each of `MAC_APP_BROWSERS` whose `<App>.app` exists in `/Applications` or `~/Applications` (the others are skipped,
  * so `open` never shows its error dialog for an application that is not there), else the first of `LINUX_APP_BROWSERS`
  * found on PATH that does not exit non-zero within `LINUX_LAUNCH_GRACE_MS`. Returns the browser's name, or undefined
- * when none launched. `deps` replaces the platform and the machine calls, so a test opens nothing; `launchOptions`
- * (`env` and `cwd`) goes to every `launch`.
+ * when none launched. A `url` with a `ticket` reaches the browser as the `file://` URL of a sign-in file
+ * (`signInFile`, by default `writeSignInFile`), written at the first launch that needs it and at most once, so no
+ * argv carries the ticket; only a Linux snap browser, which cannot read that file, gets `url` itself. When the file
+ * cannot be written it launches nothing more and throws a `SignInFileError`. `deps` replaces the platform and the
+ * machine calls, so a test opens nothing; `launchOptions` (`env` and `cwd`) goes to every `launch`.
  */
-export const openAppWindow = async (url, { platform = process.platform, launch: run = launch, resolve: find = resolveCommand, exists = existsSync, launchOptions } = {}) => {
+export const openAppWindow = async (url, deps = {}) => {
+  const { platform = process.platform, launch: run = launch, resolve: find = resolveCommand, exists = existsSync, launchOptions } = deps;
+  const signInFile = deps.signInFile ?? ((target) => writeSignInFile(target));
+  const ticketed = carriesTicket(url);
+  let fileUrl;
+  const signInUrl = () => {
+    if (!ticketed) {
+      return url;
+    }
+    if (fileUrl === undefined) {
+      try {
+        fileUrl = signInFile(url);
+      } catch (error) {
+        throw new SignInFileError(error);
+      }
+    }
+    return fileUrl;
+  };
   if (platform === 'darwin') {
     for (const browser of MAC_APP_BROWSERS.filter((name) => macAppPaths(name).some((path) => exists(path)))) {
-      if (await run(MAC_OPEN, ['-na', browser, '--args', `--app=${url}`], UNTIL_EXIT, launchOptions)) {
+      if (await run(MAC_OPEN, ['-na', browser, '--args', `--app=${signInUrl()}`], UNTIL_EXIT, launchOptions)) {
         return browser;
       }
     }
@@ -1944,7 +2043,11 @@ export const openAppWindow = async (url, { platform = process.platform, launch: 
   }
   for (const browser of LINUX_APP_BROWSERS) {
     const command = find(browser);
-    if (command !== undefined && (await run(command, [`--app=${url}`], LINUX_LAUNCH_GRACE_MS, launchOptions))) {
+    if (command === undefined) {
+      continue;
+    }
+    const target = isSnap(command) ? url : signInUrl();
+    if (await run(command, [`--app=${target}`], LINUX_LAUNCH_GRACE_MS, launchOptions)) {
       return browser;
     }
   }
@@ -1964,7 +2067,8 @@ const openByHand = (cli) => cliCommand(undefined, 'open --app', cli);
  * The line a SessionStart that has started the board adds to its message when `env.NURSELOG_AUTO_OPEN` is `app`
  * (design section 9), after it opened `url` in an app window: undefined when the variable is anything else, or when
  * the window launched; else why none did and the command that opens it by hand. The window opens the sign-in URL
- * `signIn(url)` gives (by default a ticket URL of `signInBoard`, else `url`), so it signs in; the lines name `url`
+ * `signIn(url)` gives (by default a ticket URL of `signInBoard`, else `url`), so it signs in, through the sign-in file
+ * of `openAppWindow`; when that file cannot be written no window opens and the line says so. The lines name `url`
  * without a ticket. The browser runs with `launchOptions`,
  * by default the board's environment (`boardEnv`, without the session's variables) in the home directory, because it
  * outlives the session. It waits at most `waitMs` for the launch, so a slow browser never holds the hook past its
@@ -1996,7 +2100,10 @@ export const autoOpenLine = async (url, options = {}) => {
       return `No app window opened: no Chromium browser launched (tried ${tried.join(', ')}); open one with: ${byHand}`;
     }
     return undefined;
-  } catch {
+  } catch (error) {
+    if (error instanceof SignInFileError) {
+      return `No app window opened: ${error.message}; open one with: ${byHand}`;
+    }
     return `No app window opened: the launch failed; open one with: ${byHand}`;
   } finally {
     clearTimeout(timer);

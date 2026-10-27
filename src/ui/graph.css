@@ -1,7 +1,7 @@
 /* The graph of a card (design section 15), ported from the graph styles of reference/demo.html. Items take their
    colour from `--c` (set by the scene). Continuous motion: the running ring and the flowing edges of work in progress
-   on the run graph; on the session graph a quiet running ring and the pulses of things waiting on the developer.
-   board.css turns all motion off for reduced motion. */
+   on the run graph; on the session graph the running orbit of a running node and the pulses of things waiting on the
+   developer. board.css turns all motion off for reduced motion. */
 
 /* The scene sizes the SVG in pixels (one board-wide scale per layout unit, scene.ts); a wider graph scrolls in its host.
    The host's top padding keeps the halo of a "?" on the plan gate unclipped. */
@@ -54,8 +54,6 @@
 /* the part the pop and the finish sweep scale (scene.ts, element.animate) */
 .node .node-core { transform-box: fill-box; transform-origin: center; }
 @keyframes graph-ring { 0% { r: 11; opacity: .9; } 100% { r: 19; opacity: 0; } }
-/* the session graph's running ring: weaker than the waiting pulse (peak .45 against .9, 6 growth against 8) and slower */
-@keyframes graph-ring-quiet { 0% { r: 11; opacity: .45; } 100% { r: 17; opacity: 0; } }
 
 /* package pills */
 .pill rect { fill: color-mix(in srgb, var(--c) 15%, var(--card)); stroke: color-mix(in srgb, var(--c) 55%, transparent); stroke-width: 1; }
@@ -120,7 +118,8 @@
 
 /* The session graph (design section 15, "Session stage map"; SC20): its own wrapper, never scrolled; the SVG is sized
    by the fit's scale (fit.ts). No edge flow: a running node is filled with its mark and its edge solid, a stale one
-   grey. A running node in a turn has a quiet ring in its own colour; what waits for the developer pulses stronger. */
+   grey. A running node in a turn has the running orbit, a turning dashed circle in its own colour; what waits for the
+   developer pulses. */
 .session-graph { padding-top: 10px; overflow: visible; }
 /* clipped only while a fold tween runs, so the items that leave do not draw below the shrinking graph */
 .session-graph .graph.tweening { overflow: hidden; }
@@ -138,8 +137,37 @@
 .session-graph .node.idle .node-letter { fill: var(--c); }
 .session-graph .node.idle .node-mark { color: var(--c); }
 .session-graph .node.waiting .node-ring { fill: none; stroke: var(--you); stroke-width: 1.2; animation: graph-ring 1.8s ease-out infinite; }
-/* the quiet running ring (the scene draws it only on a running node in a turn); opacity 0 keeps it unseen where the animation is off */
-.session-graph .node.running .node-ring { stroke-width: 1; opacity: 0; animation: graph-ring-quiet 2.4s ease-out infinite; }
+/* the running orbit (nodes.ts draws it only on a running node in a turn): 12 dashes at 3 outside the node, a turn
+   every 7 s, and a fade in once when it is drawn (a new orbit element: a turn start, a node turning running); a node
+   new in the update holds it unseen until its pop (scene.ts). Where the animation is off it stays, still */
+.session-graph .node-orbit {
+  fill: none; stroke: var(--c); stroke-width: 1.3; stroke-opacity: .8; stroke-dasharray: 2.2 1.8;
+  transform-box: fill-box; transform-origin: center; animation: graph-orbit 7s linear infinite, graph-orbit-in .55s ease-out;
+}
+@keyframes graph-orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes graph-orbit-in { from { opacity: 0; } }
+/* the progress ring (progress-ring.ts, decisions 131 and 134): in place of the orbit on a running subagent's node whose
+   estimate is known, at the orbit's radius; done parts solid in the node's colour, the rest at .2, butt caps so the
+   gaps stay open. It fades in once as the orbit does; a part turning done or back moves its opacity in 300 ms, the one
+   arc's end eases to its new angle in 300 ms. The light, a dash of 34 of 100, travels its arc at one angular speed
+   (its duration and phase are inline); a full ring dims its parts to .45 under it. Held still (reduced motion) the
+   light is the current part drawn whole at .55, and none on one arc or a full ring. The typical ticks are still */
+.session-graph .node-progress { animation: graph-orbit-in .55s ease-out; }
+.session-graph .node-progress path, .session-graph .node-progress circle { fill: none; stroke-linecap: butt; }
+.session-graph .progress-part, .session-graph .progress-track, .session-graph .progress-done, .session-graph .progress-light { stroke: var(--c); stroke-width: 1.8; }
+.session-graph .progress-part, .session-graph .progress-track { stroke-opacity: .2; }
+.session-graph .progress-part { transition: stroke-opacity .3s; }
+.session-graph .progress-part.done { stroke-opacity: 1; }
+.session-graph .progress-done { transition: stroke-dasharray .3s var(--ease), stroke-opacity .3s; }
+.session-graph .node-progress.full:not(.still) .progress-part.done, .session-graph .node-progress.full:not(.still) .progress-done { stroke-opacity: .45; }
+.session-graph .progress-light { stroke-dasharray: 34 100; animation: graph-progress-light 1.4s cubic-bezier(.4, 0, .2, 1) infinite; }
+.session-graph .node-progress.still .progress-light { stroke-dasharray: none; stroke-opacity: .55; animation: none; }
+.session-graph .progress-tick { stroke: var(--fg-3); stroke-width: 1.2; }
+@keyframes graph-progress-light { from { stroke-dashoffset: 34; } to { stroke-dashoffset: -100; } }
+/* the done sheen (nodes.ts, scene.ts): a band of light in the foreground colour that crosses a finished subagent's node
+   once; the band is an alpha mask, so its stops need only their opacity */
+.session-graph .node-sheen { pointer-events: none; }
+.session-graph .node-sheen-light { fill: var(--fg); }
 /* a node's hit area, 5 wider than the node */
 .session-graph .node .node-hit { fill: transparent; }
 /* a folded pipeline's compact row: lighter pills with 10 px text */

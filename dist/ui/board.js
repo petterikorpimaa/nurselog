@@ -686,6 +686,7 @@ var createContext = (config, now, root = document.documentElement) => {
     github: { polling: false, accountOk: false },
     runs: {},
     sessions: {},
+    typical: {},
     repositoryId: ""
   };
 };
@@ -880,6 +881,10 @@ var VERIFICATION_FAIL_PATTERNS = Object.freeze({
 var time = (at) => Date.parse(at);
 var compareText = (a, b) => Number(a > b) - Number(a < b);
 var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|test|perf|build|ci)\//, "");
+var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
+
+// src/model/progress.ts
+var PHASE_SHARES = { build: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
 
 // src/model/retention.ts
 var PRUNE_EVERY_MS = 60 * 1e3;
@@ -1116,12 +1121,12 @@ var graphLayout = (run, options) => {
   const fixKeys = [...new Set(run.fixes.map(keys.fixKey))];
   const newestFix = new Map(run.fixes.map((fix) => [keys.fixKey(fix), fix]));
   const reviewerMarks = new Map(run.reviewers.map((reviewer) => [reviewer.id, markOf(reviewer.model, options)]));
-  const reviewerSub = (round3) => round3 > 1 ? `r${round3}` : "";
+  const reviewerSub = (round4) => round4 > 1 ? `r${round4}` : "";
   const openQuestions = run.questions.filter((question) => question.state === "open");
   const asksReviewer = (question, id) => question.node.kind === "reviewer" && question.node.id === id;
   const reviewerQuestions = (id) => openQuestions.filter((question) => asksReviewer(question, id)).length;
-  const labelEnd = (id, round3) => {
-    const sub = reviewerSub(round3);
+  const labelEnd = (id, round4) => {
+    const sub = reviewerSub(round4);
     return 20 + (id.length + (sub ? sub.length + 1 : 0)) * CHAR;
   };
   const labelEnds = new Map(run.reviewers.map((reviewer) => [reviewer.id, labelEnd(reviewer.id, reviewer.round)]));
@@ -2071,7 +2076,7 @@ var createBranchesOverview = (host, context, link) => {
       tip.classList.remove("on");
     }
   };
-  const pointAt = (event) => {
+  const pointAt2 = (event) => {
     const box = root.getBoundingClientRect();
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   };
@@ -2094,14 +2099,14 @@ var createBranchesOverview = (host, context, link) => {
       }
       hovered = target;
       labels = /* @__PURE__ */ new Map();
-      pointer = pointAt(event);
+      pointer = pointAt2(event);
       applyHover();
       placeTip();
       link?.hover(source);
     });
     element.addEventListener("pointermove", (event) => {
       if (hovered !== void 0) {
-        pointer = pointAt(event);
+        pointer = pointAt2(event);
         placeTip();
       }
     });
@@ -2400,6 +2405,7 @@ var DOT_STAGGER = 150;
 var DOT_MS = 850;
 var FAN_DELAY = 500;
 var FAN_STAGGER = 120;
+var POP_MS2 = 550;
 var NONE = { pops: [], dots: [], sweep: false };
 var isActive2 = (state) => state === "running" || state === "waiting";
 var hasLeftPending = (state) => state !== "pending" && state !== "skipped";
@@ -2804,16 +2810,240 @@ var bubbleItems = (targets) => [...targets].map(([target, { at, questions }]) =>
   return { kind: "bubble", key: keys.bubble(target), at, questionIds: questionIds2, blocking, quiet, summary: bubbleSummary(questions) };
 });
 
+// src/ui/graph/progress-ring.ts
+var RING_PARTS = 8;
+var PHASE_NAMES = { build: ["read", "edit", "verify"], pr: ["push", "open the PR", "finish"] };
+var LONGEST_RUNS = 9;
+var RING_GAP = 3;
+var TICK_FROM = 4.5;
+var TICK_TO = 6;
+var PART_GAP = 9.6 / 360;
+var LIGHT_SECONDS_PER_TURN = 1.4 * (360 / 72);
+var LIGHT_MIN_SECONDS = 1.4;
+var LIGHT_MAX_SECONDS = 5;
+var RING_IN = [{ opacity: 0 }, { opacity: 1 }];
+var RING_IN_MS = 550;
+var isPhase = (kind) => kind === "build" || kind === "pr";
+var isCount = (value2) => typeof value2 === "number" && Number.isFinite(value2) && value2 >= 0;
+var partsOf = (progress) => {
+  const flags = progress.parts;
+  const valid = Array.isArray(flags) && flags.length >= 1 && flags.length <= RING_PARTS && flags.every((flag) => typeof flag === "boolean");
+  if (!valid) {
+    return void 0;
+  }
+  const phases = isPhase(progress.kind) ? PHASE_SHARES[progress.kind] : void 0;
+  const shares = phases !== void 0 && phases.length === flags.length ? phases : flags.map(() => 1 / flags.length);
+  return flags.map((done, index) => ({ share: shares[index], done }));
+};
+var currentOf = (progress, count) => {
+  const current = progress.current;
+  return current !== void 0 && Number.isInteger(current) && current >= 0 && current < count ? current : void 0;
+};
+var progressText = (progress, current) => {
+  const { kind, done, total } = progress;
+  if (kind === "files") {
+    return `Changed files: ${done} of ${total} opened`;
+  }
+  if (kind === "fixes") {
+    return `Fix items: ${done} of ${total} edited`;
+  }
+  const names = PHASE_NAMES[kind];
+  const phase = current ?? Math.min(done, names.length - 1);
+  return `Phase ${phase + 1} of ${names.length}: ${names[phase]}`;
+};
+var fromProgress = (progress) => {
+  const { kind, total, done } = progress;
+  const known = isPhase(kind) || kind === "files" || kind === "fixes";
+  const valid = known && Number.isInteger(total) && total >= 1 && Number.isInteger(done) && done >= 0 && done <= total;
+  if (!valid || kind === "files" && done === 0) {
+    return void 0;
+  }
+  const current = currentOf(progress, isPhase(kind) ? PHASE_NAMES[kind].length : total);
+  const text2 = progressText(progress, current);
+  const parts = partsOf(progress);
+  if (parts === void 0) {
+    return { kind: "arc", done: done / total, text: text2 };
+  }
+  return current !== void 0 && current < parts.length ? { kind: "parts", parts, current, text: text2 } : { kind: "parts", parts, text: text2 };
+};
+var isTypicalLength = (value2) => {
+  if (typeof value2 !== "object" || value2 === null) {
+    return false;
+  }
+  const { runs, p25, p75, p90 } = value2;
+  return isCount(runs) && isCount(p25) && isCount(p75) && isCount(p90) && p90 >= 1;
+};
+var typicalText = (used, length) => {
+  const calls = `${used} tool call${used === 1 ? "" : "s"}`;
+  if (used > length.p90 && length.runs <= LONGEST_RUNS) {
+    return `${calls}, longer than all ${length.runs} earlier runs (the longest ${length.p90})`;
+  }
+  if (used > length.p90) {
+    return `${calls}, longer than usual: at least 90 % of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
+  }
+  const range = length.p25 === length.p75 ? `${length.p25}` : `${length.p25} to ${length.p75}`;
+  return `${calls}, usually ${range} (${length.runs} earlier runs)`;
+};
+var fromTypical = (agent, typical) => {
+  const firstLeg = agent.resumedAt === void 0 && agent.budget.toolCallsAtFirstStop === void 0;
+  const length = typical !== void 0 && firstLeg ? ownValue(typical, agent.role) : void 0;
+  if (!isTypicalLength(length)) {
+    return void 0;
+  }
+  const used = isCount(agent.budget.toolCalls.used) ? agent.budget.toolCalls.used : 0;
+  const text2 = typicalText(used, length);
+  const ticks = [...new Set([length.p25, length.p75].map((calls) => Math.min(calls / length.p90, 1)))];
+  return { kind: "arc", done: Math.min(used / length.p90, 1), ticks, text: text2 };
+};
+var progressRing = (agent, typical) => {
+  if (agent.id === "main") {
+    return void 0;
+  }
+  const own = agent.progress === void 0 ? void 0 : fromProgress(agent.progress);
+  return own ?? fromTypical(agent, typical);
+};
+var round2 = (value2) => String(Math.round(value2 * 100) / 100);
+var pointAt = (r, share2) => {
+  const angle = share2 * 2 * Math.PI;
+  return `${round2(r * Math.sin(angle))} ${round2(-r * Math.cos(angle))}`;
+};
+var arcPath = (r, from, to) => {
+  const radii = `${round2(r)} ${round2(r)}`;
+  if (to - from >= 1) {
+    return `M${pointAt(r, from)} A${radii} 0 1 1 ${pointAt(r, from + 0.5)} A${radii} 0 1 1 ${pointAt(r, from)} Z`;
+  }
+  const large = to - from > 0.5 ? 1 : 0;
+  return `M${pointAt(r, from)} A${radii} 0 ${large} 1 ${pointAt(r, to)}`;
+};
+var tickPath = (radius, share2) => `M${pointAt(radius + TICK_FROM, share2)} L${pointAt(radius + TICK_TO, share2)}`;
+var partArcs = (parts) => {
+  if (parts.length === 1) {
+    return [{ from: 0, to: 1 }];
+  }
+  const arcs = [];
+  let start2 = 0;
+  for (const part of parts) {
+    arcs.push({ from: start2 + PART_GAP / 2, to: start2 + part.share - PART_GAP / 2 });
+    start2 += part.share;
+  }
+  return arcs;
+};
+var lightArc = (ring) => {
+  if (ring.kind === "parts") {
+    return ring.current === void 0 ? { from: 0, to: 1 } : partArcs(ring.parts)[ring.current];
+  }
+  return ring.done > 0 && ring.done < 1 ? { from: ring.done, to: 1 } : { from: 0, to: 1 };
+};
+var isFull = (ring) => ring.kind === "parts" ? ring.parts.every((part) => part.done) : ring.done >= 1;
+var lightSeconds = (arc) => Math.min(LIGHT_MAX_SECONDS, Math.max(LIGHT_MIN_SECONDS, (arc.to - arc.from) * LIGHT_SECONDS_PER_TURN));
+var keyPhase = (key) => {
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = Math.imul(hash, 31) + key.charCodeAt(index) >>> 0;
+  }
+  return hash % 1e3 / 1e3;
+};
+var shapeOf = (ring, radius) => {
+  if (ring.kind === "parts") {
+    return `parts|${radius}|${ring.parts.map((part) => round2(part.share)).join(" ")}`;
+  }
+  return `arc|${radius}|${ring.ticks?.length ?? 0}`;
+};
+var childrenOf = (group, name) => [...group.children].filter((child) => child.classList.contains(name));
+var pendingArcs = /* @__PURE__ */ new WeakMap();
+var setStyle = (element, name, value2) => {
+  if (element.style.getPropertyValue(name) !== value2) {
+    element.style.setProperty(name, value2);
+  }
+};
+var setAttribute = (element, name, value2) => {
+  if (element.getAttribute(name) !== value2) {
+    element.setAttribute(name, value2);
+  }
+};
+var drawLight = (arc, r, phase) => {
+  const seconds = lightSeconds(arc);
+  const light = svgEl("path", { class: "progress-light", d: arcPath(r, arc.from, arc.to), pathLength: 100 });
+  light.style.setProperty("animation-duration", `${round2(seconds)}s`);
+  light.style.setProperty("animation-delay", `${round2(-phase * seconds)}s`);
+  light.addEventListener("animationiteration", () => {
+    const next = pendingArcs.get(light);
+    if (next !== void 0) {
+      light.parentNode?.insertBefore(drawLight(next.arc, next.r, 0), light);
+      light.remove();
+    }
+  });
+  return light;
+};
+var drawShape = (ring, radius) => {
+  const r = radius + RING_GAP;
+  if (ring.kind === "parts") {
+    return partArcs(ring.parts).map((arc) => svgEl("path", { class: "progress-part", d: arcPath(r, arc.from, arc.to) }));
+  }
+  const ticks = (ring.ticks ?? []).map((share2) => svgEl("path", { class: "progress-tick", d: tickPath(radius, share2) }));
+  return [...ticks, svgEl("circle", { class: "progress-track", r: round2(r) }), svgEl("path", { class: "progress-done", d: arcPath(r, 0, 1), pathLength: 100 })];
+};
+var placeLight = (group, ring, draw2) => {
+  const light = childrenOf(group, "progress-light")[0];
+  const wanted = !draw2.still || ring.kind === "parts" && ring.current !== void 0;
+  if (!wanted) {
+    light?.remove();
+    return;
+  }
+  const r = draw2.radius + RING_GAP;
+  const arc = lightArc(ring);
+  const d = arcPath(r, arc.from, arc.to);
+  if (light === void 0) {
+    group.append(drawLight(arc, r, keyPhase(draw2.key)));
+  } else if (light.getAttribute("d") === d) {
+    pendingArcs.delete(light);
+  } else if (draw2.still) {
+    light.setAttribute("d", d);
+    pendingArcs.delete(light);
+  } else {
+    pendingArcs.set(light, { arc, r });
+  }
+};
+var updateProgressRing = (group, ring, draw2) => {
+  const shape = shapeOf(ring, draw2.radius);
+  const previous = group.dataset.shape;
+  if (previous !== shape) {
+    group.dataset.shape = shape;
+    group.replaceChildren(...drawShape(ring, draw2.radius));
+    if (previous !== void 0 && !draw2.still) {
+      group.animate(RING_IN, { duration: RING_IN_MS, easing: "ease-out" });
+    }
+  }
+  group.classList.toggle("full", isFull(ring));
+  group.classList.toggle("still", draw2.still);
+  if (ring.kind === "parts") {
+    childrenOf(group, "progress-part").forEach((part, index) => part.classList.toggle("done", ring.parts[index]?.done === true));
+  } else {
+    const dash = ring.done >= 1 ? "none" : `${round2(ring.done * 100)} 100`;
+    childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", dash));
+    const ticks = ring.ticks ?? [];
+    childrenOf(group, "progress-tick").forEach((tick, index) => setAttribute(tick, "d", tickPath(draw2.radius, ticks[index] ?? 0)));
+  }
+  placeLight(group, ring, draw2);
+};
+var drawProgressRing = (ring, draw2) => {
+  const group = svgEl("g", { class: "node-progress" });
+  updateProgressRing(group, ring, draw2);
+  return group;
+};
+
 // src/ui/graph/session-layout.ts
 var GATE_Y = 22;
 var ROWS_TOP = 52;
 var ROW_MIN = 46;
-var REVIEWER_PITCH = 21;
+var REVIEWER_PITCH = 28;
 var STREAM_LANE2 = 46;
-var FIX_PITCH = 24;
+var FIX_PITCH = 30;
 var RE_REVIEW_ROOM = 26;
 var NODE_R = 10;
 var SMALL_R = 9;
+var LABEL_GAP = 8;
+var LABEL_BELOW = 15;
 var LABEL_ROW = 28;
 var SECOND_LABEL_ROW = 18;
 var CHAR2 = 6.4;
@@ -2825,18 +3055,17 @@ var RUN_STEP = 30;
 var LABELLED_RUN_STEP = 42;
 var FORK_STEP = 118;
 var AGENT_TOP = 36;
-var AGENT_STEP = 26;
+var AGENT_STEP = 28;
 var PLAN_REACH = 64;
 var PLAN_RIGHT = 56;
 var REVIEW_INSET = 34;
 var NATURAL = { plan: PLAN_REACH + PLAN_RIGHT, build: 96, join: 56, review: 90, fix: 96, pr: 84, merge: 84, promote: 84, docs: 84 };
-var CORNER2 = { dx: 13, dy: -14 };
 var GATE_BUBBLE = { dx: 21, dy: -8 };
 var LINK_TEXT = 40;
 var CONTINUED_DX = 14;
 var CONTINUED_GAP = 8;
 var LINE_GAP = 8;
-var LINE_B_LABELS = 4;
+var LINE_B_LABELS = 7;
 var LOOP_CLEAR = 5;
 var LOOP_ABOVE_SPLIT = 6;
 var FORK_LANE = 12;
@@ -2854,7 +3083,7 @@ var LANE_TURN = 16;
 var LANE_STEP = 4;
 var LANE_LEAST = 4;
 var NEST_TURN = LANE_STEP * TURN / TURN_REACH;
-var FIX_LABEL_DY = NODE_R + 12;
+var FIX_LABEL_DY = NODE_R + LABEL_BELOW;
 var TEXT_DESCENT = 3;
 var TEXT_ASCENT = 8;
 var PILL_LABEL = 14;
@@ -2874,7 +3103,7 @@ var HIT_LEFT = 16;
 var HIT_HALF = 14;
 var COMPACT_GAP = 6;
 var SUMMARY_GAP = 8;
-var CHECK_LABEL = 12;
+var CHECK_LABEL = DOT_R + LABEL_GAP;
 var PR_NUMBERS = 3;
 var HANDLED_CHECK_MS = 4e4;
 var CHECK_R = 7;
@@ -3102,7 +3331,22 @@ var buildWidth = (plan) => {
 };
 var sessionLayout = (session, options) => {
   const first = placeSession(session, options, { a: {}, b: {} });
-  return first.room === void 0 ? first.layout : placeSession(session, options, first.room).layout;
+  const layout = first.room === void 0 ? first.layout : placeSession(session, options, first.room).layout;
+  return withProgress(layout, session, options.typical);
+};
+var withProgress = (layout, session, typical) => {
+  const items = layout.items.map((item2) => {
+    const running = item2.kind === "node" && item2.state === "running" && item2.stale !== true && item2.idle !== true;
+    const agentId = running ? item2.agentId : void 0;
+    const agent = agentId !== void 0 && agentId !== "main" ? ownValue(session.agents, agentId) : void 0;
+    const ring = agent !== void 0 && agent.staleSince === void 0 ? progressRing(agent, typical) : void 0;
+    if (item2.kind !== "node" || agent === void 0 || ring === void 0) {
+      return item2;
+    }
+    return { ...item2, progress: ring, tip: `${agent.role}
+${ring.text}` };
+  });
+  return { ...layout, items };
 };
 var placeSession = (session, options, room) => {
   const items = [];
@@ -3264,15 +3508,15 @@ var placeSession = (session, options, room) => {
   const height = body + LABEL_ROW + (wrap ? SECOND_LABEL_ROW : 0);
   const planLabels = ["main", ...current.agents.map((id) => session.agents[id]?.role ?? "")];
   const sideLabels = planAgents.filter((id) => !current.agents.includes(id)).map((id) => session.agents[id]?.role ?? "");
-  const sideReach = AGENT_SIDE + SMALL_R + 5 + Math.max(0, ...sideLabels.map(textWidth)) + 6;
-  const mainReach = Math.ceil(NODE_R + 5 + Math.max(...planLabels.map(textWidth)) + 6);
+  const sideReach = AGENT_SIDE + SMALL_R + LABEL_GAP + Math.max(0, ...sideLabels.map(textWidth)) + 6;
+  const mainReach = Math.ceil(NODE_R + LABEL_GAP + Math.max(...planLabels.map(textWidth)) + 6);
   const planReach = Math.max(PLAN_REACH, mainReach, sideLabels.length > 0 ? Math.ceil(sideReach) : 0);
   const reviewLabels = rows.flatMap((row2) => row2.reviewers.map((reviewer) => textWidth(reviewerLabel(reviewer))));
   const fixLabelOf = (agentId) => agentId === "main" ? "main thread" : session.agents[agentId]?.role ?? "fix";
   const belowLabels = rows.filter((row2) => row2.fixes.length === 1).map((row2) => textWidth(fixLabelOf(row2.fixes[0].agentId)));
   const besideLabels = rows.filter((row2) => row2.fixes.length > 1).flatMap((row2) => row2.fixes.map((fix) => textWidth(fixLabelOf(fix.agentId))));
   const fixLeft = Math.max(NATURAL.fix / 2, ...belowLabels.map((width2) => width2 / 2 + 12));
-  const fixRight = Math.max(fixLeft, ...besideLabels.map((width2) => NODE_R + 5 + width2 + 12));
+  const fixRight = Math.max(fixLeft, ...besideLabels.map((width2) => NODE_R + LABEL_GAP + width2 + 12));
   const mergeLabels = rows.filter(mergeDrawn).map((row2) => textWidth(mergeText(session, row2)));
   const mergeRowsDrawn = rows.filter(mergeDrawn);
   const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf(row2.pipeline) === current) ?? mergeRowsDrawn[0];
@@ -3306,8 +3550,9 @@ var placeSession = (session, options, room) => {
   const planState = session.plan.state === "idle" ? "running" : session.plan.state;
   const idle = session.plan.state === "idle" ? { idle: true } : {};
   add({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R, agentId: "main", ...idle, ...slide2("plan", planAt) });
-  add({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R + 5), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
+  add({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R + LABEL_GAP), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
   const agentKeys = /* @__PURE__ */ new Map([["main", sessionKeys.plan]]);
+  const labelledRight = /* @__PURE__ */ new Set();
   if (multi) {
     for (const group of groups2) {
       const base = { pipeline: group.index };
@@ -3354,7 +3599,7 @@ ${FOLD_HINT}` : label };
       const dot = { edges: [`edge:agent:${agentId}`], when: "start", color: "shared", back: true };
       add({ kind: "node", key, at, state: agent.state, color: "shared", mark: markOf(agent.model, options), radius: SMALL_R, stale, ...base, from: { key: anchor.key }, dot });
       const tone2 = isActive3(agent.state) ? "reviewer" : "reviewer-dim";
-      add({ kind: "text", key: `text:agent:${agentId}`, at: { key, dx: -(SMALL_R + 5), dy: 3.5 }, text: agent.role, tone: tone2, anchor: "end", ...base });
+      add({ kind: "text", key: `text:agent:${agentId}`, at: { key, dx: -(SMALL_R + LABEL_GAP), dy: 3.5 }, text: agent.role, tone: tone2, anchor: "end", ...base });
     });
   }
   const forkRunKey = (plan) => {
@@ -3445,7 +3690,7 @@ ${FOLD_HINT}` : label };
         const dot = { edges: [inKey], when: "start", color: laneColor, ...last ? { out: [joinEdge] } : {} };
         add({ kind: "node", key, at, state: run.state, color: laneColor, mark, radius: NODE_R, stale: run.stale, ...nodeBase, from: { key: previousKey }, dot });
         if (index > 0) {
-          add({ kind: "text", key: `text:run:${run.agentId}`, at: { key, dy: -(NODE_R + 5) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
+          add({ kind: "text", key: `text:run:${run.agentId}`, at: { key, dy: -(NODE_R + LABEL_GAP) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
         }
         previous = { key, dx: NODE_R };
         previousKey = key;
@@ -3525,7 +3770,7 @@ ${FOLD_HINT}` : label };
         return sameSide.filter((other) => Math.abs(other) < Math.abs(dy)).length;
       };
       const nestOut = Math.max(0, ...dys.filter((dy) => dy !== 0).map(outRank)) * LANE_STEP;
-      const outX = rx + SMALL_R + 10 + labelWidth + 10 + nestOut;
+      const outX = rx + SMALL_R + LABEL_GAP + 5 + labelWidth + 10 + nestOut;
       const reviewKey = sessionKeys.review(branch);
       add({ kind: "anchor", key: reviewKey, at: { x: outX, y }, ...base, ...slide2("review", { x: outX, y }) });
       const feed = exit;
@@ -3546,9 +3791,10 @@ ${FOLD_HINT}` : label };
         const dot = { edges: [`edge:agent:${reviewer.agentId}`], when: "start", color: "review", out: [`edge:agent:${reviewer.agentId}>review`], ...firstRound };
         add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...nodeBase, ...enter, dot });
         const tone2 = isEnded(reviewer.state) ? "reviewer-dim" : "reviewer";
-        add({ kind: "text", key: `text:agent:${reviewer.agentId}`, at: { key, dx: SMALL_R + 5, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
+        add({ kind: "text", key: `text:agent:${reviewer.agentId}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
+        labelledRight.add(key);
         if (isEnded(reviewer.state)) {
-          const labelOut = { xKey: key, dx: SMALL_R + 6 + textWidth(label), yKey: key };
+          const labelOut = { xKey: key, dx: SMALL_R + LABEL_GAP + 1 + textWidth(label), yKey: key };
           const short = labelWidth - textWidth(label) + (dys[index] === 0 ? 0 : outRank(dys[index]) * LANE_STEP);
           const out = short > 0 ? { shape: "level", extra: { drop: 0, reach: short } } : { shape: "curve", extra: {} };
           const outState = reviewer.state === "changes" ? "loop" : "done";
@@ -3567,7 +3813,7 @@ ${FOLD_HINT}` : label };
       const fx = fixColumn.start + fixLeft;
       const stacked = row2.fixes.length > 1;
       const besideWidths = stacked ? row2.fixes.map((fix) => textWidth(fixLabelOf(fix.agentId))) : [];
-      const besideReach = NODE_R + 5 + Math.max(0, ...besideWidths) + LABEL_PAST - FIX_LOWER_STACKED.dx;
+      const besideReach = NODE_R + LABEL_GAP + Math.max(0, ...besideWidths) + LABEL_PAST - FIX_LOWER_STACKED.dx;
       const lower = stacked ? FIX_LOWER_STACKED : FIX_LOWER;
       const fixKeys = /* @__PURE__ */ new Map();
       const loopFrom = exit;
@@ -3594,9 +3840,12 @@ ${FOLD_HINT}` : label };
         const dot = { edges: [inKey], when: "start", color: byMain ? "shared" : color };
         add({ kind: "node", key, at: { x: fx, y: fy }, state: fix.state, color: byMain ? "shared" : color, mark, radius: NODE_R, stale: fix.stale, ...nodeBase, ...from, dot });
         const label = fixLabelOf(fix.agentId);
-        const labelAt = stacked ? { key, dx: NODE_R + 5, dy: 3.5 } : { key, dy: FIX_LABEL_DY + plan.labelShift };
+        const labelAt = stacked ? { key, dx: NODE_R + LABEL_GAP, dy: 3.5 } : { key, dy: FIX_LABEL_DY + plan.labelShift };
         add({ kind: "text", key: `text:fix:${branch}:${fix.id}`, at: labelAt, text: label, tone: "note", anchor: stacked ? "start" : "middle", ...nodeBase });
-        reach("fix", stacked ? fx + NODE_R + 5 + textWidth(label) : fx + Math.max(NODE_R, textWidth(label) / 2));
+        if (stacked) {
+          labelledRight.add(key);
+        }
+        reach("fix", stacked ? fx + NODE_R + LABEL_GAP + textWidth(label) : fx + Math.max(NODE_R, textWidth(label) / 2));
         endY = lineY;
         exit = stacked ? { key, ...FIX_LOWER_STACKED } : { key, dx: NODE_R };
         exitReach = stacked ? besideReach : void 0;
@@ -3959,8 +4208,13 @@ ${FOLD_HINT}` : label };
     }
   }
   const present = new Set(items.map((item2) => item2.key));
-  const planTarget = planGate ? { key: sessionKeys.planGate, ...GATE_BUBBLE } : { key: sessionKeys.plan, ...CORNER2 };
-  const nodeTarget = (key) => key !== void 0 && present.has(key) ? { key, ...CORNER2 } : void 0;
+  const radii = new Map(items.flatMap((item2) => item2.kind === "node" ? [[item2.key, item2.radius]] : []));
+  const cornerOf = (key) => {
+    const radius = radii.get(key) ?? NODE_R;
+    return { key, dx: radius + 1, dy: labelledRight.has(key) ? -(radius + 1) : 2 - radius };
+  };
+  const planTarget = planGate ? { key: sessionKeys.planGate, ...GATE_BUBBLE } : cornerOf(sessionKeys.plan);
+  const nodeTarget = (key) => key !== void 0 && present.has(key) ? cornerOf(key) : void 0;
   const mergeBubble = (branch) => {
     if (mergeGate !== void 0) {
       return { key: mergeGate, ...GATE_BUBBLE };
@@ -4057,26 +4311,38 @@ ${FOLD_HINT}` : label };
 var isMergePlace = (question) => question.place.kind === "merge" || question.place.kind === "gate" && question.place.gate === "merge";
 
 // src/ui/graph/nodes.ts
-var RUN_RINGS = ["running"];
-var SESSION_RINGS = ["running", "waiting"];
-var WAITING_RINGS = ["waiting"];
-var sessionRings = (node) => node.stale === true || node.idle === true ? WAITING_RINGS : SESSION_RINGS;
-var round2 = (value2) => String(Math.round(value2 * 100) / 100);
+var RUN_RINGS = { ring: ["running"], orbit: [] };
+var SESSION_RINGS = { ring: ["waiting"], orbit: ["running"] };
+var WAITING_RINGS = { ring: ["waiting"], orbit: [] };
+var sessionRings = (node) => {
+  const orbitless = node.stale === true || node.idle === true || node.progress !== void 0;
+  return orbitless ? WAITING_RINGS : SESSION_RINGS;
+};
+var ORBIT_GAP = 3;
+var ORBIT_LENGTH = 48;
+var round3 = (value2) => String(Math.round(value2 * 100) / 100);
+var drawOrbit = (radius) => svgEl("circle", { class: "node-orbit", r: round3(radius + ORBIT_GAP), pathLength: ORBIT_LENGTH });
 var icon = (d) => svgEl("path", { class: "node-icon", d });
 var letterText = (text2, y) => {
   const element = svgEl("text", { class: "node-letter", y });
   element.textContent = text2;
   return element;
 };
-var check = (r) => icon(`M${round2(-r * 0.38)} 0.3 l${round2(r * 0.27)} ${round2(r * 0.27)} l${round2(r * 0.5)} ${round2(-r * 0.55)}`);
+var check = (r) => icon(`M${round3(-r * 0.38)} 0.3 l${round3(r * 0.27)} ${round3(r * 0.27)} l${round3(r * 0.5)} ${round3(-r * 0.55)}`);
 var cross = (r) => {
-  const a = round2(r * 0.32);
+  const a = round3(r * 0.32);
   return icon(`M-${a} -${a} L${a} ${a} M${a} -${a} L-${a} ${a}`);
 };
 var drawNode = (group, state, mark, radius, rings = RUN_RINGS) => {
   const core = svgEl("g", { class: "node-core" });
   core.append(svgEl("circle", { class: "node-outline", r: radius }));
-  const parts = rings.includes(state) ? [svgEl("circle", { class: "node-ring", r: radius })] : [];
+  const parts = [];
+  if (rings.ring.includes(state)) {
+    parts.push(svgEl("circle", { class: "node-ring", r: radius }));
+  }
+  if (rings.orbit.includes(state)) {
+    parts.push(drawOrbit(radius));
+  }
   if (state === "running") {
     drawMark(core, mark, radius);
   } else if (state === "done" || state === "approved") {
@@ -4084,7 +4350,7 @@ var drawNode = (group, state, mark, radius, rings = RUN_RINGS) => {
   } else if (state === "changes") {
     core.append(cross(radius));
   } else if (state === "handed") {
-    const inner = round2(radius - 1.6);
+    const inner = round3(radius - 1.6);
     core.append(svgEl("path", { class: "node-half", d: `M0 -${inner} A${inner} ${inner} 0 0 0 0 ${inner} Z` }));
   } else if (state === "waiting") {
     core.append(svgEl("circle", { class: "node-person", cy: -2.6, r: 2.2 }), icon("M-4 5 q4 -5.5 8 0"));
@@ -4095,6 +4361,26 @@ var drawNode = (group, state, mark, radius, rings = RUN_RINGS) => {
   }
   group.replaceChildren(...parts, core);
   return core;
+};
+var SHEEN_TILT = 24;
+var sheenCount = 0;
+var sheenPeak = (state) => state === "approved" ? 0.85 : 0.5;
+var drawSheen = (core, radius, state) => {
+  sheenCount += 1;
+  const id = `graph-sheen-${sheenCount}`;
+  const gradient = svgEl("linearGradient", { id: `${id}-light` });
+  const light = [0, sheenPeak(state), 0];
+  gradient.append(...light.map((opacity, index) => svgEl("stop", { offset: index / (light.length - 1), "stop-opacity": opacity })));
+  const band = svgEl("rect", { class: "node-sheen-band", x: -3.5, y: -16, width: 7, height: 32, fill: `url(#${id}-light)` });
+  const tilt = svgEl("g", { transform: `rotate(${SHEEN_TILT})` });
+  tilt.append(band);
+  const mask = svgEl("mask", { id: `${id}-band`, "mask-type": "alpha" });
+  mask.append(tilt);
+  const lit = svgEl("circle", { class: "node-sheen-light", r: round3(radius - 0.8), mask: `url(#${id}-band)` });
+  const sheen = svgEl("g", { class: "node-sheen" });
+  sheen.append(gradient, mask, lit);
+  core.insertBefore(sheen, core.children[1] ?? null);
+  return { sheen, band };
 };
 
 // src/ui/graph/scene.ts
@@ -4110,6 +4396,10 @@ var EASING2 = "cubic-bezier(.2,.8,.2,1)";
 var POP2 = [{ transform: "scale(.4)" }, { transform: "scale(1.22)", offset: 0.6 }, { transform: "none" }];
 var SWEEP = [{ transform: "none" }, { transform: "scale(1.35)", offset: 0.4 }, { transform: "none" }];
 var SWEEP_STEP_MS = 55;
+var ORBIT_IN = [{ opacity: 0 }, { opacity: 1 }];
+var SHEEN = [{ transform: "translateX(-16px)" }, { transform: "translateX(16px)" }];
+var SHEEN_MS = 1400;
+var SHEEN_EASING = "cubic-bezier(.5,0,.3,1)";
 var DIM_MS = 200;
 var PIXEL_EPSILON = 1e-6;
 var HIT_REACH = 5;
@@ -4135,7 +4425,7 @@ var textElement = (className, text2, attributes = {}) => {
 var signatureOf = (item2) => {
   switch (item2.kind) {
     case "node":
-      return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}|${item2.tip ?? ""}`;
+      return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}`;
     case "pill":
       return `${item2.text}|${item2.color}|${item2.compact === true}|${item2.skipped === true}|${item2.tip ?? ""}`;
     case "rect":
@@ -4266,6 +4556,40 @@ var createScene = (host, context, options = {}) => {
     title.textContent = tip;
     return [title];
   };
+  const retitle = (entry, tip) => {
+    if (tip === void 0) {
+      entry.title?.remove();
+      entry.title = void 0;
+      return;
+    }
+    if (!entry.title) {
+      entry.title = svgEl("title");
+      entry.element?.append(entry.title);
+    }
+    if (entry.title.textContent !== tip) {
+      entry.title.textContent = tip;
+    }
+  };
+  const placeRing = (entry) => {
+    const { item: item2, element, core } = entry;
+    if (!session || item2.kind !== "node" || !element || !core) {
+      return;
+    }
+    const ring = entry.orbit?.classList.contains("node-progress") === true ? entry.orbit : void 0;
+    if (item2.progress !== void 0 && ring) {
+      updateProgressRing(ring, item2.progress, { radius: item2.radius, key: item2.key, still: context.reducedMotion() });
+    } else if (item2.progress !== void 0) {
+      entry.orbit?.remove();
+      entry.orbit = drawProgressRing(item2.progress, { radius: item2.radius, key: item2.key, still: context.reducedMotion() });
+      element.insertBefore(entry.orbit, core);
+    } else if (ring) {
+      ring.remove();
+      entry.orbit = sessionRings(item2).orbit.includes(item2.state) ? drawOrbit(item2.radius) : void 0;
+      if (entry.orbit) {
+        element.insertBefore(entry.orbit, core);
+      }
+    }
+  };
   const render = (entry) => {
     const { item: item2, element } = entry;
     if (!element) {
@@ -4277,10 +4601,11 @@ var createScene = (host, context, options = {}) => {
         element.setAttribute("class", classes.join(" "));
         element.style.setProperty("--c", colorValue(item2.color, context));
         entry.core = drawNode(element, item2.state, item2.mark, item2.radius, session ? sessionRings(item2) : RUN_RINGS);
+        entry.orbit = [...element.children].find((child) => child.classList.contains("node-orbit"));
+        entry.title = void 0;
         if (session) {
           element.prepend(svgEl("circle", { class: "node-hit", r: item2.radius + HIT_REACH }));
         }
-        element.append(...titleOf(item2.tip));
         break;
       }
       case "pill": {
@@ -4572,6 +4897,10 @@ var createScene = (host, context, options = {}) => {
           entry.signature = signature;
           render(entry);
         }
+        if (item2.kind === "node") {
+          placeRing(entry);
+          retitle(entry, item2.tip);
+        }
       }
       refreshHover();
       if (focus) {
@@ -4586,11 +4915,25 @@ var createScene = (host, context, options = {}) => {
       }
       for (const pop of effects.pops) {
         const fill = entered.has(pop.key) ? "backwards" : "none";
-        entries.get(pop.key)?.core?.animate(POP2, { duration: 550, delay: pop.delay, easing: EASING2, fill });
+        const entry = entries.get(pop.key);
+        entry?.core?.animate(POP2, { duration: POP_MS2, delay: pop.delay, easing: EASING2, fill });
+        if (entered.has(pop.key)) {
+          entry?.orbit?.animate(ORBIT_IN, { duration: POP_MS2, delay: pop.delay, easing: EASING2, fill });
+        }
       }
       if (effects.sweep) {
         const nodes = [...entries.values()].filter((entry) => entry.item.kind === "node" && entry.alive).sort((a, b) => a.x - b.x);
         nodes.forEach((entry, index) => entry.core?.animate(SWEEP, { duration: 700, delay: index * SWEEP_STEP_MS, easing: EASING2 }));
+      }
+      for (const sheen of effects.sheens ?? []) {
+        const entry = entries.get(sheen.key);
+        if (entry?.item.kind !== "node" || !entry.core) {
+          continue;
+        }
+        const drawn = drawSheen(entry.core, entry.item.radius, entry.item.state);
+        const crossing = drawn.band.animate(SHEEN, { duration: SHEEN_MS, delay: sheen.delay, easing: SHEEN_EASING, fill: "both" });
+        crossing.onfinish = () => drawn.sheen.remove();
+        crossing.oncancel = () => drawn.sheen.remove();
       }
       const now = performance.now();
       for (const dot of effects.dots) {
@@ -5053,8 +5396,8 @@ var agentTitle = (session, agent, name) => {
   if (agent.id === MAIN_AGENT) {
     return name;
   }
-  const round3 = reviewOf(session, agent.id)?.reviewer.round ?? 1;
-  const extra = [...round3 > 1 ? [`round ${round3}`] : [], ...agent.role === name ? [] : [agent.role]];
+  const round4 = reviewOf(session, agent.id)?.reviewer.round ?? 1;
+  const extra = [...round4 > 1 ? [`round ${round4}`] : [], ...agent.role === name ? [] : [agent.role]];
   return extra.length > 0 ? `${name} (${extra.join(", ")})` : name;
 };
 var escapeRegExp2 = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -5097,8 +5440,8 @@ var sessionSuperseded = (session, agent, state) => {
   if (review === void 0) {
     return false;
   }
-  const { reviewerId, round: round3 } = review.reviewer;
-  return review.row.reviewers.some((entry) => entry.reviewerId === reviewerId && entry.round > round3);
+  const { reviewerId, round: round4 } = review.reviewer;
+  return review.row.reviewers.some((entry) => entry.reviewerId === reviewerId && entry.round > round4);
 };
 var sessionAgentEnd = (session, agent) => {
   if (agent.id === MAIN_AGENT && session.plan.state === "done") {
@@ -6623,7 +6966,7 @@ var rectOf = (element) => {
 };
 var viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
 var SVG_RADIUS_PX = 8;
-var shapeOf = (anchor) => {
+var shapeOf2 = (anchor) => {
   if (!(anchor instanceof SVGElement)) {
     return anchor;
   }
@@ -7120,7 +7463,7 @@ var createModal = () => {
       reveal(next.messageId, false);
       return;
     }
-    const fromRect = from.isConnected ? rectOf(shapeOf(from)) : void 0;
+    const fromRect = from.isConnected ? rectOf(shapeOf2(from)) : void 0;
     const plan = openPlan(boxRect, fromRect, inFlight, viewport());
     const fromUsable = fromRect !== void 0 && plan.from === fromRect;
     if (!continuing) {
@@ -7132,7 +7475,7 @@ var createModal = () => {
     if (inFlight) {
       startLook = inFlightLook ?? { ...boxLook, rect: inFlight };
     } else if (fromUsable) {
-      startLook = openerLook(shapeOf(from), fromRect);
+      startLook = openerLook(shapeOf2(from), fromRect);
     } else {
       startLook = { ...boxLook, rect: plan.from, shadow: "none" };
       track(shell.animate([{ opacity: 0 }, { opacity: 1 }], { duration: plan.moveMs / 2, easing: "ease" }));
@@ -7207,7 +7550,7 @@ var createModal = () => {
     const partOpacity = new Map(parts.map((part) => [part, opacityOf(part)]));
     const riding = riders.map((rider) => ({ rider, offset: getComputedStyle(rider).translate }));
     const boxRect = rectOf(box);
-    const fromRect = from.isConnected ? rectOf(shapeOf(from)) : void 0;
+    const fromRect = from.isConnected ? rectOf(shapeOf2(from)) : void 0;
     const plan = closePlan(boxRect, fromRect, inFlight, viewport());
     stopMotion();
     for (const { rider, offset } of riding) {
@@ -7234,7 +7577,7 @@ var createModal = () => {
       }
     }
     const shellLook = inFlightLook ?? lookOf(box, boxRect);
-    const endLook = openerLook(shapeOf(from), plan.to);
+    const endLook = openerLook(shapeOf2(from), plan.to);
     const landing = isTransparent(getComputedStyle(from).backgroundColor) ? endLook.background : void 0;
     const startShell = () => {
       if (own !== token) {
@@ -8769,6 +9112,253 @@ var createSessionConversationSection = (context, parts, onHover) => {
   };
 };
 
+// src/ui/chips.ts
+var TONES = { merge: "you", merged: "merged", promoted: "promoted" };
+var AFTER = { clear: "after a context clear", resume: "after a resume" };
+var CONTINUED_STATUS = "continued";
+var chipLink = (session, link, fallback) => {
+  const chip = { sessionId: link.sessionId, label: linkLabel(session, link, fallback) };
+  if (link.after !== void 0) {
+    chip.after = AFTER[link.after];
+  }
+  return chip;
+};
+var branchChip = (session, row2) => {
+  const open2 = row2.stage === "pr" && row2.pr?.pr?.state === "open";
+  const tone = open2 ? "open" : TONES[row2.stage] ?? "normal";
+  const chip = { kind: "branch", branch: row2.branch, pipeline: row2.pipeline, color: rowColor(row2), status: row2.stageText, tone };
+  if (row2.from?.kind === "branch") {
+    chip.base = row2.from.branch;
+  }
+  if (row2.continuedIn) {
+    chip.continuedIn = chipLink(session, row2.continuedIn, LINK_FALLBACK.continuedIn);
+  }
+  return chip;
+};
+var foldChip = (session, index, open2) => {
+  const rows = session.rows.filter((row2) => row2.pipeline === index);
+  const title = session.pipelines.find((pipeline) => pipeline.index === index)?.title;
+  const merged = `${mergedRows(rows).length} merged`;
+  return { kind: "fold", pipeline: index, label: pipelineLabel(index), detail: title ? `${title} \xB7 ${merged}` : merged, branches: rows.map((row2) => row2.branch), open: open2 };
+};
+var sessionChips = (session, folded) => {
+  const chips = [];
+  const continues = session.continues;
+  if (continues) {
+    const row2 = session.rows.find((entry) => entry.branch === continues.branch);
+    const link = chipLink(session, continues, LINK_FALLBACK.continues);
+    chips.push({ kind: "link", branch: continues.branch, color: row2 ? rowColor(row2) : "shared", ...link });
+  }
+  const placed = /* @__PURE__ */ new Set();
+  for (const row2 of session.rows) {
+    const isFolded = folded.has(row2.pipeline);
+    if (!placed.has(row2.pipeline) && (isFolded || foldablePipeline(session, row2.pipeline))) {
+      placed.add(row2.pipeline);
+      chips.push(foldChip(session, row2.pipeline, !isFolded));
+    }
+    if (!isFolded) {
+      chips.push(branchChip(session, row2));
+    }
+  }
+  return chips;
+};
+var suffixOf = (link) => link.after ? ` \xB7 ${link.after}` : "";
+var chipTexts = (chip) => {
+  if (chip.kind === "fold") {
+    return { lead: chip.label, code: "", status: chip.detail, tone: chip.open ? "normal" : "merged", note: "" };
+  }
+  if (chip.kind === "link") {
+    return { lead: "continues", code: chip.branch, status: "", tone: "normal", note: `from ${chip.label}${suffixOf(chip)}` };
+  }
+  const link = chip.continuedIn;
+  if (!link) {
+    return { lead: "", code: chip.branch, status: chip.status, tone: chip.tone, note: "" };
+  }
+  if (chip.status === CONTINUED_STATUS) {
+    return { lead: "", code: chip.branch, status: "", tone: chip.tone, note: `continued in ${link.label}${suffixOf(link)}` };
+  }
+  return { lead: "", code: chip.branch, status: chip.status, tone: chip.tone, note: `\xB7 continued in ${link.label}` };
+};
+var chipTitle = (chip) => {
+  if (chip.kind === "fold") {
+    return `${chip.branches.join(", ")}
+${chip.open ? FOLD_HINT : OPEN_HINT}`;
+  }
+  if (chip.kind === "link") {
+    return "Open the session this one continues";
+  }
+  const branch = chip.base ? `${chip.branch} \xB7 from ${chip.base}` : chip.branch;
+  return chip.continuedIn ? `${branch}
+Open the session that continued this branch` : branch;
+};
+var chipKey = (chip) => {
+  if (chip.kind === "branch") {
+    return `branch:${chip.branch}`;
+  }
+  return chip.kind === "fold" ? `fold:${chip.pipeline}` : "continues";
+};
+var pipelineOf = (chip) => chip.kind === "link" ? void 0 : chip.pipeline;
+var pipelineGaps = (chips) => {
+  const unfolded = new Set(chips.flatMap((chip) => chip.kind === "fold" && chip.open ? [chip.pipeline] : []));
+  return chips.map((chip, index) => {
+    const own = pipelineOf(chip);
+    const next = index + 1 < chips.length ? pipelineOf(chips[index + 1]) : void 0;
+    return own !== void 0 && unfolded.has(own) && next !== void 0 && next !== own;
+  });
+};
+var chipMoves = (current, target) => {
+  const order = [...current];
+  const moves = [];
+  target.forEach((key, index) => {
+    if (order[index] === key) {
+      return;
+    }
+    const from = order.indexOf(key);
+    if (from >= 0) {
+      order.splice(from, 1);
+    }
+    moves.push({ key, before: order[index] });
+    order.splice(index, 0, key);
+  });
+  return moves;
+};
+var ENTER_FRAMES = [{ opacity: 0, transform: "translateY(-8px) scale(.98)" }, { opacity: 1, transform: "none" }];
+var BUMP_FRAMES = [{ transform: "none" }, { transform: "scale(1.12)", offset: 0.35 }, { transform: "none" }];
+var CHIP_MOTION_MS = 500;
+var createChipsRow = (host, context, actions) => {
+  const entries = /* @__PURE__ */ new Map();
+  let drawn = false;
+  let marked;
+  let pointed;
+  let destroyed = false;
+  const point2 = (entry, on) => {
+    if (entry.chip.kind !== "branch") {
+      return;
+    }
+    const branch = entry.chip.branch;
+    if (on) {
+      pointed = branch;
+      actions.focus(branch);
+    } else if (pointed === branch) {
+      pointed = void 0;
+      actions.focus(void 0);
+    }
+  };
+  const linkOfChip = (chip) => {
+    if (chip.kind === "link") {
+      return chip.sessionId;
+    }
+    return chip.kind === "branch" ? chip.continuedIn?.sessionId : void 0;
+  };
+  const create = (chip) => {
+    const element = el("button", `session-chip ${chip.kind}`);
+    element.type = "button";
+    element.dataset.chip = chipKey(chip);
+    const entry = { element, lead: el("span", "chip-lead"), code: el("code"), status: el("span", "chip-status"), note: el("span", "chip-note"), chip };
+    element.append(el("i", "chip-dot"), entry.lead, " ", entry.code, " ", entry.status, " ", entry.note);
+    if (chip.kind === "fold") {
+      element.append(chevronIcon());
+    }
+    element.addEventListener("click", () => {
+      if (entry.chip.kind === "fold") {
+        actions.toggleFold(entry.chip.pipeline);
+        return;
+      }
+      const sessionId = linkOfChip(entry.chip);
+      if (sessionId !== void 0) {
+        const detail = { sessionId };
+        element.dispatchEvent(new CustomEvent(SESSION_LINK, { bubbles: true, detail }));
+      }
+    });
+    element.addEventListener("pointerenter", () => point2(entry, true));
+    element.addEventListener("pointerleave", () => point2(entry, false));
+    element.addEventListener("focus", () => point2(entry, true));
+    element.addEventListener("blur", () => point2(entry, false));
+    return entry;
+  };
+  const show = (element, text2) => {
+    setText(element, text2);
+    element.hidden = text2 === "";
+  };
+  const write2 = (entry, chip, fresh) => {
+    entry.chip = chip;
+    const texts = chipTexts(chip);
+    const color = chip.kind === "fold" ? "review" : chip.color;
+    entry.element.style.setProperty("--c", colorValue(color, context));
+    show(entry.lead, texts.lead);
+    show(entry.code, texts.code);
+    show(entry.note, texts.note);
+    const changed = entry.status.textContent !== texts.status;
+    show(entry.status, texts.status);
+    entry.status.dataset.tone = texts.tone;
+    if (changed && !fresh && texts.status !== "" && !context.reducedMotion()) {
+      entry.status.animate(BUMP_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE8 });
+    }
+    entry.element.title = chipTitle(chip);
+    if (chip.kind === "fold") {
+      entry.element.setAttribute("aria-expanded", String(chip.open));
+    }
+    entry.element.classList.toggle("link", linkOfChip(chip) !== void 0);
+    entry.element.classList.toggle("hl", chip.kind === "branch" && chip.branch === marked);
+  };
+  return {
+    update(session, folded) {
+      if (destroyed) {
+        return;
+      }
+      const chips = sessionChips(session, folded);
+      const keys2 = chips.map(chipKey);
+      const wanted = new Set(keys2);
+      for (const [key, entry] of entries) {
+        if (wanted.has(key)) {
+          continue;
+        }
+        entries.delete(key);
+        entry.element.remove();
+        if (entry.chip.kind === "branch" && entry.chip.branch === pointed) {
+          pointed = void 0;
+          actions.focus(void 0);
+        }
+      }
+      const current = Array.from(host.children, (child) => child instanceof HTMLElement ? child.dataset.chip ?? "" : "").filter((key) => entries.has(key));
+      const gaps = pipelineGaps(chips);
+      chips.forEach((chip, index) => {
+        const key = keys2[index];
+        let entry = entries.get(key);
+        if (!entry) {
+          entry = create(chip);
+          entries.set(key, entry);
+          if (drawn && !context.reducedMotion()) {
+            entry.element.animate(ENTER_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE8 });
+          }
+          write2(entry, chip, true);
+        } else {
+          write2(entry, chip, false);
+        }
+        entry.element.classList.toggle("pipeline-end", gaps[index]);
+      });
+      for (const move of chipMoves(current, keys2)) {
+        const element = entries.get(move.key)?.element;
+        const before = move.before === void 0 ? null : entries.get(move.before)?.element ?? null;
+        if (element) {
+          host.insertBefore(element, before);
+        }
+      }
+      drawn = true;
+    },
+    mark(branch) {
+      marked = branch;
+      for (const entry of entries.values()) {
+        entry.element.classList.toggle("hl", entry.chip.kind === "branch" && entry.chip.branch === branch);
+      }
+    },
+    destroy() {
+      destroyed = true;
+      entries.clear();
+    }
+  };
+};
+
 // src/ui/session-fetch.ts
 var sessionUrl = (repositoryId, sessionId) => {
   return `/api/session?repo=${encodeURIComponent(repositoryId)}&id=${encodeURIComponent(sessionId)}`;
@@ -8826,7 +9416,7 @@ var createLoader = (read = fetchSession) => {
 // src/ui/toast.ts
 var TOAST_MS = 6e3;
 var UNDO_TEXT = "Undo";
-var EASE8 = "cubic-bezier(.2,.8,.2,1)";
+var EASE9 = "cubic-bezier(.2,.8,.2,1)";
 var toast;
 var createToast = () => {
   const element = el("div", "toast");
@@ -8898,9 +9488,9 @@ var createToast = () => {
       }
       if (!reducedMotion && wasHidden) {
         const frames = [{ opacity: 0, transform: "translate(-50%, 16px) scale(.98)" }, { opacity: 1, transform: "translate(-50%, 0)" }];
-        element.animate(frames, { duration: 300, easing: EASE8 });
+        element.animate(frames, { duration: 300, easing: EASE9 });
       } else if (!reducedMotion) {
-        text2.animate([{ opacity: 0.3 }, { opacity: 1 }], { duration: 300, easing: EASE8 });
+        text2.animate([{ opacity: 0.3 }, { opacity: 1 }], { duration: 300, easing: EASE9 });
       }
       bar = progress.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration: TOAST_MS, fill: "forwards" });
       bar.finished.then(() => {
@@ -8940,8 +9530,7 @@ var NO_FINISHED_TEXT = "No finished runs. A cleared run comes back when it is ac
 var NO_FINISHED_SESSIONS_TEXT = "No finished sessions. A cleared session comes back when it is active again.";
 var LOADING_SESSION_TEXT = "Loading the session\u2026";
 var SESSION_FAILED_TEXT = "The session could not be loaded. Show it again to retry.";
-var EASE9 = "cubic-bezier(.2,.8,.2,1)";
-var BUMP = [{ transform: "none" }, { transform: "scale(1.12)", offset: 0.35 }, { transform: "none" }];
+var EASE10 = "cubic-bezier(.2,.8,.2,1)";
 var DETAIL_RESIZE_MS = 500;
 var REVEAL_WAIT_MS = 650;
 var panelCount = 0;
@@ -8996,7 +9585,7 @@ var createPanelShell = (context, options, make) => {
     setText(count, String(next));
     toggle.setAttribute("aria-label", `${options.title}, ${next}`);
     if (rises && !context.reducedMotion()) {
-      count.animate(BUMP, { duration: 500, easing: EASE9 });
+      count.animate(BUMP_FRAMES, { duration: 500, easing: EASE10 });
     }
   };
   const dropCard = (id) => {
@@ -9016,7 +9605,7 @@ var createPanelShell = (context, options, make) => {
     if (next && motion && !context.reducedMotion()) {
       const frames = [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
       rows.ids().slice(0, 8).forEach((id, index) => {
-        rows.rows.get(id)?.element.animate(frames, { duration: 380, delay: 60 + index * 35, easing: EASE9, fill: "backwards" });
+        rows.rows.get(id)?.element.animate(frames, { duration: 380, delay: 60 + index * 35, easing: EASE10, fill: "backwards" });
       });
     }
   };
@@ -9257,7 +9846,7 @@ var createFinishedSessionsPanel = (context, options) => {
   const resize = (box, from) => {
     const to = box.offsetHeight;
     if (Math.abs(to - from) > 1 && !context.reducedMotion()) {
-      box.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: DETAIL_RESIZE_MS, easing: EASE9 });
+      box.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: DETAIL_RESIZE_MS, easing: EASE10 });
     }
   };
   const step = (id, event) => {
@@ -9439,7 +10028,7 @@ var createFinishedSessionsPanel = (context, options) => {
 var EMPTY_BOARD_TEXT = "No runs yet. A session shows up here as a conversation once it gets a prompt, and as a card once it delegates to a subagent, edits files or opens a PR.";
 var NO_ACTIVE_TEXT = "No active runs. A new run shows up here once a session gets a prompt; the finished ones are under Finished runs.";
 var NO_REPOSITORY_TEXT = "No repository yet. A repository gets a tab once a Claude Code session runs in it with a Nurselog config (nurselog init).";
-var EASE10 = "cubic-bezier(.2,.8,.2,1)";
+var EASE8 = "cubic-bezier(.2,.8,.2,1)";
 var FADE_MS = 320;
 var ENTER2 = [{ opacity: 0, transform: "translateY(-14px)" }, { opacity: 1, transform: "none" }];
 var ENTER_MS = 420;
@@ -9629,7 +10218,7 @@ var morphFrom = (element, from) => {
   const to = element.getBoundingClientRect();
   const frames = [{ transform: `translateY(${from.top - to.top}px)`, height: `${from.height}px` }, { transform: "none", height: `${to.height}px` }];
   element.classList.add("morphing");
-  const morph = element.animate(frames, { duration: MORPH_MS, easing: EASE10 });
+  const morph = element.animate(frames, { duration: MORPH_MS, easing: EASE8 });
   const settle = () => element.classList.remove("morphing");
   morph.finished.then(settle, settle);
 };
@@ -9638,7 +10227,7 @@ var glide = (before, after, still = /* @__PURE__ */ new Set()) => {
   for (const [element, top] of before) {
     const delta = top - (after.get(element) ?? top);
     if (!still.has(element) && Math.abs(delta) > 0.5) {
-      element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE10 });
+      element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE8 });
     }
   }
 };
@@ -9724,7 +10313,7 @@ var createCardStack = (host, context, repositoryId, options) => {
     for (const card of stackChange.entered) {
       const from = rowRects.get(card.element.dataset.run ?? "");
       if (!from) {
-        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE10, fill: "backwards" });
+        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE8, fill: "backwards" });
         continue;
       }
       morphFrom(card.element, from);
@@ -9960,6 +10549,7 @@ var legendPackages = (config) => {
 };
 var MODEL_PREFIX = "claude-";
 var MARKS_NOTE = "\xB7 icons are the model";
+var YOU_NOTE = "\xB7 what waits for you pulses, a running node's orbit turns";
 var legendMarks = (config) => {
   const keys2 = /* @__PURE__ */ new Map();
   for (const key of Object.keys(config.modelLetters)) {
@@ -10130,7 +10720,7 @@ var youRow = () => {
   const items = [item(prompt, "your prompt"), item(waiting, "waiting for you")];
   items.push(item(bubbleSample("non-blocking"), "a question for you, filled while it blocks"));
   items.push(item(bubbleSample("non-blocking quiet"), "an agent asked the main thread"));
-  return row("You", items, "\xB7 what waits for you pulses, what runs rings quietly");
+  return row("You", items, YOU_NOTE);
 };
 var groups = (config) => {
   const first = config.packages[0];
@@ -10508,253 +11098,6 @@ var createOverview = (host, context, link) => {
   };
 };
 
-// src/ui/chips.ts
-var TONES = { merge: "you", merged: "merged", promoted: "promoted" };
-var AFTER = { clear: "after a context clear", resume: "after a resume" };
-var CONTINUED_STATUS = "continued";
-var chipLink = (session, link, fallback) => {
-  const chip = { sessionId: link.sessionId, label: linkLabel(session, link, fallback) };
-  if (link.after !== void 0) {
-    chip.after = AFTER[link.after];
-  }
-  return chip;
-};
-var branchChip = (session, row2) => {
-  const open2 = row2.stage === "pr" && row2.pr?.pr?.state === "open";
-  const tone = open2 ? "open" : TONES[row2.stage] ?? "normal";
-  const chip = { kind: "branch", branch: row2.branch, pipeline: row2.pipeline, color: rowColor(row2), status: row2.stageText, tone };
-  if (row2.from?.kind === "branch") {
-    chip.base = row2.from.branch;
-  }
-  if (row2.continuedIn) {
-    chip.continuedIn = chipLink(session, row2.continuedIn, LINK_FALLBACK.continuedIn);
-  }
-  return chip;
-};
-var foldChip = (session, index, open2) => {
-  const rows = session.rows.filter((row2) => row2.pipeline === index);
-  const title = session.pipelines.find((pipeline) => pipeline.index === index)?.title;
-  const merged = `${mergedRows(rows).length} merged`;
-  return { kind: "fold", pipeline: index, label: pipelineLabel(index), detail: title ? `${title} \xB7 ${merged}` : merged, branches: rows.map((row2) => row2.branch), open: open2 };
-};
-var sessionChips = (session, folded) => {
-  const chips = [];
-  const continues = session.continues;
-  if (continues) {
-    const row2 = session.rows.find((entry) => entry.branch === continues.branch);
-    const link = chipLink(session, continues, LINK_FALLBACK.continues);
-    chips.push({ kind: "link", branch: continues.branch, color: row2 ? rowColor(row2) : "shared", ...link });
-  }
-  const placed = /* @__PURE__ */ new Set();
-  for (const row2 of session.rows) {
-    const isFolded = folded.has(row2.pipeline);
-    if (!placed.has(row2.pipeline) && (isFolded || foldablePipeline(session, row2.pipeline))) {
-      placed.add(row2.pipeline);
-      chips.push(foldChip(session, row2.pipeline, !isFolded));
-    }
-    if (!isFolded) {
-      chips.push(branchChip(session, row2));
-    }
-  }
-  return chips;
-};
-var suffixOf = (link) => link.after ? ` \xB7 ${link.after}` : "";
-var chipTexts = (chip) => {
-  if (chip.kind === "fold") {
-    return { lead: chip.label, code: "", status: chip.detail, tone: chip.open ? "normal" : "merged", note: "" };
-  }
-  if (chip.kind === "link") {
-    return { lead: "continues", code: chip.branch, status: "", tone: "normal", note: `from ${chip.label}${suffixOf(chip)}` };
-  }
-  const link = chip.continuedIn;
-  if (!link) {
-    return { lead: "", code: chip.branch, status: chip.status, tone: chip.tone, note: "" };
-  }
-  if (chip.status === CONTINUED_STATUS) {
-    return { lead: "", code: chip.branch, status: "", tone: chip.tone, note: `continued in ${link.label}${suffixOf(link)}` };
-  }
-  return { lead: "", code: chip.branch, status: chip.status, tone: chip.tone, note: `\xB7 continued in ${link.label}` };
-};
-var chipTitle = (chip) => {
-  if (chip.kind === "fold") {
-    return `${chip.branches.join(", ")}
-${chip.open ? FOLD_HINT : OPEN_HINT}`;
-  }
-  if (chip.kind === "link") {
-    return "Open the session this one continues";
-  }
-  const branch = chip.base ? `${chip.branch} \xB7 from ${chip.base}` : chip.branch;
-  return chip.continuedIn ? `${branch}
-Open the session that continued this branch` : branch;
-};
-var chipKey = (chip) => {
-  if (chip.kind === "branch") {
-    return `branch:${chip.branch}`;
-  }
-  return chip.kind === "fold" ? `fold:${chip.pipeline}` : "continues";
-};
-var pipelineOf = (chip) => chip.kind === "link" ? void 0 : chip.pipeline;
-var pipelineGaps = (chips) => {
-  const unfolded = new Set(chips.flatMap((chip) => chip.kind === "fold" && chip.open ? [chip.pipeline] : []));
-  return chips.map((chip, index) => {
-    const own = pipelineOf(chip);
-    const next = index + 1 < chips.length ? pipelineOf(chips[index + 1]) : void 0;
-    return own !== void 0 && unfolded.has(own) && next !== void 0 && next !== own;
-  });
-};
-var chipMoves = (current, target) => {
-  const order = [...current];
-  const moves = [];
-  target.forEach((key, index) => {
-    if (order[index] === key) {
-      return;
-    }
-    const from = order.indexOf(key);
-    if (from >= 0) {
-      order.splice(from, 1);
-    }
-    moves.push({ key, before: order[index] });
-    order.splice(index, 0, key);
-  });
-  return moves;
-};
-var ENTER_FRAMES = [{ opacity: 0, transform: "translateY(-8px) scale(.98)" }, { opacity: 1, transform: "none" }];
-var BUMP_FRAMES = [{ transform: "none" }, { transform: "scale(1.12)", offset: 0.35 }, { transform: "none" }];
-var CHIP_MOTION_MS = 500;
-var createChipsRow = (host, context, actions) => {
-  const entries = /* @__PURE__ */ new Map();
-  let drawn = false;
-  let marked;
-  let pointed;
-  let destroyed = false;
-  const point2 = (entry, on) => {
-    if (entry.chip.kind !== "branch") {
-      return;
-    }
-    const branch = entry.chip.branch;
-    if (on) {
-      pointed = branch;
-      actions.focus(branch);
-    } else if (pointed === branch) {
-      pointed = void 0;
-      actions.focus(void 0);
-    }
-  };
-  const linkOfChip = (chip) => {
-    if (chip.kind === "link") {
-      return chip.sessionId;
-    }
-    return chip.kind === "branch" ? chip.continuedIn?.sessionId : void 0;
-  };
-  const create = (chip) => {
-    const element = el("button", `session-chip ${chip.kind}`);
-    element.type = "button";
-    element.dataset.chip = chipKey(chip);
-    const entry = { element, lead: el("span", "chip-lead"), code: el("code"), status: el("span", "chip-status"), note: el("span", "chip-note"), chip };
-    element.append(el("i", "chip-dot"), entry.lead, " ", entry.code, " ", entry.status, " ", entry.note);
-    if (chip.kind === "fold") {
-      element.append(chevronIcon());
-    }
-    element.addEventListener("click", () => {
-      if (entry.chip.kind === "fold") {
-        actions.toggleFold(entry.chip.pipeline);
-        return;
-      }
-      const sessionId = linkOfChip(entry.chip);
-      if (sessionId !== void 0) {
-        const detail = { sessionId };
-        element.dispatchEvent(new CustomEvent(SESSION_LINK, { bubbles: true, detail }));
-      }
-    });
-    element.addEventListener("pointerenter", () => point2(entry, true));
-    element.addEventListener("pointerleave", () => point2(entry, false));
-    element.addEventListener("focus", () => point2(entry, true));
-    element.addEventListener("blur", () => point2(entry, false));
-    return entry;
-  };
-  const show = (element, text2) => {
-    setText(element, text2);
-    element.hidden = text2 === "";
-  };
-  const write2 = (entry, chip, fresh) => {
-    entry.chip = chip;
-    const texts = chipTexts(chip);
-    const color = chip.kind === "fold" ? "review" : chip.color;
-    entry.element.style.setProperty("--c", colorValue(color, context));
-    show(entry.lead, texts.lead);
-    show(entry.code, texts.code);
-    show(entry.note, texts.note);
-    const changed = entry.status.textContent !== texts.status;
-    show(entry.status, texts.status);
-    entry.status.dataset.tone = texts.tone;
-    if (changed && !fresh && texts.status !== "" && !context.reducedMotion()) {
-      entry.status.animate(BUMP_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE10 });
-    }
-    entry.element.title = chipTitle(chip);
-    if (chip.kind === "fold") {
-      entry.element.setAttribute("aria-expanded", String(chip.open));
-    }
-    entry.element.classList.toggle("link", linkOfChip(chip) !== void 0);
-    entry.element.classList.toggle("hl", chip.kind === "branch" && chip.branch === marked);
-  };
-  return {
-    update(session, folded) {
-      if (destroyed) {
-        return;
-      }
-      const chips = sessionChips(session, folded);
-      const keys2 = chips.map(chipKey);
-      const wanted = new Set(keys2);
-      for (const [key, entry] of entries) {
-        if (wanted.has(key)) {
-          continue;
-        }
-        entries.delete(key);
-        entry.element.remove();
-        if (entry.chip.kind === "branch" && entry.chip.branch === pointed) {
-          pointed = void 0;
-          actions.focus(void 0);
-        }
-      }
-      const current = Array.from(host.children, (child) => child instanceof HTMLElement ? child.dataset.chip ?? "" : "").filter((key) => entries.has(key));
-      const gaps = pipelineGaps(chips);
-      chips.forEach((chip, index) => {
-        const key = keys2[index];
-        let entry = entries.get(key);
-        if (!entry) {
-          entry = create(chip);
-          entries.set(key, entry);
-          if (drawn && !context.reducedMotion()) {
-            entry.element.animate(ENTER_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE10 });
-          }
-          write2(entry, chip, true);
-        } else {
-          write2(entry, chip, false);
-        }
-        entry.element.classList.toggle("pipeline-end", gaps[index]);
-      });
-      for (const move of chipMoves(current, keys2)) {
-        const element = entries.get(move.key)?.element;
-        const before = move.before === void 0 ? null : entries.get(move.before)?.element ?? null;
-        if (element) {
-          host.insertBefore(element, before);
-        }
-      }
-      drawn = true;
-    },
-    mark(branch) {
-      marked = branch;
-      for (const entry of entries.values()) {
-        entry.element.classList.toggle("hl", entry.chip.kind === "branch" && entry.chip.branch === branch);
-      }
-    },
-    destroy() {
-      destroyed = true;
-      entries.clear();
-    }
-  };
-};
-
 // src/ui/fixture-link.ts
 var FIXTURE_LINK_TEXT = "fixture";
 var FIXTURE_LINK_TITLE = "Save this session's spool lines as a replay fixture";
@@ -10887,6 +11230,8 @@ var ENTER_MS3 = 500;
 var FLY_EASE3 = "cubic-bezier(.45,.05,.3,1)";
 var FLY_DELAY_MS2 = 320;
 var FLY_MS3 = 900;
+var BUMP_MS = 500;
+var sectionCount = 0;
 var iconOf = (type) => {
   const icon2 = svgEl("svg", { viewBox: "0 0 14 14", "aria-hidden": "true" });
   if (type === "issue") {
@@ -10927,10 +11272,18 @@ var createSessionFollowupsView = (host, context, options) => {
   section2.setAttribute("aria-label", "Follow-ups");
   section2.hidden = true;
   const total = el("span", "questions-count");
-  const heading2 = el("div", "questions-heading");
-  heading2.append(el("span", "followups-title", "Follow-ups"), total);
+  const toggle = el("button", "questions-heading followups-toggle");
+  toggle.type = "button";
+  toggle.append(el("span", "followups-title", "Follow-ups"), total, chevronIcon());
+  const body = el("div", "followups-body");
+  sectionCount += 1;
+  body.id = `followups-body-${sectionCount}`;
+  toggle.setAttribute("aria-controls", body.id);
+  const inner = el("div", "followups-body-inner");
   const grid = el("div", "followup-columns");
-  section2.append(heading2, grid);
+  inner.append(grid);
+  body.append(inner);
+  section2.append(toggle, body);
   host.append(section2);
   const columns = /* @__PURE__ */ new Map();
   const items = /* @__PURE__ */ new Map();
@@ -10939,6 +11292,15 @@ var createSessionFollowupsView = (host, context, options) => {
   let current;
   let first = true;
   let destroyed = false;
+  let open2 = false;
+  const setOpen2 = (next) => {
+    open2 = next;
+    body.classList.toggle("open", next);
+    inner.inert = !next;
+    toggle.setAttribute("aria-expanded", String(next));
+  };
+  toggle.addEventListener("click", () => setOpen2(!open2));
+  setOpen2(false);
   const createItem = () => {
     const element = el("article", "followup-item");
     const entry = {
@@ -11049,10 +11411,10 @@ var createSessionFollowupsView = (host, context, options) => {
     const entering = section2.hidden;
     section2.hidden = false;
     if (animate && entering) {
-      section2.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE10 });
+      section2.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE8 });
     } else if (animate) {
       for (const element of entered) {
-        element.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE10 });
+        element.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE8 });
       }
     }
   };
@@ -11072,11 +11434,18 @@ var createSessionFollowupsView = (host, context, options) => {
       const half = { x: chip.offsetWidth / 2, y: chip.offsetHeight / 2 };
       const source = options.flySource?.(followup.origin.agentId)?.getBoundingClientRect();
       const centre = source ? centreIn(source, box) : { x: box.width / 2, y: box.height / 2 };
-      const head = column.head.getBoundingClientRect();
+      const folded = !open2;
+      const head = (folded ? toggle : column.head).getBoundingClientRect();
       const origin = { x: centre.x - half.x, y: centre.y - half.y };
       const target = { x: head.left - box.left + 16, y: centreIn(head, box).y - half.y };
       const remove = () => chip.remove();
-      chip.animate(flyFrames(origin, target), { duration: FLY_MS3, easing: FLY_EASE3, fill: "forwards" }).finished.then(remove, remove);
+      const land = () => {
+        remove();
+        if (folded && !destroyed) {
+          total.animate(BUMP_FRAMES, { duration: BUMP_MS, easing: EASE8 });
+        }
+      };
+      chip.animate(flyFrames(origin, target), { duration: FLY_MS3, easing: FLY_EASE3, fill: "forwards" }).finished.then(land, remove);
     }, FLY_DELAY_MS2);
     timers.add(timer);
   };
@@ -11238,9 +11607,25 @@ var fitGraph = (session, options, hostWidth, wrapped) => {
 // src/ui/graph/session-effects.ts
 var MESSAGE_POP_MS = 80;
 var QUESTION_POP_MS = 80;
-var NONE2 = { pops: [], dots: [], sweep: false, folds: [] };
+var NONE2 = { pops: [], dots: [], sweep: false, folds: [], sheens: [] };
 var isEnded2 = (state) => !isActive2(state) && state !== "pending" && state !== "skipped";
 var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
+var SHEEN_STATES = ["done", "approved", "changes"];
+var sheensOf = (previous, current, pops) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const sheens = [];
+  for (const item2 of current.items) {
+    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
+      continue;
+    }
+    const old = before.get(item2.key);
+    if (old?.kind === "node" && old.state === "running" && old.stale !== true) {
+      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+      sheens.push({ key: item2.key, delay: pop + POP_MS2 });
+    }
+  }
+  return sheens;
+};
 var foldsOf = (previous, current) => {
   const before = foldedPipelines(previous.session, previous.expanded);
   const after = foldedPipelines(current.session, current.expanded);
@@ -11379,7 +11764,8 @@ var sessionEffects = (previous, current) => {
   }
   const sweep = previous.session.chip.tone !== "done" && current.session.chip.tone === "done";
   const dots = planned.map(({ edges, color, delay, reverse }) => reverse ? { edges, color, delay, reverse } : { edges, color, delay });
-  return { pops, dots, sweep, folds };
+  const sheens = sheensOf(previous.layout, current.layout, pops);
+  return { pops, dots, sweep, folds, sheens };
 };
 
 // src/ui/graph/session-view.ts
@@ -11424,7 +11810,7 @@ var createSessionGraphView = (host, context) => {
     if (!(hostWidth > 0)) {
       hostWidth = Math.floor(wrapper.clientWidth);
     }
-    const fit = fitGraph(session, { modelLetters: context.config.modelLetters, expanded, now }, hostWidth, wrapped);
+    const fit = fitGraph(session, { modelLetters: context.config.modelLetters, expanded, now, typical: context.typical }, hostWidth, wrapped);
     wrapped = fit.wrap;
     const current = { session, layout: fit.layout, expanded };
     scene.set(fit.layout, labelOf(session), fit.scale);
@@ -12001,7 +12387,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
         shown = true;
         button.hidden = false;
         if (!first && !context.reducedMotion()) {
-          button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE10 });
+          button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE8 });
         }
       }
       first = false;
@@ -12778,7 +13164,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
         morphFrom(card.element, from);
         morphing.add(card.element);
       } else {
-        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE10, fill: "backwards" });
+        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE8, fill: "backwards" });
       }
     }
     glide(before, measure(), morphing);
@@ -13547,8 +13933,44 @@ var createTopBar = (host, options) => {
   };
 };
 
-// src/ui/board.ts
+// src/ui/snapshot.ts
 var isSessionView = (snapshot) => "sessions" in snapshot;
+var parseSessionView = (data) => {
+  try {
+    const view = JSON.parse(String(data));
+    const valid = view !== null && typeof view === "object" && typeof view.sessions === "object" && view.sessions !== null && Array.isArray(view.sessionOrder);
+    if (!valid) {
+      return void 0;
+    }
+    const listed = Array.isArray(view.summaries) ? view.summaries : [];
+    const summaries = listed.map((summary) => Array.isArray(summary.branches) ? summary : { ...summary, branches: [] });
+    const repositories = Array.isArray(view.repositories) ? view.repositories : [];
+    const parsed = { ...view, summaries, repositories };
+    const typical = view.typical;
+    if (typeof typical !== "object" || typical === null || Array.isArray(typical)) {
+      delete parsed.typical;
+    }
+    return parsed;
+  } catch {
+    return void 0;
+  }
+};
+var takeSnapshot = (context, snapshot) => {
+  context.github = snapshot.github;
+  if (isSessionView(snapshot)) {
+    context.sessions = snapshot.sessions;
+    context.typical = snapshot.typical ?? {};
+  } else {
+    context.runs = snapshot.runs;
+  }
+};
+var clearSnapshot = (context) => {
+  context.runs = {};
+  context.sessions = {};
+  context.typical = {};
+};
+
+// src/ui/board.ts
 var branchLabels = (board, canOpen) => {
   if (isSessionView(board)) {
     const onBranch = (branch) => {
@@ -13610,21 +14032,6 @@ var parseBoard = (data) => {
     }
     const repositories = Array.isArray(board.repositories) ? board.repositories : [];
     return { ...board, repositories };
-  } catch {
-    return void 0;
-  }
-};
-var parseSessionView = (data) => {
-  try {
-    const view = JSON.parse(String(data));
-    const valid = view !== null && typeof view === "object" && typeof view.sessions === "object" && view.sessions !== null && Array.isArray(view.sessionOrder);
-    if (!valid) {
-      return void 0;
-    }
-    const listed = Array.isArray(view.summaries) ? view.summaries : [];
-    const summaries = listed.map((summary) => Array.isArray(summary.branches) ? summary : { ...summary, branches: [] });
-    const repositories = Array.isArray(view.repositories) ? view.repositories : [];
-    return { ...view, summaries, repositories };
   } catch {
     return void 0;
   }
@@ -13782,8 +14189,7 @@ var start = async () => {
     }
     stack?.destroy();
     previous.overview?.destroy();
-    previous.context.runs = {};
-    previous.context.sessions = {};
+    clearSnapshot(previous.context);
     host.classList.add("leaving");
     if (reducedMotion()) {
       host.remove();
@@ -14008,12 +14414,7 @@ var start = async () => {
     if (pending && latest && shown) {
       pending = false;
       const board = latest;
-      shown.context.github = board.github;
-      if (isSessionView(board)) {
-        shown.context.sessions = board.sessions;
-      } else {
-        shown.context.runs = board.runs;
-      }
+      takeSnapshot(shown.context, board);
       topBar.update(board);
       drawStack(shown, board);
       shown.board = board;
