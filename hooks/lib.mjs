@@ -206,6 +206,9 @@ const lstatOrUndefined = (path) => {
   }
 };
 
+/** The entry at `path`, undefined only when it is missing: a path that cannot be read (EACCES, ELOOP, ENOTDIR) throws. */
+const lstatIfPresent = (path) => lstatSync(path, { throwIfNoEntry: false });
+
 /**
  * A file of a `<repo-hash>` directory (the user config, the repository record) and that directory are refused when
  * they are a symlink or belong to another user (design section 3).
@@ -239,11 +242,12 @@ const repositoryRoots = (start) => {
  * The config of a repository (design section 8): the user config when it exists, else the repository config
  * `nurselog.config.json` of the worktree, else that of the main checkout of the same clone, else undefined. The
  * first repository config found must be a regular file (no symlink) within `MAX_CONFIG_BYTES`; any other file
- * leaves the repository inactive. Throws when the user config fails the path checks.
+ * leaves the repository inactive. Throws when the user config cannot be looked up (EACCES on a parent, for one; only a
+ * missing file is no user config) or fails the path checks.
  */
 export const findConfig = (root) => {
   const user = userConfigPath(root);
-  if (lstatOrUndefined(user)) {
+  if (lstatIfPresent(user)) {
     checkOwnedFile(user);
     return { path: user, kind: 'user' };
   }
@@ -391,11 +395,12 @@ export const readHookConfig = (root) => {
  * The `keepDays` of `section` (`spool`, else `insights` for the session aggregates) in the config file at `path` (an
  * integer from 1 to 3650 for both), or undefined when the file is missing or sets none. The board reads an orphaned
  * spool directory's own `nurselog.config.json` this way (design section 3, "Retention"), and fails closed: it throws
- * when the file or its directory is a symlink or another user's, the file cannot be read within `MAX_CONFIG_BYTES`, it
- * is no JSON object, or its `keepDays` is out of range.
+ * when the file cannot be looked up (EACCES on a parent, for one; only a missing file gives undefined), the file or
+ * its directory is a symlink or another user's, the file cannot be read within `MAX_CONFIG_BYTES`, it is no JSON
+ * object, or its `keepDays` is out of range.
  */
 export const configKeepDays = (path, section = 'spool') => {
-  if (lstatOrUndefined(path) === undefined) {
+  if (lstatIfPresent(path) === undefined) {
     return undefined;
   }
   checkOwnedFile(path);
@@ -1080,18 +1085,20 @@ const pruneNotified = (dir, oldest) => {
 const AFTER_EVERY_DAY = '\uFFFF';
 
 /**
- * The day files of `dir` dated before the local day `oldest`, oldest first; none when `dir` is missing. A day file is
+ * The day files of `dir` dated before the local day `oldest`, oldest first; none when `dir` is missing, and a `dir` that
+ * cannot be looked up (EACCES on a parent, ENOTDIR) throws, so no prune reads it as empty. A day file is
  * a regular file or a symlink by `lstat` (a symlink is unlinked, never followed); a directory named like one is left out.
+ * A file gone since the listing is left out; one that cannot be looked up throws, so no prune reads it as deleted.
  */
 const dayFilesBefore = (dir, oldest) => {
-  if (!existsSync(dir)) {
+  if (lstatIfPresent(dir) === undefined) {
     return [];
   }
   const files = [];
   for (const name of readdirSync(dir)) {
     const day = DAY_FILE.exec(name)?.[1];
     const path = join(dir, name);
-    const stat = day !== undefined && day < oldest ? lstatOrUndefined(path) : undefined;
+    const stat = day !== undefined && day < oldest ? lstatIfPresent(path) : undefined;
     if (stat?.isFile() || stat?.isSymbolicLink()) {
       files.push({ day, path });
     }
@@ -1118,10 +1125,11 @@ const deleteDaysBefore = (dir, oldest, onFailure = () => {}) => {
 
 /**
  * Deletes the day files of `dir` and its `notified/<session_id>` markers (design section 3) older than `keepDays`
- * and returns their paths: a day file by the day in its name, a marker by the day it was last written.
+ * and returns their paths: a day file by the day in its name, a marker by the day it was last written. A missing `dir`
+ * deletes nothing; one that cannot be looked up throws (`dayFilesBefore`).
  */
 export const pruneSpool = (dir, keepDays, now = new Date()) => {
-  if (!existsSync(dir)) {
+  if (lstatIfPresent(dir) === undefined) {
     return [];
   }
   return deleteDaysBefore(dir, localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays)));
@@ -1149,11 +1157,12 @@ export const pruneOncePerDay = (dir, keepDays, now = new Date(), backup = {}) =>
 /* ---------- purge (design section 3, "Retention") ---------- */
 
 /**
- * Whether the spool directory `dir` exists: false when it is missing; throws when it is a symlink, no directory or
- * a directory of another user, as the private-directory rules refuse them (design section 3).
+ * Whether the spool directory `dir` exists: false when it is missing; throws when it cannot be looked up (EACCES on a
+ * parent, for one), is a symlink, no directory or a directory of another user, as the private-directory rules refuse
+ * them (design section 3).
  */
 export const spoolDirExists = (dir) => {
-  const stat = lstatOrUndefined(dir);
+  const stat = lstatIfPresent(dir);
   if (stat === undefined) {
     return false;
   }

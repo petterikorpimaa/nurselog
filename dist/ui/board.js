@@ -214,6 +214,9 @@ var githubStatus = (github) => {
   if (checked && !github.accountOk) {
     return { text: github.activeAccount ? `gh account mismatch: ${github.activeAccount}` : "gh account mismatch", tone: "bad" };
   }
+  if (github.repoMismatch) {
+    return { text: `gh repo mismatch: github.repo ${github.repoMismatch.repo}, remotes ${github.repoMismatch.remotes.join(", ")}`, tone: "bad" };
+  }
   if (!github.polling) {
     return { text: "gh polling off", tone: "off" };
   }
@@ -239,6 +242,17 @@ var cardTitle = (run) => {
   const trailing = new RegExp(`\\s*\\(${key}\\)$`, "i");
   const stripped = title.replace(leading, "").replace(trailing, "").trim();
   return stripped || run.branch;
+};
+var ticketUrl = (template, key) => {
+  if (!template || !key || !template.includes("{key}") || !URL.canParse(template)) {
+    return void 0;
+  }
+  const url = template.replaceAll("{key}", encodeURIComponent(key));
+  if (!URL.canParse(url)) {
+    return void 0;
+  }
+  const parsed = new URL(url);
+  return parsed.protocol === "https:" && parsed.host === new URL(template).host ? url : void 0;
 };
 var rowTitle = (run) => {
   if (run.title?.trim()) {
@@ -646,6 +660,7 @@ var FALLBACK_CONFIG = {
   promote: [],
   docs: false,
   features: { answerFromUi: false },
+  keyUrl: "",
   sessionFixtures: false
 };
 var cssName = (id) => id.replace(/[^A-Za-z0-9_-]/g, "-");
@@ -1168,7 +1183,7 @@ var graphLayout = (run, options) => {
         return order.map((stream) => {
           const lane = keys.stream(stream.id);
           const color = `package:${stream.package}`;
-          return { key: `stream:${stream.id}`, from: id, at: { key: lane, dx: 11 }, lane, color, done: stream.state === "done" };
+          return { key: `stream:${stream.id}`, from: id, at: { key: lane, dx: 11 }, lane, color, done: stream.state === "done", skipped: stream.state === "skipped" };
         });
       case "join":
         return [{ key: "join", from: id, at: joinOut, color: "shared", done: run.join?.state === "done" }];
@@ -1192,8 +1207,8 @@ var graphLayout = (run, options) => {
     }
     feeds[target] = exits.map((exit) => {
       const key = keys.feed(exit.key, target === "review" ? "split" : target);
-      edge(key, exit.at, to(exit), state(exit), exit.color, "curve");
-      return { key, color: exit.color };
+      edge(key, exit.at, to(exit), exit.skipped ? "pending" : state(exit), exit.color, "curve");
+      return exit.skipped ? { key, color: exit.color, skipped: true } : { key, color: exit.color };
     });
   };
   const planX = (column.plan?.center ?? 0) - 6;
@@ -1238,7 +1253,8 @@ var graphLayout = (run, options) => {
       const nodeMark = markOf(nodeModel, options);
       const pillFrom = origin ? { from: origin } : slide2("build", pillAt);
       const nodeFrom = origin ? { from: origin } : slide2("build", nodeAt);
-      add({ kind: "pill", key: pill, at: pillAt, text: stream.package, color, ...pillFrom });
+      const pillSkipped = stream.state === "skipped" ? { skipped: true } : {};
+      add({ kind: "pill", key: pill, at: pillAt, text: stream.package, color, ...pillSkipped, ...pillFrom });
       const latest2 = stream.agentIds.at(-1);
       const nodeStale = isStaleNode(run, rerun ? stream.agentIds[0] : latest2, nodeState);
       add({ kind: "node", key: node, at: nodeAt, state: nodeState, color, mark: nodeMark, radius: NODE_RADIUS, stale: nodeStale, ...nodeFrom });
@@ -1248,7 +1264,7 @@ var graphLayout = (run, options) => {
         add({ kind: "node", key: keys.streamRun(stream.id), at: { key: node, dx: 13, dy: -11 }, state: stream.state, color, mark: runMark, radius: 7.5, stale: runStale });
       }
       if (origin) {
-        const inState = stream.state === "pending" ? "pending" : "done";
+        const inState = stream.state === "pending" || stream.state === "skipped" ? "pending" : "done";
         add({ kind: "edge", key: keys.streamIn(stream.id), a: origin, b: { key: pill, dx: -half }, shape: "curve", state: inState, color });
       }
       const pillState = flowInto(stream.state === "handed" ? "running" : stream.state, runStale);
@@ -1263,8 +1279,9 @@ var graphLayout = (run, options) => {
   const join = column.join;
   if (join) {
     const ys = laneYs.length > 0 ? laneYs : [cy];
-    const joined = streams.filter((stream) => stream.state === "done").length;
-    const allJoined = streams.length > 0 && joined === streams.length;
+    const counted = streams.filter((stream) => stream.state !== "skipped");
+    const joined = counted.filter((stream) => stream.state === "done").length;
+    const allJoined = counted.length > 0 && joined === counted.length;
     let barState = joined > 0 ? "partial" : "pending";
     if (run.join?.state === "done" || allJoined) {
       barState = "done";
@@ -1275,9 +1292,9 @@ var graphLayout = (run, options) => {
     const barBottom = Math.max(...ys) + 13;
     const barFrom = slide2("join", { x: join.center, y: (barTop + barBottom) / 2 });
     add({ kind: "bar", key: keys.joinBar, x: join.center, y0: barTop, y1: barBottom, state: barState, ...barFrom });
-    if (streams.length > 1 && barState !== "done") {
+    if (counted.length > 1 && barState !== "done") {
       const at = { x: join.center, y: barTop - 6 };
-      add({ kind: "text", key: "text:join", at, text: `${joined}/${streams.length}`, tone: "join-count", anchor: "middle", ...slide2("join", at) });
+      add({ kind: "text", key: "text:join", at, text: `${joined}/${counted.length}`, tone: "join-count", anchor: "middle", ...slide2("join", at) });
     }
     const joinAtCenter = { xKey: keys.joinBar, dx: -4, yKey: "anchor:center" };
     const into = (exit) => exit.lane ? { xKey: keys.joinBar, dx: -4, yKey: exit.lane } : joinAtCenter;
@@ -2409,7 +2426,7 @@ var popsOf = (previous, current) => {
   const pops = [];
   for (const [key, node] of nodesOf(current)) {
     const old = before.get(key);
-    const changed = old ? old.state !== node.state || old.mark !== node.mark : isActive2(node.state);
+    const changed = old ? old.state !== node.state && node.state !== "skipped" || old.mark !== node.mark : isActive2(node.state);
     if (changed) {
       pops.push(key);
     }
@@ -2494,14 +2511,14 @@ var dotsOf = (before, current) => {
     if (!hasLeftPending(run.stages[id].state) || hasLeftPending(previous.stages[id].state)) {
       continue;
     }
-    const edges = layout.feeds[id] ?? [];
+    const edges = (layout.feeds[id] ?? []).filter((edge) => !edge.skipped);
     queue.push(...edges.map((edge) => ({ edges: [edge.key], color: edge.color, to: keys.tail(id) })));
   }
   const drawn = queue.filter((dot) => dot.edges.every((edge) => present.has(edge)));
   const dots = drawn.map((dot, index) => ({ ...dot, delay: index * DOT_STAGGER }));
   if (fan.length > 0) {
     const start2 = drawn.length * DOT_STAGGER;
-    for (const edge of layout.feeds.review ?? []) {
+    for (const edge of (layout.feeds.review ?? []).filter((feed) => !feed.skipped)) {
       dots.push({ edges: [edge.key], color: edge.color, delay: start2 });
     }
     fan.forEach((id, index) => {
@@ -4120,7 +4137,7 @@ var signatureOf = (item2) => {
     case "node":
       return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}|${item2.tip ?? ""}`;
     case "pill":
-      return `${item2.text}|${item2.color}|${item2.compact === true}|${item2.tip ?? ""}`;
+      return `${item2.text}|${item2.color}|${item2.compact === true}|${item2.skipped === true}|${item2.tip ?? ""}`;
     case "rect":
       return `${item2.role}|${item2.width}|${item2.height}|${item2.tip ?? ""}`;
     case "bar":
@@ -4270,7 +4287,7 @@ var createScene = (host, context, options = {}) => {
         const width = item2.text.length * 6.4 + (item2.compact ? 10 : 14);
         const core = svgEl("g", { class: "pill-core" });
         core.append(svgEl("rect", { x: -width / 2, y: -8, width, height: 16, rx: 8 }), textElement("pill-text", item2.text, { y: 3.7 }));
-        element.setAttribute("class", item2.compact ? "pill compact" : "pill");
+        element.setAttribute("class", ["pill", item2.compact ? "compact" : "", item2.skipped ? "skipped" : ""].filter(Boolean).join(" "));
         element.style.setProperty("--c", colorValue(item2.color, context));
         element.replaceChildren(core, ...titleOf(item2.tip));
         entry.core = core;
@@ -6196,7 +6213,7 @@ var memoSource = (toSource) => {
   };
 };
 var createRunModalSource = () => {
-  return memoSource((run) => ({ id: run.id, title: modalTitle(run), messages: run.messages }));
+  return memoSource((run) => ({ id: run.id, title: modalTitle(run), key: run.key, messages: run.messages }));
 };
 var createModalSource = (runs, cardId, messageId) => {
   let memo;
@@ -6237,7 +6254,7 @@ var createModalSource = (runs, cardId, messageId) => {
 var createSessionModalSource = (sessions, sessionId, fallback = () => void 0) => {
   const toSource = memoSource((session) => {
     const heading2 = sessionHeading(session);
-    return { id: session.id, title: modalTitle({ key: session.key, title: heading2, branch: heading2 }), messages: session.messages };
+    return { id: session.id, title: modalTitle({ key: session.key, title: heading2, branch: heading2 }), key: session.key, messages: session.messages };
   });
   return () => {
     const all = sessions();
@@ -6248,6 +6265,10 @@ var earlierLabel = (count) => `Earlier messages (${count})`;
 var modalTitle = (run) => {
   const title = cardTitle(run);
   return run.key ? `${run.key}: ${title}` : title;
+};
+var modalTitleKey = (source) => {
+  const { key, title } = source;
+  return key !== void 0 && title.startsWith(`${key}: `) ? { key, after: title.slice(key.length) } : { after: "" };
 };
 var modalSubtitle = (repository, count) => {
   const parts = [repository, "main thread", plural(count, "message")];
@@ -6493,6 +6514,36 @@ var contentDelays = (contentAt) => {
   return Array.from({ length: CONTENT_GROUPS }, (_, group) => contentAt + group * CONTENT_STAGGER_MS);
 };
 
+// src/ui/ticket-link.ts
+var drawnLinks = /* @__PURE__ */ new WeakMap();
+var ticketLinkTitle = (key) => `Open ${key} in the tracker`;
+var setTicketKey = (host, key, template, after = "", fallback = "") => {
+  const href = key === void 0 ? void 0 : ticketUrl(template, key);
+  if (key === void 0 || href === void 0) {
+    if (drawnLinks.delete(host)) {
+      host.replaceChildren();
+    }
+    setText(host, key === void 0 ? fallback : `${key}${after}`);
+    return;
+  }
+  const drawn = JSON.stringify([href, key, after]);
+  if (drawnLinks.get(host) === drawn) {
+    return;
+  }
+  drawnLinks.set(host, drawn);
+  const link = el("a", "ticket-link", key);
+  link.setAttribute("href", href);
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener noreferrer");
+  link.title = ticketLinkTitle(key);
+  link.addEventListener("click", (event) => event.stopPropagation());
+  host.textContent = "";
+  host.replaceChildren(link);
+  if (after !== "") {
+    host.append(after);
+  }
+};
+
 // src/ui/modal.ts
 var TITLE_ID = "main-modal-title";
 var EARLIER_ID = "main-modal-earlier";
@@ -6553,6 +6604,11 @@ var blockNode = (block) => {
 };
 var drawMessageText = (target, text2) => {
   target.replaceChildren(...textBlocks(text2).map(blockNode));
+};
+var drawModalTitle = (title, source, keyUrl) => {
+  const { key, after } = modalTitleKey(source);
+  setTicketKey(title, key, keyUrl, after, source.title);
+  title.title = source.title;
 };
 var fullTime = (at) => at === void 0 ? "" : new Date(at).toLocaleString();
 var modal;
@@ -6880,10 +6936,8 @@ var createModal = () => {
   const render = (source, context, animate) => {
     drawn = source;
     const model = messagesModel(source.messages);
-    const heading2 = source.title;
     const sub = modalSubtitle(context.config.repo, model.count);
-    setText(title, heading2);
-    title.title = heading2;
+    drawModalTitle(title, source, context.config.keyUrl);
     setText(subtitle, sub);
     subtitle.title = sub;
     fillLatest(model.latest, animate);
@@ -8009,7 +8063,7 @@ var createCard = (context, onToggle) => {
       const previous = current;
       current = run;
       element.dataset.run = run.id;
-      setText(key, run.key ? `${run.key}:` : "");
+      setTicketKey(key, run.key, context.config.keyUrl, ":");
       key.hidden = !run.key;
       setText(heading2, cardTitle(run));
       setText(branch, run.branch);
@@ -8132,20 +8186,21 @@ var OUTCOME_TONE_TEXTS = {
   removed: "removed"
 };
 var rowCount = 0;
-var createLine = (kind, attribute, button) => {
+var createLine = (kind, attribute, button, template) => {
   const element = el("li", `run-row ${kind}`);
   const line = button ? el("button", "run-row-line") : el("div", "run-row-line");
   const dot = el("span", "row-dot");
   const key = el("span", "row-key");
   const title = el("span", "row-title");
   line.append(dot, key, title);
+  const keyTemplate = button ? "" : template;
   element.append(line, el("p", "row-error", ROW_ERROR_TEXT));
   const update = (item2) => {
     element.dataset[attribute] = item2.id;
     if (attribute === "session") {
-      setText(key, item2.key ?? NO_TICKET_TEXT);
+      setTicketKey(key, item2.key, keyTemplate, "", NO_TICKET_TEXT);
     } else {
-      setText(key, item2.key ?? "");
+      setTicketKey(key, item2.key, keyTemplate);
       key.hidden = !item2.key;
       element.classList.toggle("keyless", !item2.key);
     }
@@ -8170,7 +8225,7 @@ var questionIds = (event) => {
   return Array.isArray(detail?.questionIds) ? detail.questionIds : [];
 };
 var createConversationRow = (context) => {
-  const { element, line, dot, key, title, update: updateLine } = createLine("conversation", "run", true);
+  const { element, line, dot, key, title, update: updateLine } = createLine("conversation", "run", true, context.config.keyUrl);
   const { meta, branch, chip, elapsedText, costText } = createConversationMeta(context);
   line.append(meta);
   const questionsHost = el("div", "questions-host");
@@ -8228,7 +8283,7 @@ var createConversationRow = (context) => {
 };
 var createSessionConversationRow = (context, parts) => {
   const opens = parts.openMessages !== void 0;
-  const { element, line, dot, key, title, update: updateLine } = createLine("conversation", "session", opens);
+  const { element, line, dot, key, title, update: updateLine } = createLine("conversation", "session", opens, context.config.keyUrl);
   const { meta, branch, chip, elapsedText, costText } = createConversationMeta(context);
   line.append(meta);
   const questionsHost = el("div", "questions-host");
@@ -8303,9 +8358,9 @@ var createSessionConversationRow = (context, parts) => {
     }
   };
 };
-var createFinishedParts = (attribute, actions) => {
+var createFinishedParts = (context, attribute, actions) => {
   rowCount += 1;
-  const parts = createLine("finished", attribute, false);
+  const parts = createLine("finished", attribute, false, context.config.keyUrl);
   const outcome = el("span", "row-outcome");
   const facts = el("span", "row-facts");
   facts.title = "Duration \xB7 tokens \xB7 estimated cost";
@@ -8337,7 +8392,7 @@ var createFinishedParts = (attribute, actions) => {
   return { ...parts, outcome, facts, when, show, clear, detailBox, detail, setShown: setShown2, isShown: () => shown };
 };
 var createFinishedRow = (context, actions) => {
-  const { element, dot, outcome, facts, when, clear, detail, setShown: setShown2, update: updateLine } = createFinishedParts("run", actions);
+  const { element, dot, outcome, facts, when, clear, detail, setShown: setShown2, update: updateLine } = createFinishedParts(context, "run", actions);
   let current;
   const updateAgo = (now) => {
     if (current) {
@@ -8370,7 +8425,7 @@ var createFinishedRow = (context, actions) => {
   };
 };
 var createFinishedSessionRow = (context, actions) => {
-  const parts = createFinishedParts("session", actions);
+  const parts = createFinishedParts(context, "session", actions);
   const { element, line, dot, outcome, facts, when, show, clear, detailBox, detail, setShown: setShown2, isShown: isShown2 } = parts;
   const note = el("p", "row-detail-note");
   note.setAttribute("role", "status");
@@ -9851,7 +9906,7 @@ var stageKeyTitle = (stage, packages) => {
   }
   return stage === "main" ? "main thread" : stage;
 };
-var rankRow = (entry, max, packages) => {
+var rankRow = (entry, max, packages, runs) => {
   const order = stageOrder(Object.keys(entry.byStage), packages);
   const segments = [];
   for (const stage of order) {
@@ -9861,12 +9916,13 @@ var rankRow = (entry, max, packages) => {
     }
   }
   const value2 = `${tokens(entry.tokens)} \xB7 ${cost(entry.usd)}`;
-  return { key: entry.key, title: entry.title ?? "", finished: entry.finished, value: value2, segments };
+  const ticket = entry.runIds.some((id) => Object.hasOwn(runs, id) && runs[id].key === entry.key);
+  return { key: entry.key, title: entry.title ?? "", ticket, finished: entry.finished, value: value2, segments };
 };
-var rankingModel = (entries, packages) => {
+var rankingModel = (entries, packages, runs = {}) => {
   const sorted = entries.filter((entry) => entry.tokens > 0).sort((a, b) => b.tokens - a.tokens || a.key.localeCompare(b.key));
   const max = Math.max(1, sorted[0]?.tokens ?? 0);
-  const rows = sorted.map((entry) => rankRow(entry, max, packages));
+  const rows = sorted.map((entry) => rankRow(entry, max, packages, runs));
   return { top: rows.slice(0, RANK_TOP), rest: rows.slice(RANK_TOP) };
 };
 var toggleText = (ranking, open2) => {
@@ -10233,6 +10289,7 @@ var createRanking = (context, link, reveal) => {
   let lit;
   let latest = rankingModel([], []);
   let arrangement = "";
+  const keyTemplate = link ? "" : context.config.keyUrl;
   const drawToggle = () => {
     const label = toggleText(latest, open2);
     toggle.hidden = label === "";
@@ -10247,7 +10304,7 @@ var createRanking = (context, link, reveal) => {
   });
   const drawRow = (row2, model, grow) => {
     row2.dot.classList.toggle("finished", model.finished);
-    setText(row2.key, model.key);
+    setTicketKey(row2.key, model.key, model.ticket ? keyTemplate : "");
     row2.key.title = model.key;
     setText(row2.title, model.title);
     row2.title.title = model.title;
@@ -10312,7 +10369,7 @@ var createRanking = (context, link, reveal) => {
       }
     },
     update(input) {
-      const ranking = rankingModel(input.tokenRanking, context.config.packages);
+      const ranking = rankingModel(input.tokenRanking, context.config.packages, context.runs);
       latest = ranking;
       reveal(ranking.top.length > 0);
       setText(sub, input.repository ? `${input.repository} \xB7 split by stage, live` : "Split by stage, live");
@@ -10823,8 +10880,8 @@ var newFollowups = (previous, next) => {
   if (previous === void 0) {
     return [];
   }
-  const known = new Set(previous.map((followup) => followup.id));
-  return next.filter((followup) => !known.has(followup.id)).sort(compareFollowups);
+  const known = new Map(previous.map((followup) => [followup.id, followup.at]));
+  return next.filter((followup) => known.get(followup.id) !== followup.at).sort(compareFollowups);
 };
 var ENTER_MS3 = 500;
 var FLY_EASE3 = "cubic-bezier(.45,.05,.3,1)";
@@ -10886,6 +10943,7 @@ var createSessionFollowupsView = (host, context, options) => {
     const element = el("article", "followup-item");
     const entry = {
       element,
+      at: "",
       text: el("p", "followup-text"),
       file: el("code", "followup-file"),
       branch: el("span", "followup-branch"),
@@ -10962,15 +11020,16 @@ var createSessionFollowupsView = (host, context, options) => {
       const nodes = [];
       for (const followup of model.items) {
         let entry = items.get(followup.id);
-        const created = !entry;
         if (!entry) {
           entry = createItem();
           items.set(followup.id, entry);
         }
+        const entering2 = entry.at !== followup.at;
+        entry.at = followup.at;
         fillItem(entry, followup, session);
         if (shown.has(followup)) {
           nodes.push(entry.element);
-          if (created) {
+          if (entering2) {
             entered.push(entry.element);
           }
         }
@@ -11137,7 +11196,8 @@ var sessionMetrics = (session) => {
   const tokens2 = { byStage, total: processedTokens(session.tokens.total), usd: session.tokens.total.usd };
   const tools = { main: toolMetrics(main ? [main] : []), subagents: toolMetrics(subagents) };
   const total = totalOf(roles);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens: tokens2 };
+  const resumes = resumeMetrics(session.resumes ?? []);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens: tokens2, resumes };
   if (session.overhead) {
     metrics.overhead = overheadMetrics(session.overhead, total.usd);
   }
@@ -11146,6 +11206,11 @@ var sessionMetrics = (session) => {
 var overheadMetrics = (overhead, sessionUsd) => {
   const share2 = sessionUsd > 0 ? overhead.usd / sessionUsd : 0;
   return { ...structuredClone(overhead), share: share2 };
+};
+var resumeMetrics = (resumes) => {
+  const expired = resumes.filter((entry) => entry.cacheLikelyExpired === true).length;
+  const cacheWriteUsd = resumes.reduce((sum, entry) => sum + (entry.cacheWriteUsd ?? 0), 0);
+  return { count: resumes.length, expired, cacheWriteUsd, items: structuredClone(resumes) };
 };
 
 // src/ui/graph/fit.ts
@@ -11555,6 +11620,7 @@ var TOOLS_NOTE = "Response sizes as Claude Code reports them: an image Read coun
 var OVERHEAD_NOTE = "Estimate from character counts, 3 characters per token.";
 var NO_OVERHEAD = "\u2013";
 var NO_OVERHEAD_NOTE = "Not recorded for this session: its hook predates the overhead count.";
+var NO_RESUMES = "No resumes";
 var OVERHEAD_PARTS = [
   { key: "markers", label: "Markers prompt" },
   { key: "reportParagraph", label: "Report prompt" },
@@ -11644,6 +11710,39 @@ var verifyRows = (verification) => {
     const mean = `${(Number.isFinite(entry.meanPerRun) ? entry.meanPerRun : 0).toFixed(1)} per run`;
     return { role: entry.role, cells, mean, title: plural(entry.runs, "run") };
   });
+};
+var cacheText = (expired) => {
+  if (expired === void 0) {
+    return "";
+  }
+  return expired ? "likely expired" : "warm";
+};
+var resumeRow = (entry) => {
+  const at = parseTime(entry.at);
+  const when = at === void 0 ? entry.at : new Date(at).toLocaleString();
+  const estimate = entry.cacheWriteUsd === void 0 ? [] : [`estimated cache write $${entry.cacheWriteUsd}`];
+  return {
+    time: timeOfDay(at),
+    idle: entry.idleSeconds === void 0 ? "" : `after ${elapsed(entry.idleSeconds * 1e3)}`,
+    context: entry.contextTokens === void 0 ? "" : `${tokens(entry.contextTokens)} context`,
+    cache: cacheText(entry.cacheLikelyExpired),
+    expired: entry.cacheLikelyExpired === true,
+    usd: entry.cacheWriteUsd === void 0 ? "" : overheadCost(entry.cacheWriteUsd),
+    title: [when, entry.source, ...estimate].join(" \xB7 ")
+  };
+};
+var resumesView = (resumes) => {
+  if (resumes.items.length === 0) {
+    return { head: NO_RESUMES, rows: [] };
+  }
+  const parts = [plural(resumes.count, "resume")];
+  if (resumes.expired > 0) {
+    parts.push(`${resumes.expired} likely expired`);
+  }
+  if (resumes.items.some((entry) => entry.cacheWriteUsd !== void 0)) {
+    parts.push(`\u2248\xA0${overheadCost(resumes.cacheWriteUsd)}`);
+  }
+  return { head: parts.join(" \xB7 "), rows: resumes.items.map(resumeRow) };
 };
 var createBarList = (list, empty) => {
   const entries = /* @__PURE__ */ new Map();
@@ -11763,7 +11862,11 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
   const overheadBars = createBarList(overheadList, el("p"));
   const overheadNote = el("p", "summary-note");
   overhead.body.append(overheadHead, overheadList, overheadNote);
-  left.append(agents.element, verification.element);
+  const resumes = section("Resumes");
+  const resumesHead = el("p", "summary-overhead-head");
+  const resumeList = el("div", "summary-verify resumes");
+  resumes.body.append(resumesHead, resumeList);
+  left.append(agents.element, verification.element, resumes.element);
   right.append(branches.element, tools.element, overhead.element);
   inner.append(left, right);
   clip3.append(inner);
@@ -11800,6 +11903,17 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     element.append(el("span", "summary-verify-mean", row2.mean));
     return element;
   };
+  const resumeLine = (row2) => {
+    const element = el("div", "summary-verify-row");
+    element.title = row2.title;
+    const cache = el("span", "summary-verify-kind", row2.cache);
+    if (row2.expired) {
+      cache.dataset.tone = "warn";
+    }
+    element.append(el("span", "summary-verify-role", row2.time), el("span", "summary-verify-kind", row2.idle), el("span", "summary-verify-kind", row2.context));
+    element.append(cache, el("span", "summary-verify-mean", row2.usd));
+    return element;
+  };
   const draw2 = (session) => {
     const metrics = metricsOf(session);
     const markOf2 = (model) => modelMark(model, context.config.modelLetters);
@@ -11819,6 +11933,11 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     overheadList.hidden = nurselog.bars.length === 0;
     overheadBars.set(nurselog.bars);
     setText(overheadNote, nurselog.note);
+    const continued = resumesView(metrics.resumes);
+    setText(resumesHead, continued.head);
+    resumesHead.className = continued.rows.length > 0 ? "summary-overhead-head" : "summary-empty";
+    resumeList.replaceChildren(...continued.rows.map(resumeLine));
+    resumeList.hidden = continued.rows.length === 0;
   };
   let current;
   let shown = false;
@@ -12441,7 +12560,7 @@ var createSessionCard = (context, onToggle, onHover) => {
       element.dataset.session = session.id;
       sessionId.set(session.id);
       fixtureLink?.set(session.id);
-      setText(key, session.key ? `${session.key}:` : "");
+      setTicketKey(key, session.key, context.config.keyUrl, ":");
       key.hidden = !session.key;
       setText(heading2, sessionHeading(session));
       chip.set(session.chip);

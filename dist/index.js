@@ -19,7 +19,7 @@ import {
   startNurselog,
   usdFor,
   worktreeAddPath
-} from "./chunk-ULUUDCIE.js";
+} from "./chunk-VGB744M5.js";
 import {
   DEFAULT_CONFIG,
   SPOOL_EVENT_NAMES,
@@ -63,7 +63,7 @@ import {
   uiConfig,
   userConfigPath,
   validateConfig
-} from "./chunk-3KGMWC3I.js";
+} from "./chunk-WVTBF6C4.js";
 
 // src/cli/markers.ts
 var parseStream2 = (spec) => parseStream(spec);

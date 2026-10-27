@@ -262,6 +262,12 @@
 }
 .summary-verify-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
 .summary-verify-failed { margin-left: 6px; color: var(--red); }
+.summary-verify-kind[data-tone="warn"] { color: var(--amber); }
+/* The resume lines: no part wraps or shrinks below its text, and the amount column is as wide as the widest amount,
+   "<$0.001" or "$999.99" (7 characters of the mono face), so the lines stay aligned. */
+.summary-verify.resumes { --amount-w: 7ch; }
+.summary-verify.resumes .summary-verify-row { grid-template-columns: minmax(min-content, .6fr) repeat(3, minmax(min-content, 1fr)) var(--amount-w); }
+.summary-verify.resumes .summary-verify-row > span { white-space: nowrap; }
 .summary-verify-mean { text-align: right; color: var(--fg-3); white-space: nowrap; }
 @media (max-width: 860px) {
   .summary-inner { grid-template-columns: 1fr; }
@@ -276,4 +282,5 @@
   .summary-bar .meter-bar { grid-area: b; }
   .summary-verify-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .summary-verify-role, .summary-verify-mean { grid-column: 1 / -1; text-align: left; }
+  .summary-verify.resumes .summary-verify-row { grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
 }

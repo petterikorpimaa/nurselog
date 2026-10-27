@@ -187,7 +187,7 @@ const run = async (raw, truncated) => {
     root = repositoryRoot(projectDir) ?? resolve(projectDir);
     config = readHookConfig(root);
   } catch {
-    // A user config that fails the path checks leaves the repository inactive.
+    // A user config that fails the path checks or cannot be looked up leaves the repository inactive.
   }
   if (!config?.found) {
     process.exit(0);

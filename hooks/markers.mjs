@@ -22,6 +22,7 @@ export const USAGE = `Usage: nurselog <command> [--repo <path>]
   purge [--all] [--before <YYYY-MM-DD>] [--yes]          delete the repository's spool day files (of every repository and orphaned spool directory with --all, only the days before a date with --before); asks first unless --yes
   fixture <session id or prefix> [--out <file>]          print one session's spool lines as a replay fixture (a prefix of 8+ characters names it), or write them to a new file with --out
   insights [--json]                                      workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data
+  install-cli [--remove]                                 write the terminal command ~/.local/bin/nurselog, which runs the newest installed plugin copy (from a clone, the clone); --remove deletes it; a file Nurselog did not write is never touched
 --repo <path> names the repository; the default is the git worktree of the current directory.
 Quote free text in single quotes; a value that starts with - needs the = form: --text='-5 files'.`;
 

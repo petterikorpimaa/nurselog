@@ -34,6 +34,7 @@ import {
   expandHome,
   findConfig,
   gitCommonDir,
+  githubRepoOfRemote,
   isBranchName,
   linearRegExp,
   listSpoolFiles,
@@ -75,8 +76,9 @@ import {
   uiConfig,
   userConfigPath,
   validateMarkerInput,
+  worktreeAddOfCommand,
   writePrivate
-} from "./chunk-3KGMWC3I.js";
+} from "./chunk-WVTBF6C4.js";
 
 // src/spool/writer.ts
 var createLine = (src, event, data, envelope = {}) => {
@@ -91,16 +93,21 @@ var appendEvent = (dir, event, maxLineBytes) => appendSpoolLine(dir, event, "dat
 
 // src/facts/shared.ts
 import { execFile } from "child_process";
-var runCommand = (command, args, cwd, env) => new Promise((resolve6, reject) => {
+var runCommand = (command, args, cwd, env) => new Promise((resolve7, reject) => {
   const childEnv = env ? { ...process.env, ...env } : void 0;
   execFile(command, args, { cwd, env: childEnv, timeout: 15e3, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" }, (error, stdout) => {
     if (error) {
       reject(error);
     } else {
-      resolve6(stdout.trim());
+      resolve7(stdout.trim());
     }
   });
 });
+var stderrLine = (error) => {
+  const lines = error.message.split("\n");
+  const stderr = lines[0].startsWith("Command failed") ? lines.slice(1) : lines;
+  return stderr.find((line) => line.trim() !== "")?.trim() ?? "";
+};
 var createBashTracker = () => {
   const open = /* @__PURE__ */ new Map();
   return (event) => {
@@ -111,9 +118,461 @@ var createBashTracker = () => {
     if (event.event === "tool.post" || event.event === "tool.fail") {
       const finished = open.get(event.data.toolUseId);
       open.delete(event.data.toolUseId);
-      return event.event === "tool.post" ? finished : void 0;
+      return event.event === "tool.post" && finished ? { ...finished, interrupted: event.data.interrupted, exitCode: event.data.exitCode } : void 0;
     }
     return void 0;
+  };
+};
+
+// src/facts/git.ts
+import { existsSync, readFileSync, realpathSync } from "fs";
+import { stat } from "fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
+var REMOVAL_SWEEP_MS = 5 * 60 * 1e3;
+var CD = /(?:^|&&|;|\|\||\n)\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g;
+var GIT_C = /\bgit\s+-C\s+("[^"]+"|'[^']+'|[^\s;&|]+)/;
+var WORD = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
+var WORKTREE_ADD = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?worktree\s+add\s+([^;&|\n)]+)`);
+var CHECKOUT = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?(?:checkout|switch)\b`);
+var COMMIT = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?commit\b`);
+var REMOVES = [
+  new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?worktree\s+(?:remove|prune)\b`),
+  new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?branch\b[^;&|\n]*\s(?:-[a-zA-Z]*[dD]|--delete)\b`),
+  /\brm\b[^;&|\n]*\s(?:-[a-zA-Z]*[rR]|--recursive)/
+];
+var VALUE_OPTIONS = /* @__PURE__ */ new Set(["-b", "-B", "--orphan", "--reason"]);
+var SAFE_GIT = ["-c", "log.showSignature=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
+var END_OF_OPTIONS = "--end-of-options";
+var NOT_A_REPO = 128;
+var HEADS = "refs/heads/";
+var lastGroup = (command, match) => {
+  const group = match?.[match.length - 1];
+  const end = match && match.index !== void 0 ? match.index + match[0].length : 0;
+  return group === void 0 ? void 0 : command.slice(end - group.length, end);
+};
+var worktreeAddPath = (command) => {
+  const args = lastGroup(command, WORKTREE_ADD.exec(shellCode(command)))?.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (VALUE_OPTIONS.has(args[index])) {
+      index += 1;
+    } else if (!args[index].startsWith("-")) {
+      return literalWord(args[index]);
+    }
+  }
+  return void 0;
+};
+var realPath = (path) => {
+  const full = resolve(expandHome(path));
+  const rest = [];
+  let existing = full;
+  for (; ; ) {
+    try {
+      return join(realpathSync(existing), ...rest);
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) {
+        return full;
+      }
+      rest.unshift(basename(existing));
+      existing = parent;
+    }
+  }
+};
+var canonical = (path) => tildeHome(realPath(path));
+var resolveIn = (base, word) => {
+  if (word === void 0) {
+    return void 0;
+  }
+  const path = expandHome(word);
+  if (isAbsolute(path)) {
+    return resolve(path);
+  }
+  return base === void 0 ? void 0 : resolve(base, path);
+};
+var createGitFacts = (options) => {
+  const { config, write } = options;
+  const run = options.run ?? runCommand;
+  const trunk = config.branches.trunk;
+  const quietBranches = /* @__PURE__ */ new Set([trunk, ...config.branches.promote]);
+  const branches = /* @__PURE__ */ new Map();
+  const forks = /* @__PURE__ */ new Set();
+  const subjects = /* @__PURE__ */ new Set();
+  const resolved = /* @__PURE__ */ new Set();
+  const candidates = /* @__PURE__ */ new Set();
+  const eventDirs = /* @__PURE__ */ new Set();
+  const finishedBash = createBashTracker();
+  const common = options.repoCommonDir;
+  const mainCheckout = common && basename(common) === ".git" ? dirname(common) : void 0;
+  let live = false;
+  let stopped = false;
+  let queue = Promise.resolve();
+  let sweep;
+  let checkWaiting = false;
+  let refsWarning = "";
+  const statWarnings = /* @__PURE__ */ new Set();
+  const pendingAdds = /* @__PURE__ */ new Map();
+  const emit = (data, worktree) => write(createLine("server", "git.fact", data, { cwd: worktree }));
+  const git = (args) => run("git", [...SAFE_GIT, ...args]);
+  const quiet = (what) => (error) => {
+    if (error.code !== NOT_A_REPO) {
+      options.log?.("warning", `${what} failed: ${error.message.split("\n")[0]}`);
+    }
+    return "";
+  };
+  const mergeBase = async (top, branch) => {
+    try {
+      return await git(["-C", top, "merge-base", END_OF_OPTIONS, trunk, branch]);
+    } catch {
+      return git(["-C", top, "merge-base", END_OF_OPTIONS, `origin/${trunk}`, branch]);
+    }
+  };
+  const repoOf = async (path) => {
+    if (!options.repoCommonDir) {
+      return "this";
+    }
+    const common2 = await git(["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(quiet(`git rev-parse in ${path}`));
+    if (common2 === "" || !existsSync(common2)) {
+      return "unknown";
+    }
+    return realpathSync(common2) === options.repoCommonDir ? "this" : "other";
+  };
+  const inThisRepo = async (path) => await repoOf(path) === "this";
+  const branchDetails = async (top, worktree, branch) => {
+    if (quietBranches.has(branch)) {
+      return;
+    }
+    if (!forks.has(branch)) {
+      const sha = await mergeBase(top, branch).catch(quiet(`git merge-base for ${branch}`));
+      if (sha) {
+        forks.add(branch);
+        emit({ kind: "fork", branch, base: trunk, sha }, worktree);
+      }
+    }
+    if (!subjects.has(branch)) {
+      const logArgs = ["-C", top, "log", "--no-show-signature", "--reverse", "--format=%s", END_OF_OPTIONS, `${trunk}..${branch}`];
+      const log = await git(logArgs).catch(quiet(`git log of ${branch}`));
+      const subject = log.split("\n")[0]?.trim();
+      if (subject) {
+        subjects.add(branch);
+        emit({ kind: "subject", branch, subject }, worktree);
+      }
+    }
+  };
+  const lookUp = async (dir, force) => {
+    const path = expandHome(dir);
+    if (!force && resolved.has(path) || !existsSync(path)) {
+      return;
+    }
+    resolved.add(path);
+    if (!await inThisRepo(path)) {
+      return;
+    }
+    const top = await git(["-C", path, "rev-parse", "--show-toplevel"]).catch(quiet(`git rev-parse in ${path}`));
+    const branch = top ? await git(["-C", top, "branch", "--show-current"]).catch(quiet(`git branch in ${top}`)) : "";
+    if (!branch) {
+      return;
+    }
+    if (!isBranchName(branch)) {
+      options.log?.("warning", `ignored the branch name ${JSON.stringify(branch.slice(0, 80))} in ${top}`);
+      return;
+    }
+    const worktree = tildeHome(top);
+    resolved.add(top);
+    if (branches.get(worktree) !== branch) {
+      branches.set(worktree, branch);
+      emit({ kind: "worktree", worktree, branch }, worktree);
+    }
+    await branchDetails(top, worktree, branch);
+  };
+  const localBranches = async (commonDir) => {
+    let output;
+    try {
+      output = await git(["-C", commonDir, "for-each-ref", "--format=%(refname)", END_OF_OPTIONS, "refs/heads"]);
+    } catch (error) {
+      const failure = error;
+      const reason = `exit ${String(failure.code)}: ${stderrLine(failure)}`;
+      const warning = `git for-each-ref of the branches failed (${reason}); no worktree counts as removed until it works`;
+      if (warning !== refsWarning) {
+        refsWarning = warning;
+        options.log?.("warning", warning);
+      }
+      return void 0;
+    }
+    refsWarning = "";
+    const refs = output.split("\n").filter((ref) => ref.startsWith(HEADS));
+    return new Set(refs.map((ref) => ref.slice(HEADS.length)));
+  };
+  const warnOnce = (warning) => {
+    if (!statWarnings.has(warning)) {
+      statWarnings.add(warning);
+      options.log?.("warning", warning);
+    }
+  };
+  const statEntry = async (path, entry = ".git") => {
+    try {
+      await stat(join(path, entry));
+      return "present";
+    } catch (error) {
+      const failure = error;
+      if (failure.code === "ENOENT") {
+        return "gone";
+      }
+      warnOnce(`could not check whether the worktree ${path} was removed: ${failure.message}`);
+      return "failed";
+    }
+  };
+  const isGone = async (path) => await statEntry(path) === "gone";
+  const forget = (worktree, branch) => {
+    const path = expandHome(worktree);
+    branches.delete(worktree);
+    if (pendingAdds.size > 0) {
+      pendingAdds.delete(canonical(worktree));
+    }
+    forks.delete(branch);
+    subjects.delete(branch);
+    for (const dir of [...resolved, ...eventDirs]) {
+      const full = expandHome(dir);
+      if (full === path || full.startsWith(`${path}/`)) {
+        resolved.delete(dir);
+        eventDirs.delete(dir);
+      }
+    }
+  };
+  const checkRemoved = async () => {
+    if (!common) {
+      return;
+    }
+    const gone = [];
+    for (const [worktree, branch] of [...branches]) {
+      const path = expandHome(worktree);
+      if (path !== mainCheckout && await isGone(path)) {
+        gone.push([worktree, branch]);
+      }
+      if (stopped) {
+        return;
+      }
+    }
+    const heads = gone.length > 0 ? await localBranches(common) : void 0;
+    if (!heads) {
+      return;
+    }
+    for (const [worktree, branch] of gone) {
+      if (stopped) {
+        return;
+      }
+      if (heads.has(branch) || branches.get(worktree) !== branch) {
+        continue;
+      }
+      try {
+        emit({ kind: "worktree-removed", worktree, branch }, worktree);
+        forget(worktree, branch);
+      } catch (error) {
+        const reason = error.message;
+        options.log?.("warning", `writing the worktree-removed fact of ${worktree} failed, checked again next time: ${reason}`);
+      }
+    }
+  };
+  const gitdirOf = (path) => {
+    try {
+      const named = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(path, ".git"), "utf8"))?.[1];
+      return named === void 0 ? void 0 : realPath(resolve(path, named.trim()));
+    } catch {
+      return void 0;
+    }
+  };
+  const namesOtherGitdir = (path) => {
+    const gitdir = gitdirOf(path);
+    return gitdir !== void 0 && common !== void 0 && gitdir !== common && !gitdir.startsWith(`${common}/`);
+  };
+  const namesPrunedGitdir = (path) => {
+    const gitdir = gitdirOf(path);
+    return gitdir !== void 0 && common !== void 0 && gitdir.startsWith(`${common}/`) && !existsSync(gitdir);
+  };
+  const checkAdd = async (path) => {
+    const found = await statEntry(path, "");
+    if (found !== "present") {
+      return found === "gone" ? "unconfirmed" : "undecided";
+    }
+    const repo = await repoOf(path);
+    if (repo !== "unknown") {
+      return repo === "this" ? "confirmed" : "unconfirmed";
+    }
+    if (await statEntry(path, "") === "gone" || namesOtherGitdir(path) || namesPrunedGitdir(path)) {
+      return "unconfirmed";
+    }
+    warnOnce(`could not tell which repository the worktree ${path} belongs to; checked again by the next sweep`);
+    return "undecided";
+  };
+  const confirmAdds = async (retryParked) => {
+    const known = pendingAdds.size > 0 ? new Set([...branches.keys()].map(canonical)) : /* @__PURE__ */ new Set();
+    for (const [key, add] of [...pendingAdds]) {
+      if (stopped) {
+        return;
+      }
+      if (add.parked && !retryParked) {
+        continue;
+      }
+      let verdict;
+      try {
+        verdict = known.has(key) ? "confirmed" : await checkAdd(expandHome(add.path));
+      } catch (error) {
+        warnOnce(`could not check the worktree add of ${add.path}: ${error.message}`);
+        continue;
+      }
+      if (pendingAdds.get(key) !== add) {
+        continue;
+      }
+      if (verdict === "undecided") {
+        add.parked = true;
+      } else if (verdict === "confirmed") {
+        pendingAdds.delete(key);
+      } else {
+        try {
+          emit({ kind: "worktree-removed", worktree: add.path, branch: add.branch }, add.path);
+          pendingAdds.delete(key);
+        } catch (error) {
+          const reason = error.message;
+          options.log?.("warning", `writing the worktree-removed fact of ${add.path} failed, checked again next time: ${reason}`);
+        }
+      }
+    }
+  };
+  const enqueueConfirm = (retryParked = false) => {
+    const waiting = [...pendingAdds.values()].some((add) => retryParked || !add.parked);
+    if (stopped || !common || !waiting) {
+      return;
+    }
+    queue = queue.then(() => confirmAdds(retryParked)).catch((error) => options.log?.("warning", `worktree add check failed: ${error.message}`));
+  };
+  const enqueueCheck = () => {
+    if (stopped || checkWaiting) {
+      return;
+    }
+    checkWaiting = true;
+    const check = () => {
+      checkWaiting = false;
+      return checkRemoved();
+    };
+    queue = queue.then(check).catch((error) => options.log?.("warning", `worktree removal check failed: ${error.message}`));
+  };
+  const enqueue = (dir, force = false) => {
+    if (!live) {
+      candidates.add(dir);
+      return;
+    }
+    queue = queue.then(() => lookUp(dir, force)).catch((error) => options.log?.("warning", `git lookup in ${dir} failed: ${error.message}`));
+  };
+  const enqueueOnce = (dir) => {
+    if (!eventDirs.has(dir)) {
+      eventDirs.add(dir);
+      enqueue(dir);
+    }
+  };
+  const noteAdd = ({ command, cwd, interrupted, exitCode }) => {
+    const succeeded = !interrupted && (exitCode === void 0 || exitCode === 0);
+    if (!command.includes("worktree") || !succeeded || stopped || live && !common) {
+      return;
+    }
+    const add = worktreeAddOfCommand(command, cwd);
+    if (add?.branch === void 0) {
+      return;
+    }
+    if (!isBranchName(add.branch)) {
+      warnOnce(`ignored the branch name ${JSON.stringify(add.branch.slice(0, 80))} in the worktree add of ${add.path}`);
+      return;
+    }
+    pendingAdds.set(canonical(add.path), { path: add.path, branch: add.branch, parked: false });
+  };
+  const onBash = ({ command, cwd }) => {
+    const start = expandHome(cwd);
+    const code = shellCode(command);
+    let base = start;
+    for (const match of code.matchAll(CD)) {
+      base = resolveIn(base, cdTarget(lastGroup(command, match) ?? ""));
+    }
+    const gitDir = lastGroup(command, GIT_C.exec(code));
+    if (gitDir) {
+      base = resolveIn(base, literalWord(gitDir));
+    }
+    const added = resolveIn(base, worktreeAddPath(command));
+    if (added) {
+      enqueue(added, true);
+    }
+    enqueueConfirm();
+    if (REMOVES.some((pattern) => pattern.test(code))) {
+      enqueueCheck();
+    }
+    if (base === void 0) {
+      return;
+    }
+    if (CHECKOUT.test(code)) {
+      enqueue(base, true);
+    } else if (COMMIT.test(code)) {
+      enqueue(base, true);
+    } else if (base !== start) {
+      enqueue(base);
+    }
+  };
+  return {
+    observe(event) {
+      if (event.event === "git.fact") {
+        const data = event.data;
+        if (data.kind === "worktree") {
+          branches.set(data.worktree, data.branch);
+          if (pendingAdds.size > 0) {
+            pendingAdds.delete(canonical(data.worktree));
+          }
+        } else if (data.kind === "worktree-removed") {
+          forget(data.worktree, data.branch);
+        } else if (data.kind === "fork") {
+          forks.add(data.branch);
+        } else if (data.kind === "subject") {
+          subjects.add(data.branch);
+        }
+        return;
+      }
+      if (event.src === "hook" && event.cwd) {
+        enqueueOnce(event.cwd);
+      }
+      if (event.event === "cwd" && event.data.to) {
+        enqueueOnce(event.data.to);
+      }
+      const bash = finishedBash(event);
+      if (bash) {
+        noteAdd(bash);
+      }
+      if (bash && live) {
+        onBash(bash);
+      }
+    },
+    goLive() {
+      if (live || stopped) {
+        return;
+      }
+      live = true;
+      for (const dir of candidates) {
+        enqueue(dir);
+      }
+      candidates.clear();
+      if (!common) {
+        options.log?.("info", "the repository's git common directory is unknown, so removed worktrees are not checked");
+        pendingAdds.clear();
+        return;
+      }
+      enqueueConfirm();
+      enqueueCheck();
+      sweep = setInterval(() => {
+        enqueueConfirm(true);
+        enqueueCheck();
+      }, REMOVAL_SWEEP_MS);
+      sweep.unref();
+    },
+    idle: () => queue,
+    stop() {
+      live = false;
+      stopped = true;
+      clearInterval(sweep);
+    }
   };
 };
 
@@ -151,6 +610,23 @@ var hostAccounts = (output) => {
   }));
   return [...accounts.filter((account) => account.active), ...accounts.filter((account) => !account.active)];
 };
+var parseRemotes = (output) => {
+  const urls = /* @__PURE__ */ new Set();
+  for (const line of output.split("\n")) {
+    const url = /^\S+\s+(\S+)\s+\((?:fetch|push)\)(?:\s+\[[^\]]*\])?$/.exec(line.trim())?.[1];
+    if (url !== void 0) {
+      urls.add(url);
+    }
+  }
+  const repos = /* @__PURE__ */ new Set();
+  for (const url of urls) {
+    const repo = githubRepoOfRemote(url);
+    if (repo !== void 0) {
+      repos.add(repo);
+    }
+  }
+  return { repos: [...repos], urls: urls.size };
+};
 var createGhFacts = (options) => {
   const { config, write, wanted } = options;
   const run = options.run ?? runCommand;
@@ -163,10 +639,14 @@ var createGhFacts = (options) => {
   let checkedAt = Number.NEGATIVE_INFINITY;
   let polledAt = Number.NEGATIVE_INFINITY;
   let lastStatus = "";
+  let remotesCheckedAt = Number.NEGATIVE_INFINITY;
+  let repoMismatch;
   let running;
+  let runningCheckOnly = false;
   let timer;
   let live = false;
-  const emitStatus = (status) => {
+  const emitStatus = (given) => {
+    const status = repoMismatch ? { ...given, repoMismatch } : given;
     const signature = JSON.stringify(status);
     if (signature !== lastStatus) {
       lastStatus = signature;
@@ -174,12 +654,54 @@ var createGhFacts = (options) => {
     }
   };
   const shownPattern = stripControl(config.github.accountPattern);
+  if (options.root === void 0 && config.github.repo !== "") {
+    options.log?.("warning", "github.repo is not compared with the git remotes: the repository root is unknown");
+  }
   let accountWarning;
   const warnAccount = (message) => {
     if (message !== void 0 && message !== accountWarning) {
       options.log?.("warning", message);
     }
     accountWarning = message;
+  };
+  const onceWarning = () => {
+    let last;
+    return (message) => {
+      if (message !== void 0 && message !== last) {
+        options.log?.("warning", message);
+      }
+      last = message;
+    };
+  };
+  const warnRepo = onceWarning();
+  const warnRemotesFailure = onceWarning();
+  const checkRemotes = async () => {
+    if (options.root === void 0 || config.github.repo === "" || now() - remotesCheckedAt <= ACCOUNT_CHECK_MS) {
+      return;
+    }
+    remotesCheckedAt = now();
+    let found;
+    try {
+      found = parseRemotes(await run("git", [...SAFE_GIT, "remote", "-v"], options.root));
+    } catch (error) {
+      remotesCheckedAt = Number.NEGATIVE_INFINITY;
+      const failure = error;
+      const cause = stripControl(stderrLine(failure) || `exit ${String(failure.code)}`);
+      warnRemotesFailure(`git remote -v failed (${cause}), so github.repo is not compared with the remotes`);
+      return;
+    }
+    warnRemotesFailure(void 0);
+    const { repos, urls } = found;
+    const named = config.github.repo.toLowerCase();
+    repoMismatch = void 0;
+    if (repos.some((repo) => repo.toLowerCase() === named) || urls === 0) {
+      warnRepo(void 0);
+    } else if (repos.length === 0) {
+      warnRepo(`git remote -v lists ${urls} ${urls === 1 ? "remote URL" : "remote URLs"}, none a GitHub URL; github.repo is not compared with them`);
+    } else {
+      repoMismatch = { repo: config.github.repo, remotes: repos };
+      warnRepo(`github.repo ${stripControl(config.github.repo)} names none of the git remotes of this repository (${repos.join(", ")}); gh lists the pull requests of github.repo, so the board may show no merges. Fix github.repo or the remote.`);
+    }
   };
   const accountPattern = () => {
     try {
@@ -211,6 +733,7 @@ var createGhFacts = (options) => {
   };
   const checkAccount = async () => {
     checkedAt = now();
+    await checkRemotes();
     if (options.configKind !== "user") {
       return checkActiveAccount();
     }
@@ -283,6 +806,7 @@ var createGhFacts = (options) => {
     write(createLine("server", "gh.fact", { kind: "pr", pr: kept }));
   };
   const pollOnce = async () => {
+    polledAt = now();
     const everyPoll = options.configKind !== "user";
     if (everyPoll || !accountOk || now() - checkedAt > ACCOUNT_CHECK_MS) {
       await checkAccount();
@@ -294,7 +818,6 @@ var createGhFacts = (options) => {
     if (!accountOk) {
       return;
     }
-    polledAt = now();
     try {
       for (const pr of await list(config.branches.trunk, false, env)) {
         record(pr);
@@ -315,11 +838,21 @@ var createGhFacts = (options) => {
     }
   };
   const failed = (error) => options.log?.("warning", `gh poll failed: ${error.message}`);
-  const poll = () => {
-    running ??= pollOnce().finally(() => {
-      running = void 0;
-    });
+  const single = (task, checkOnly = false) => {
+    if (!running) {
+      runningCheckOnly = checkOnly;
+      running = task().then(() => void 0).finally(() => {
+        running = void 0;
+        runningCheckOnly = false;
+      });
+    }
     return running;
+  };
+  const poll = async () => {
+    while (running && runningCheckOnly) {
+      await running.catch(() => void 0);
+    }
+    return single(pollOnce);
   };
   return {
     observe(event) {
@@ -342,7 +875,7 @@ var createGhFacts = (options) => {
     poll,
     goLive() {
       live = true;
-      checkAccount().catch(failed);
+      single(checkAccount, true).catch(failed);
       timer = setInterval(() => {
         if (wanted()) {
           poll().catch(failed);
@@ -351,342 +884,20 @@ var createGhFacts = (options) => {
       timer.unref();
     },
     nudge() {
-      if (live && wanted() && now() - polledAt > NUDGE_MS) {
-        poll().catch(failed);
+      if (!live) {
+        return;
+      }
+      if (wanted()) {
+        if (now() - polledAt > NUDGE_MS) {
+          poll().catch(failed);
+        }
+      } else if (now() - checkedAt > NUDGE_MS) {
+        single(checkAccount, true).catch(failed);
       }
     },
     stop() {
       live = false;
       clearInterval(timer);
-    }
-  };
-};
-
-// src/facts/git.ts
-import { existsSync, realpathSync } from "fs";
-import { stat } from "fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "path";
-var REMOVAL_SWEEP_MS = 5 * 60 * 1e3;
-var CD = /(?:^|&&|;|\|\||\n)\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g;
-var GIT_C = /\bgit\s+-C\s+("[^"]+"|'[^']+'|[^\s;&|]+)/;
-var WORD = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
-var WORKTREE_ADD = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?worktree\s+add\s+([^;&|\n)]+)`);
-var CHECKOUT = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?(?:checkout|switch)\b`);
-var COMMIT = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?commit\b`);
-var REMOVES = [
-  new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?worktree\s+(?:remove|prune)\b`),
-  new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?branch\b[^;&|\n]*\s(?:-[a-zA-Z]*[dD]|--delete)\b`),
-  /\brm\b[^;&|\n]*\s(?:-[a-zA-Z]*[rR]|--recursive)/
-];
-var VALUE_OPTIONS = /* @__PURE__ */ new Set(["-b", "-B", "--orphan", "--reason"]);
-var SAFE_GIT = ["-c", "log.showSignature=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
-var END_OF_OPTIONS = "--end-of-options";
-var NOT_A_REPO = 128;
-var HEADS = "refs/heads/";
-var stderrLine = (error) => {
-  const lines = error.message.split("\n");
-  const stderr = lines[0].startsWith("Command failed") ? lines.slice(1) : lines;
-  return stderr.find((line) => line.trim() !== "")?.trim() ?? "";
-};
-var lastGroup = (command, match) => {
-  const group = match?.[match.length - 1];
-  const end = match && match.index !== void 0 ? match.index + match[0].length : 0;
-  return group === void 0 ? void 0 : command.slice(end - group.length, end);
-};
-var worktreeAddPath = (command) => {
-  const args = lastGroup(command, WORKTREE_ADD.exec(shellCode(command)))?.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  for (let index = 0; index < args.length; index += 1) {
-    if (VALUE_OPTIONS.has(args[index])) {
-      index += 1;
-    } else if (!args[index].startsWith("-")) {
-      return literalWord(args[index]);
-    }
-  }
-  return void 0;
-};
-var resolveIn = (base, word) => {
-  if (word === void 0) {
-    return void 0;
-  }
-  const path = expandHome(word);
-  if (isAbsolute(path)) {
-    return resolve(path);
-  }
-  return base === void 0 ? void 0 : resolve(base, path);
-};
-var createGitFacts = (options) => {
-  const { config, write } = options;
-  const run = options.run ?? runCommand;
-  const trunk = config.branches.trunk;
-  const quietBranches = /* @__PURE__ */ new Set([trunk, ...config.branches.promote]);
-  const branches = /* @__PURE__ */ new Map();
-  const forks = /* @__PURE__ */ new Set();
-  const subjects = /* @__PURE__ */ new Set();
-  const resolved = /* @__PURE__ */ new Set();
-  const candidates = /* @__PURE__ */ new Set();
-  const eventDirs = /* @__PURE__ */ new Set();
-  const finishedBash = createBashTracker();
-  const common = options.repoCommonDir;
-  const mainCheckout = common && basename(common) === ".git" ? dirname(common) : void 0;
-  let live = false;
-  let stopped = false;
-  let queue = Promise.resolve();
-  let sweep;
-  let checkWaiting = false;
-  let refsWarning = "";
-  const statWarnings = /* @__PURE__ */ new Set();
-  const emit = (data, worktree) => write(createLine("server", "git.fact", data, { cwd: worktree }));
-  const git = (args) => run("git", [...SAFE_GIT, ...args]);
-  const quiet = (what) => (error) => {
-    if (error.code !== NOT_A_REPO) {
-      options.log?.("warning", `${what} failed: ${error.message.split("\n")[0]}`);
-    }
-    return "";
-  };
-  const mergeBase = async (top, branch) => {
-    try {
-      return await git(["-C", top, "merge-base", END_OF_OPTIONS, trunk, branch]);
-    } catch {
-      return git(["-C", top, "merge-base", END_OF_OPTIONS, `origin/${trunk}`, branch]);
-    }
-  };
-  const inThisRepo = async (path) => {
-    if (!options.repoCommonDir) {
-      return true;
-    }
-    const common2 = await git(["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(quiet(`git rev-parse in ${path}`));
-    return common2 !== "" && existsSync(common2) && realpathSync(common2) === options.repoCommonDir;
-  };
-  const branchDetails = async (top, worktree, branch) => {
-    if (quietBranches.has(branch)) {
-      return;
-    }
-    if (!forks.has(branch)) {
-      const sha = await mergeBase(top, branch).catch(quiet(`git merge-base for ${branch}`));
-      if (sha) {
-        forks.add(branch);
-        emit({ kind: "fork", branch, base: trunk, sha }, worktree);
-      }
-    }
-    if (!subjects.has(branch)) {
-      const logArgs = ["-C", top, "log", "--no-show-signature", "--reverse", "--format=%s", END_OF_OPTIONS, `${trunk}..${branch}`];
-      const log = await git(logArgs).catch(quiet(`git log of ${branch}`));
-      const subject = log.split("\n")[0]?.trim();
-      if (subject) {
-        subjects.add(branch);
-        emit({ kind: "subject", branch, subject }, worktree);
-      }
-    }
-  };
-  const lookUp = async (dir, force) => {
-    const path = expandHome(dir);
-    if (!force && resolved.has(path) || !existsSync(path)) {
-      return;
-    }
-    resolved.add(path);
-    if (!await inThisRepo(path)) {
-      return;
-    }
-    const top = await git(["-C", path, "rev-parse", "--show-toplevel"]).catch(quiet(`git rev-parse in ${path}`));
-    const branch = top ? await git(["-C", top, "branch", "--show-current"]).catch(quiet(`git branch in ${top}`)) : "";
-    if (!branch) {
-      return;
-    }
-    if (!isBranchName(branch)) {
-      options.log?.("warning", `ignored the branch name ${JSON.stringify(branch.slice(0, 80))} in ${top}`);
-      return;
-    }
-    const worktree = tildeHome(top);
-    resolved.add(top);
-    if (branches.get(worktree) !== branch) {
-      branches.set(worktree, branch);
-      emit({ kind: "worktree", worktree, branch }, worktree);
-    }
-    await branchDetails(top, worktree, branch);
-  };
-  const localBranches = async (commonDir) => {
-    let output;
-    try {
-      output = await git(["-C", commonDir, "for-each-ref", "--format=%(refname)", END_OF_OPTIONS, "refs/heads"]);
-    } catch (error) {
-      const failure = error;
-      const reason = `exit ${String(failure.code)}: ${stderrLine(failure)}`;
-      const warning = `git for-each-ref of the branches failed (${reason}); no worktree counts as removed until it works`;
-      if (warning !== refsWarning) {
-        refsWarning = warning;
-        options.log?.("warning", warning);
-      }
-      return void 0;
-    }
-    refsWarning = "";
-    const refs = output.split("\n").filter((ref) => ref.startsWith(HEADS));
-    return new Set(refs.map((ref) => ref.slice(HEADS.length)));
-  };
-  const isGone = async (path) => {
-    try {
-      await stat(join(path, ".git"));
-      return false;
-    } catch (error) {
-      const failure = error;
-      if (failure.code === "ENOENT") {
-        return true;
-      }
-      const warning = `could not check whether the worktree ${path} was removed: ${failure.message}`;
-      if (!statWarnings.has(warning)) {
-        statWarnings.add(warning);
-        options.log?.("warning", warning);
-      }
-      return false;
-    }
-  };
-  const forget = (worktree, branch) => {
-    const path = expandHome(worktree);
-    branches.delete(worktree);
-    forks.delete(branch);
-    subjects.delete(branch);
-    for (const dir of [...resolved, ...eventDirs]) {
-      const full = expandHome(dir);
-      if (full === path || full.startsWith(`${path}/`)) {
-        resolved.delete(dir);
-        eventDirs.delete(dir);
-      }
-    }
-  };
-  const checkRemoved = async () => {
-    if (!common) {
-      return;
-    }
-    const gone = [];
-    for (const [worktree, branch] of [...branches]) {
-      const path = expandHome(worktree);
-      if (path !== mainCheckout && await isGone(path)) {
-        gone.push([worktree, branch]);
-      }
-      if (stopped) {
-        return;
-      }
-    }
-    const heads = gone.length > 0 ? await localBranches(common) : void 0;
-    if (!heads) {
-      return;
-    }
-    for (const [worktree, branch] of gone) {
-      if (stopped) {
-        return;
-      }
-      if (heads.has(branch) || branches.get(worktree) !== branch) {
-        continue;
-      }
-      try {
-        emit({ kind: "worktree-removed", worktree, branch }, worktree);
-        forget(worktree, branch);
-      } catch (error) {
-        const reason = error.message;
-        options.log?.("warning", `writing the worktree-removed fact of ${worktree} failed, checked again next time: ${reason}`);
-      }
-    }
-  };
-  const enqueueCheck = () => {
-    if (stopped || checkWaiting) {
-      return;
-    }
-    checkWaiting = true;
-    const check = () => {
-      checkWaiting = false;
-      return checkRemoved();
-    };
-    queue = queue.then(check).catch((error) => options.log?.("warning", `worktree removal check failed: ${error.message}`));
-  };
-  const enqueue = (dir, force = false) => {
-    if (!live) {
-      candidates.add(dir);
-      return;
-    }
-    queue = queue.then(() => lookUp(dir, force)).catch((error) => options.log?.("warning", `git lookup in ${dir} failed: ${error.message}`));
-  };
-  const enqueueOnce = (dir) => {
-    if (!eventDirs.has(dir)) {
-      eventDirs.add(dir);
-      enqueue(dir);
-    }
-  };
-  const onBash = ({ command, cwd }) => {
-    const start = expandHome(cwd);
-    const code = shellCode(command);
-    let base = start;
-    for (const match of code.matchAll(CD)) {
-      base = resolveIn(base, cdTarget(lastGroup(command, match) ?? ""));
-    }
-    const gitDir = lastGroup(command, GIT_C.exec(code));
-    if (gitDir) {
-      base = resolveIn(base, literalWord(gitDir));
-    }
-    const added = resolveIn(base, worktreeAddPath(command));
-    if (added) {
-      enqueue(added, true);
-    }
-    if (REMOVES.some((pattern) => pattern.test(code))) {
-      enqueueCheck();
-    }
-    if (base === void 0) {
-      return;
-    }
-    if (CHECKOUT.test(code)) {
-      enqueue(base, true);
-    } else if (COMMIT.test(code)) {
-      enqueue(base, true);
-    } else if (base !== start) {
-      enqueue(base);
-    }
-  };
-  return {
-    observe(event) {
-      if (event.event === "git.fact") {
-        const data = event.data;
-        if (data.kind === "worktree") {
-          branches.set(data.worktree, data.branch);
-        } else if (data.kind === "worktree-removed") {
-          forget(data.worktree, data.branch);
-        } else if (data.kind === "fork") {
-          forks.add(data.branch);
-        } else if (data.kind === "subject") {
-          subjects.add(data.branch);
-        }
-        return;
-      }
-      if (event.src === "hook" && event.cwd) {
-        enqueueOnce(event.cwd);
-      }
-      if (event.event === "cwd" && event.data.to) {
-        enqueueOnce(event.data.to);
-      }
-      const bash = finishedBash(event);
-      if (bash && live) {
-        onBash(bash);
-      }
-    },
-    goLive() {
-      if (live || stopped) {
-        return;
-      }
-      live = true;
-      for (const dir of candidates) {
-        enqueue(dir);
-      }
-      candidates.clear();
-      if (!common) {
-        options.log?.("info", "the repository's git common directory is unknown, so removed worktrees are not checked");
-        return;
-      }
-      enqueueCheck();
-      sweep = setInterval(enqueueCheck, REMOVAL_SWEEP_MS);
-      sweep.unref();
-    },
-    idle: () => queue,
-    stop() {
-      live = false;
-      stopped = true;
-      clearInterval(sweep);
     }
   };
 };
@@ -950,7 +1161,7 @@ var createUsageFacts = (options) => {
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
-import { readFileSync } from "fs";
+import { readFileSync as readFileSync2 } from "fs";
 import { createServer } from "http";
 import { join as join3 } from "path";
 
@@ -962,7 +1173,7 @@ var FixtureWorkerMissingError = class extends Error {
 var FixtureTimeoutError = class extends Error {
 };
 var FIXTURE_TIMEOUT_MS = 120 * 1e3;
-var runFixtureJob = (workerFile, job, options = {}) => new Promise((resolve6, reject) => {
+var runFixtureJob = (workerFile, job, options = {}) => new Promise((resolve7, reject) => {
   if (!existsSync2(workerFile)) {
     reject(new FixtureWorkerMissingError(`${workerFile} is not built yet; run pnpm build in the Nurselog package`));
     return;
@@ -987,7 +1198,7 @@ var runFixtureJob = (workerFile, job, options = {}) => new Promise((resolve6, re
   const timer = setTimeout(() => finish(() => reject(new FixtureTimeoutError(`the fixture worker timed out after ${timeoutMs / 1e3} s`))), timeoutMs);
   const cancel = () => finish(() => reject(new Error("the fixture was cancelled")));
   options.signal?.addEventListener("abort", cancel, { once: true });
-  worker.once("message", (answer) => finish(() => resolve6(answer)));
+  worker.once("message", (answer) => finish(() => resolve7(answer)));
   worker.once("error", (error) => finish(() => reject(error)));
   worker.once("exit", (code) => finish(() => reject(new Error(`the fixture worker exited with code ${code} before it answered`))));
 });
@@ -1098,7 +1309,7 @@ var UI_ASSETS = /* @__PURE__ */ new Map([
 ]);
 var readAsset = (path) => {
   try {
-    return readFileSync(path);
+    return readFileSync2(path);
   } catch (error) {
     if (error.code === "ENOENT") {
       return void 0;
@@ -1544,15 +1755,15 @@ ${message}`);
     }
   });
   return {
-    listen: () => new Promise((resolve6, reject) => {
+    listen: () => new Promise((resolve7, reject) => {
       server.once("error", reject);
       server.listen(options.port, options.host, () => {
         server.off("error", reject);
         boundPort = server.address().port;
-        resolve6(boundPort);
+        resolve7(boundPort);
       });
     }),
-    close: () => new Promise((resolve6) => {
+    close: () => new Promise((resolve7) => {
       slicing?.abort();
       for (const follow of followed.values()) {
         follow.unsubscribe();
@@ -1565,10 +1776,10 @@ ${message}`);
       }
       streams.clear();
       if (!server.listening) {
-        resolve6();
+        resolve7();
         return;
       }
-      server.close(() => resolve6());
+      server.close(() => resolve7());
       server.closeAllConnections();
     }),
     clients: () => streams.size,
@@ -1578,9 +1789,9 @@ ${message}`);
 };
 
 // src/server/replay.ts
-import { readFileSync as readFileSync2 } from "fs";
+import { readFileSync as readFileSync3 } from "fs";
 var ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
-var readLines = (path) => readFileSync2(path, "utf8").split("\n").filter((line) => line.trim());
+var readLines = (path) => readFileSync3(path, "utf8").split("\n").filter((line) => line.trim());
 var parse = (text) => {
   try {
     return JSON.parse(text);
@@ -1652,8 +1863,8 @@ var replayFixtures = (paths, speed, onLine) => {
   let timer;
   let finish = () => {
   };
-  const done = new Promise((resolve6) => {
-    finish = resolve6;
+  const done = new Promise((resolve7) => {
+    finish = resolve7;
   });
   let index = 0;
   let previous;
@@ -1684,14 +1895,14 @@ var replayFixtures = (paths, speed, onLine) => {
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
 import { existsSync as existsSync3, linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
-import { dirname as dirname3, join as join7, resolve as resolve4 } from "path";
+import { dirname as dirname3, join as join7, resolve as resolve5 } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 // src/server/context.ts
-import { join as join6, resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve4 } from "path";
 
 // src/spool/aggregates.ts
-import { closeSync as closeSync2, lstatSync, readdirSync, readFileSync as readFileSync3, readSync as readSync2, renameSync, rmSync, unlinkSync } from "fs";
+import { closeSync as closeSync2, lstatSync, readdirSync, readFileSync as readFileSync4, readSync as readSync2, renameSync, rmSync, unlinkSync } from "fs";
 import { join as join4 } from "path";
 
 // src/model/aggregate.ts
@@ -1749,6 +1960,7 @@ var sessionAggregate = (session) => {
   const { waits, totalMs, breaks } = session.developerWait;
   const metrics = sessionMetrics(session);
   const branches = metrics.branches.map((entry) => ({ ...entry, branch: metricsBranchOf(entry.branch) }));
+  const { count, expired, cacheWriteUsd } = metrics.resumes;
   return {
     v: 1,
     id: session.id,
@@ -1759,7 +1971,7 @@ var sessionAggregate = (session) => {
     endedAt,
     finishedAt,
     work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
-    metrics: { ...metrics, branches },
+    metrics: { ...metrics, branches, resumes: { count, expired, cacheWriteUsd } },
     main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit },
     builds: subagentsOf(session, "build").map(buildOf),
     reviews: subagentsOf(session, "review").map(reviewOf),
@@ -1901,7 +2113,7 @@ var readText = (path) => withOpened(path, ({ fd, stat: stat2 }) => {
     throw new Error(`${path}: larger than ${MAX_AGGREGATES_BYTES} bytes`);
   }
   try {
-    return readFileSync3(fd, "utf8");
+    return readFileSync4(fd, "utf8");
   } catch (error) {
     throw new Error(`${path}: ${error.message}`);
   }
@@ -2209,7 +2421,7 @@ var createAggregateLog = (options) => {
 
 // src/server/repositories.ts
 import { closeSync as closeSync3, constants as constants2, lstatSync as lstatSync2, openSync as openSync2, readdirSync as readdirSync2, readSync as readSync3 } from "fs";
-import { join as join5, sep as sep2 } from "path";
+import { join as join5, resolve as resolve3, sep as sep2 } from "path";
 var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
 var RECORD_FILE = "repository.json";
 var CONFIG_FILE = "nurselog.config.json";
@@ -2293,18 +2505,35 @@ var newestActivityOf = (path) => {
   scanned.set(path, { size: Math.max(from, to), at });
   return at;
 };
-var lastLineAt = (root) => {
+var failedLookup = (error) => typeof error.code === "string";
+var lastLineAt = (root, onError) => {
+  let dir;
   try {
-    for (const file of listSpoolFiles(spoolDirFor(readHookConfig(root), root)).reverse()) {
+    dir = spoolDirFor(readHookConfig(root), root);
+  } catch (error) {
+    onError(`its config cannot be read: ${error.message}`);
+    return void 0;
+  }
+  let files;
+  try {
+    files = listSpoolFiles(dir);
+  } catch (error) {
+    onError(`its spool directory ${tildeHome(dir)} cannot be listed: ${error.message}`);
+    return void 0;
+  }
+  try {
+    for (const file of files.reverse()) {
       const at = newestActivityOf(file.path);
       if (at !== void 0) {
         return at;
       }
     }
-    return void 0;
-  } catch {
-    return void 0;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      onError(`its spool directory ${tildeHome(dir)} cannot be read: ${error.message}`);
+    }
   }
+  return void 0;
 };
 var withinReadDays = (at, readDays, now) => {
   if (at === void 0) {
@@ -2330,7 +2559,7 @@ var tabNames = (roots) => {
     }
   }
 };
-var listRepositories = () => {
+var listRepositories = (onError = () => void 0) => {
   const base = defaultRoot();
   const found = [];
   for (const hash of hashDirectories(base)) {
@@ -2340,24 +2569,34 @@ var listRepositories = () => {
     }
   }
   const names = tabNames(found.map((repository) => repository.root));
-  const repositories = found.map((repository, index) => ({ ...repository, name: names[index], lastLineAt: lastLineAt(repository.root) }));
+  const repositories = found.map((repository, index) => {
+    const named = { hash: repository.hash, name: names[index] };
+    return { ...repository, name: names[index], lastLineAt: lastLineAt(repository.root, (message) => onError(named, message)) };
+  });
   return repositories.sort((a, b) => a.name.localeCompare(b.name));
 };
-var newestDayIn = (dir) => {
+var reportLookup = (dir, error, onError) => {
+  if (failedLookup(error)) {
+    onError?.(`orphaned spool ${tildeHome(dir)} not listed: ${error.message}`);
+  }
+};
+var newestDayIn = (dir, onError) => {
   try {
     return { newest: purgeableDayFiles(dir).at(-1)?.day };
-  } catch {
+  } catch (error) {
+    reportLookup(dir, error, onError);
     return void 0;
   }
 };
-var holdsAggregates = (dir) => {
+var holdsAggregates = (dir, onError) => {
   try {
     return spoolDirExists(dir) && lstatSync2(join5(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
-  } catch {
+  } catch (error) {
+    reportLookup(dir, error, onError);
     return false;
   }
 };
-var listOrphanedSpools = (now = /* @__PURE__ */ new Date()) => {
+var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError) => {
   const base = defaultRoot();
   const today = localDay(now);
   const orphans = [];
@@ -2367,11 +2606,11 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date()) => {
     if (root !== void 0 && recordedRootValid(root, hash)) {
       continue;
     }
-    const listed = newestDayIn(dir);
+    const listed = newestDayIn(dir, onError);
     if (listed === void 0) {
       continue;
     }
-    const orphaned = listed.newest === void 0 ? holdsAggregates(dir) : listed.newest < today;
+    const orphaned = listed.newest === void 0 ? holdsAggregates(dir, onError) : listed.newest < today;
     if (!orphaned) {
       continue;
     }
@@ -2381,7 +2620,7 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date()) => {
 };
 var pruneOrphanedSpools = (now, onError) => {
   const deleted = [];
-  for (const orphan of listOrphanedSpools(now)) {
+  for (const orphan of listOrphanedSpools(now, onError)) {
     const config = join5(orphan.dir, CONFIG_FILE);
     const shown = tildeHome(orphan.dir);
     try {
@@ -2403,6 +2642,15 @@ var pruneOrphanedSpools = (now, onError) => {
   }
   return deleted;
 };
+var pruneAggregatesIn = (dir, keepDays, now, onError) => {
+  try {
+    if (spoolDirExists(dir)) {
+      pruneAggregates(dir, keepDays, now);
+    }
+  } catch (error) {
+    onError(`session aggregates of ${tildeHome(dir)} not pruned: ${error.message}`);
+  }
+};
 var pruneRecordedAggregates = (now, onError) => {
   const base = defaultRoot();
   for (const hash of hashDirectories(base).sort()) {
@@ -2411,13 +2659,21 @@ var pruneRecordedAggregates = (now, onError) => {
       continue;
     }
     const dir = join5(base, hash);
+    let keepDays = DEFAULT_CONFIG.insights.keepDays;
     try {
-      const keepDays = configKeepDays(userConfigPath(root), "insights") ?? DEFAULT_CONFIG.insights.keepDays;
-      if (spoolDirExists(dir)) {
-        pruneAggregates(dir, keepDays, now);
-      }
+      keepDays = configKeepDays(userConfigPath(root), "insights") ?? keepDays;
     } catch (error) {
       onError(`session aggregates of ${tildeHome(dir)} not pruned: ${error.message}`);
+      continue;
+    }
+    pruneAggregatesIn(dir, keepDays, now, onError);
+    try {
+      const configured = spoolDirFor(readHookConfig(root), root);
+      if (resolve3(configured) !== resolve3(dir)) {
+        pruneAggregatesIn(configured, keepDays, now, onError);
+      }
+    } catch (error) {
+      onError(`session aggregates of ${tildeHome(dir)} not pruned under its configured spool.dir: ${error.message}`);
     }
   }
 };
@@ -2470,12 +2726,13 @@ var createSpoolContext = (options) => {
   const observers = [];
   let lastLineAt2 = options.lastLineAt;
   const ghWanted = options.facts && config.github.repo !== "";
+  const ghLog = (level, message) => level === "warning" ? warn(message) : info(message);
   const pollWanted = () => options.clients() > 0 && hasOpenRun(store.state().board);
-  const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, write, log, wanted: pollWanted }) : void 0;
+  const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, root, write, log: ghLog, wanted: pollWanted }) : void 0;
   let lines = () => 0;
   try {
     const git = options.facts ? createGitFacts({ config, write, log, repoCommonDir: gitCommonDir(root) }) : void 0;
-    const usage = options.facts ? createUsageFacts({ prices: loadPrices(resolve3(root, expandHome(config.pricesFrom)), log), write, log }) : void 0;
+    const usage = options.facts ? createUsageFacts({ prices: loadPrices(resolve4(root, expandHome(config.pricesFrom)), log), write, log }) : void 0;
     if (git && usage) {
       observers.push((event) => git.observe(event), (event, payload) => usage.observe(event, payload));
       stops.push(() => git.stop(), () => usage.stop());
@@ -2782,15 +3039,23 @@ var startNurselog = async (options = {}) => {
     }
   };
   const pruneOrphans = dailyOrphanPrune(warn);
+  let unlisted = /* @__PURE__ */ new Map();
   const scan = () => {
     pruneOrphans();
     let listed;
+    const reasons = /* @__PURE__ */ new Map();
     try {
-      listed = listRepositories();
+      listed = listRepositories((repository, message) => reasons.set(repository.hash, `${nameOf(repository)} is not served: ${message}`));
     } catch (error) {
       warn(`the repositories were not listed: ${error.message}`);
       return;
     }
+    for (const [hash, reason] of reasons) {
+      if (unlisted.get(hash) !== reason) {
+        warn(reason);
+      }
+    }
+    unlisted = reasons;
     const now = /* @__PURE__ */ new Date();
     const served = /* @__PURE__ */ new Map();
     for (const repository of listed) {
@@ -2891,7 +3156,7 @@ var startNurselog = async (options = {}) => {
   try {
     if (options.replay) {
       const { fixtures, config } = options.replay;
-      const root = resolve4(options.replay.root);
+      const root = resolve5(options.replay.root);
       const ui = uiConfig(config, repositoryRoot(root));
       const id = repoHash(root);
       contexts.set(id, createReplayContext({ id, name: ui.repo || "replay", root, config, ui, fixtures, speed }));
@@ -2920,8 +3185,8 @@ var startNurselog = async (options = {}) => {
 
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
-import { closeSync as closeSync4, constants as constants3, existsSync as existsSync4, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync4, readSync as readSync4 } from "fs";
-import { join as join8, resolve as resolve5 } from "path";
+import { closeSync as closeSync4, constants as constants3, existsSync as existsSync4, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync5, readSync as readSync4 } from "fs";
+import { join as join8, resolve as resolve6 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
   start [--replay <fixture>] [--speed <n>] [--port <n>]  start the one board for every repository, or print the repository's tab while it runs (the default command; builds the package once when dist/ is missing)
@@ -2937,6 +3202,7 @@ var USAGE = `Usage: nurselog <command> [--repo <path>]
   purge [--all] [--before <YYYY-MM-DD>] [--yes]          delete the repository's spool day files (of every repository and orphaned spool directory with --all, only the days before a date with --before); asks first unless --yes
   fixture <session id or prefix> [--out <file>]          print one session's spool lines as a replay fixture (a prefix of 8+ characters names it), or write them to a new file with --out
   insights [--json]                                      workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data
+  install-cli [--remove]                                 write the terminal command ~/.local/bin/nurselog, which runs the newest installed plugin copy (from a clone, the clone); --remove deletes it; a file Nurselog did not write is never touched
 --repo <path> names the repository; the default is the git worktree of the current directory.
 Quote free text in single quotes; a value that starts with - needs the = form: --text='-5 files'.`;
 var FLAG_NAMES = {
@@ -3050,7 +3316,7 @@ var questionMarker = (args, readStdin) => {
   return { ...result, data: { ...result.data, id }, output: id };
 };
 var MARKERS = { plan: planMarker, gate: gateMarker, question: questionMarker };
-var readStandardInput = () => readFileSync4(0, "utf8");
+var readStandardInput = () => readFileSync5(0, "utf8");
 var parseMarker = (kind, args, readStdin = readStandardInput) => {
   const marker = Object.hasOwn(MARKERS, kind) ? MARKERS[kind] : void 0;
   if (!marker) {
@@ -3091,7 +3357,7 @@ var resolveRepository = (repo, cwd = process.cwd()) => {
   if (repo === "") {
     throw new Error("--repo needs a path");
   }
-  const start = resolve5(cwd, repo ?? ".");
+  const start = resolve6(cwd, repo ?? ".");
   if (!existsSync4(start)) {
     throw new Error(`${stripControl(start)} does not exist`);
   }
@@ -3283,11 +3549,11 @@ export {
   appendEvent,
   runCommand,
   createBashTracker,
-  PR_FIELDS,
-  createGhFacts,
   SAFE_GIT,
   worktreeAddPath,
   createGitFacts,
+  PR_FIELDS,
+  createGhFacts,
   loadPrices,
   priceFor,
   usdFor,

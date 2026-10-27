@@ -24,36 +24,27 @@ is nothing to build: the plugin ships the build.
    claude plugin install nurselog --marketplace petterikorpimaa/nurselog
    ```
 
-2. **Add a shell function** to `~/.zshrc` or `~/.bashrc`, then open a new shell. It runs the newest installed copy of
-   the plugin, and every example below uses it.
+2. **Set up your repository.** Start `claude` in it and ask:
 
-   ```sh
-   nurselog() {
-     local copy
-     copy=$(command ls -d ~/.claude/plugins/cache/nurselog/nurselog/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | tail -1)
-     [ -n "$copy" ] || { echo 'nurselog: the plugin is not installed' >&2; return 1; }
-     node "${copy}bin/nurselog" "$@"
-   }
+   ```text
+   /nurselog:nurselog set up this repository
    ```
 
-3. **Set up your repository.** This writes a config under `~/.local/share/nurselog`, nothing in the repository.
+   Claude proposes a config from what the repository shows and writes it once you approve, under
+   `~/.local/share/nurselog`, nothing in the repository. Then it offers the terminal command `~/.local/bin/nurselog`,
+   which every example below uses ([Terminal command](#terminal-command)).
 
-   ```console
-   cd ~/code/acme-shop
-   nurselog init            # show the detected config
-   nurselog init --write    # save it
-   ```
-
-   Or ask Claude in that repository: `/nurselog:nurselog set up this repository`.
-
-4. **Start `claude` in the repository.** The first session starts the board in the background. Open it:
+3. **Open the board.** It starts the board when it is not running and opens it, signed in; from then on a session start
+   in the repository starts the board in the background when it is down. Until you add the PATH line `install-cli`
+   printed, if it printed one, run `~/.local/bin/nurselog open` instead.
 
    ```console
    nurselog open            # or: nurselog open --app, for a window of its own
    ```
 
-**Just looking?** After steps 1 and 2, replay the sample sessions without setting up a repository, then open the URL
-it prints (from a clone, `node ~/github/nurselog/bin/nurselog` in place of `nurselog`):
+**Just looking?** After step 1, ask Claude `/nurselog:nurselog install the terminal command`, then replay the sample
+sessions without setting up a repository and open the URL it prints (from a clone without the plugin,
+`node ~/github/nurselog/bin/nurselog` in place of `nurselog`):
 
 ```console
 nurselog start --replay web-only,api-first,handed-back --speed 50 --port 6799
@@ -76,7 +67,7 @@ copy in the sessions that load it. `/plugin` in a session lists `nurselog` when 
 | --- | --- | --- |
 | Skill `/nurselog:nurselog` (start the board, status, markers, config, setup) | yes | yes |
 | Marker tools `plan`, `gate`, `question` | answer "not set up" | yes |
-| `nurselog` on the Bash tool's PATH (not your terminal's) | yes | yes |
+| `nurselog` on the Bash tool's PATH (your terminal's through the [terminal command](#terminal-command)) | yes | yes |
 | Records every event to the spool | no | yes |
 | Injects the markers and report-block instructions | no | yes |
 | Starts the board when it is down | no | yes |
@@ -101,11 +92,8 @@ Load it in every session from `~/.claude/settings.json`:
 { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/github/nurselog" } }
 ```
 
-In the terminal, an alias on the clone takes the place of the shell function:
-
-```sh
-alias nurselog='node ~/github/nurselog/bin/nurselog'
-```
+For the terminal, `node ~/github/nurselog/bin/nurselog install-cli` writes the terminal command on the clone (or use
+the alias of "The terminal command by hand").
 
 After a `git pull`, restart the board so that it runs the new build.
 
@@ -134,9 +122,47 @@ claude plugin uninstall nurselog@nurselog --scope local      # from one reposito
 claude plugin marketplace remove nurselog                    # the marketplace
 ```
 
-A board running from the uninstalled copy closes itself within 10 seconds. With `CLAUDE_CODE_PLUGIN_DIRS` set, delete
-the entry from the `env` block of `~/.claude/settings.json`. Then drop the shell function or the alias from your shell
-profile.
+When you remove the plugin everywhere, run `nurselog install-cli --remove` first to delete the terminal command (after
+the uninstall it finds no copy to run, so delete `~/.local/bin/nurselog` by hand); a `--scope local` removal from one
+repository keeps it. A board running from the uninstalled copy closes itself
+within 10 seconds. With `CLAUDE_CODE_PLUGIN_DIRS` set, delete the entry from the `env` block of
+`~/.claude/settings.json`. Then drop a shell function or an alias from your shell profile.
+
+</details>
+
+### Terminal command
+
+The plugin's `nurselog` is on the Bash tool's PATH only. For your terminal, `nurselog install-cli` writes a small
+script, `~/.local/bin/nurselog`: the skill offers it after setting up a repository, and
+`/nurselog:nurselog install the terminal command` asks for it at any time.
+
+- From a marketplace install it runs the newest installed copy that no update or uninstall has replaced, so it needs no
+  rewrite after `claude plugin update`; from a clone it runs that clone.
+- It runs `node` from your PATH, and it never edits a shell profile: when `~/.local/bin` is not on your PATH it prints
+  the line to add to `~/.zshrc` or `~/.bashrc`, `export PATH="$HOME/.local/bin:$PATH"`.
+- A file at that path that `install-cli` did not write is never replaced or removed. `nurselog install-cli` again
+  updates the script, and `nurselog install-cli --remove` deletes it.
+
+<details>
+<summary>The terminal command by hand</summary>
+
+Instead of `~/.local/bin/nurselog`, add a shell function to `~/.zshrc` or `~/.bashrc`, then open a new shell. It runs
+the newest installed copy of the plugin:
+
+```sh
+nurselog() {
+  local copy
+  copy=$(command ls -d ~/.claude/plugins/cache/nurselog/nurselog/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | tail -1)
+  [ -n "$copy" ] || { echo 'nurselog: the plugin is not installed' >&2; return 1; }
+  node "${copy}bin/nurselog" "$@"
+}
+```
+
+From a clone, an alias on the clone does the same:
+
+```sh
+alias nurselog='node ~/github/nurselog/bin/nurselog'
+```
 
 </details>
 
@@ -156,7 +182,7 @@ profile.
 | Agent table | One row per agent: state, current tool, calls against budget, verification passes and fails, context, cost, time. A row expands to its recent calls and report. |
 | Main thread and log | The newest main-thread message (all of them in a dialog) and the newest log line. |
 | Tokens by stage | A stacked chart per stage and package. |
-| Summary | Per agent totals, cost by branch, tool output, verification commands. |
+| Summary | Per agent totals, cost by branch, tool output, verification commands, and each resume after a pause with its context, whether the prompt cache likely expired and Claude Code's cache write estimate. |
 | Conversations | Sessions that only chat, one row each. |
 | Finished | Done sessions fold here after 2 minutes; Show, Clear, Undo. |
 
@@ -213,6 +239,7 @@ Claude Code --hook--> spool (NDJSON day files) --read--> board server (reducer) 
 | PR titles and states, Merge and Promote stages | `gh` logged in and `github.repo` set |
 | Ticket keys from prompts as well as branch names | `keyPattern` |
 | Lower-case tracker keys in branch names (Linear's `user/eng-123-fix-login`, Shortcut's `sc-123`) | `keyPattern` in upper case (`ENG-\d+`) and `keyIgnoreCase: true` |
+| Ticket keys as links to the tracker | `keyUrl` |
 | Package streams and colours | `packages` |
 | Budget bars (calls and verify rounds) | `budgets` (default: implementer 80 calls, 3 verify rounds) |
 
@@ -327,7 +354,8 @@ The app is bound to the address, the port included: install it from `127.0.0.1` 
 
 `nurselog link [--session <id>] [--osc8]` prints the repository's tab URL, with `&session=<id>` for one session;
 `--osc8` makes it a terminal hyperlink named "Nurselog". When no board serves the repository it prints nothing on
-stdout and exits 1, so the status line stays empty:
+stdout and exits 1, so the status line stays empty. The example calls the [terminal command](#terminal-command) by its
+path, which works whether or not `~/.local/bin` is on the status line's PATH:
 
 ```sh
 #!/bin/sh
@@ -335,10 +363,7 @@ stdout and exits 1, so the status line stays empty:
 input=$(cat)
 id=$(printf '%s' "$input" | jq -r '.session_id')
 model=$(printf '%s' "$input" | jq -r '.model.display_name')
-# the newest installed copy; from a clone: copy=~/github/nurselog/
-copy=$(command ls -d ~/.claude/plugins/cache/nurselog/nurselog/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | tail -1)
-link=
-[ -n "$copy" ] && link=$(node "${copy}bin/nurselog" link --session "$id" --osc8 2>/dev/null)
+link=$(~/.local/bin/nurselog link --session "$id" --osc8 2>/dev/null)
 printf '%s %s\n' "$model" "$link"
 ```
 
@@ -415,9 +440,11 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | `nurselog insights [--json]` | Workflow health report. |
 | `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, commands and reports included, so check it before you share it). |
 | `nurselog purge [--before <day>] [--all] [--yes]` | Deletes recorded data. |
+| `nurselog install-cli [--remove]` | Writes the [terminal command](#terminal-command) `~/.local/bin/nurselog`, or deletes it. |
 | `nurselog help` | Usage. |
 
-Every command except `open` and `help` takes `--repo <path>`; the default is the git worktree of the current directory.
+Every command except `open`, `install-cli` and `help` takes `--repo <path>`; the default is the git worktree of the
+current directory.
 
 ## Configuration
 
@@ -485,9 +512,10 @@ Arrays such as `packages` replace the default list whole.
 | --- | --- | --- |
 | `keyPattern` | `""` | Ticket key regex. Empty: the key comes from the branch name only. |
 | `keyIgnoreCase` | `false` | `keyPattern` (written in upper case) matches in any case and the key is stored in upper case: `eng-123` gives `ENG-123`. Ignored without `keyPattern`. |
+| `keyUrl` | `""` | Ticket link: the ticket keys on the board link to the ticket, each `{key}` replaced by the key, e.g. `https://tracker.example/browse/{key}`. `https:` only, with `{key}` outside the host, else a warning and plain keys. Empty: keys are plain text. |
 | `branches.trunk` | `"main"` | The trunk branch. |
 | `branches.promote` | `[]` | Promote targets; the Promote stage is drawn only with one. |
-| `github.repo` | `""` | `owner/name`. Empty turns `gh` polling off. |
+| `github.repo` | `""` | `owner/name`, the repository a git remote of this repository points at (a fork may name its `upstream`); otherwise the top bar shows `gh repo mismatch`. Empty turns `gh` polling off. |
 | `github.accountPattern` | `""` | Regex the `gh` login must match. Nurselog never switches accounts; from the user config it can poll with a logged-in account that is not the active one. |
 | `github.pollSeconds` | `60` | 10 to 3600. Polls only while a browser is open and the repository has an open run. |
 | `github.mergeBy` | `"developer"` | `agent`: an open PR does not wait for you. |
@@ -655,10 +683,11 @@ so it needs no running board.
 | Symptom | Fix |
 | --- | --- |
 | "This browser is not signed in to the board" | `nurselog open` |
+| `nurselog: command not found` in a terminal | Ask Claude `/nurselog:nurselog install the terminal command`, or add `~/.local/bin` to your PATH with the line `install-cli` printed ([Terminal command](#terminal-command)). |
 | A session is not on the board | Does `/plugin` list `nurselog`, and does `nurselog status` show the repository as set up? A terminal tab opened before `CLAUDE_CODE_PLUGIN_DIRS` was exported does not have the variable. |
 | "Nurselog is not set up for this repository" | `nurselog init --write` |
 | `board token missing or changed; restart the board` | Stop the board (`kill <pid>`) and run `nurselog open`. |
-| No PRs, merges or promotions | The top bar shows why: `gh polling off` (no `github.repo`), `gh account mismatch` (log in to an account that matches `github.accountPattern`; Nurselog never switches) or `gh: <error>`. |
+| No PRs, merges or promotions | The top bar shows why: `gh polling off` (no `github.repo`), `gh account mismatch` (log in to an account that matches `github.accountPattern`; Nurselog never switches), `gh repo mismatch` (`github.repo` names no git remote of the repository; fix it, or the remote, after a rename) or `gh: <error>`. |
 | The board still shows the old version (after an update, or after a `git pull` of a clone) | Stop it with `kill <pid>` (`nurselog status` prints the pid); the next session start starts it from the current copy. |
 | The board did not start | Read `~/.local/share/nurselog/board.log`. |
 

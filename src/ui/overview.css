@@ -37,8 +37,9 @@
 .rank-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .rank-dot { grid-area: d; width: 8px; height: 8px; border-radius: 50%; background: var(--fg); }
 .rank-dot.finished { background: transparent; border: 1.5px solid var(--fg-3); }
+/* the padding, taken back by the margin, keeps a ticket link's focus ring inside the cut; the max-width still holds 22 characters */
 .rank-key {
-  grid-area: k; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  grid-area: k; max-width: calc(22ch + 8px); padding: 4px; margin: -4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 600 11.5px var(--f-mono); color: var(--fg);
 }
 .rank-title { grid-area: t; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

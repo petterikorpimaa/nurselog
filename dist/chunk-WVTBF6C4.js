@@ -399,6 +399,7 @@ var lstatOrUndefined = (path) => {
     return void 0;
   }
 };
+var lstatIfPresent = (path) => lstatSync(path, { throwIfNoEntry: false });
 var checkOwnedFile = (path) => {
   const dir = dirname(path);
   const dirStat = lstatSync(dir);
@@ -423,7 +424,7 @@ var repositoryRoots = (start) => {
 };
 var findConfig = (root) => {
   const user = userConfigPath(root);
-  if (lstatOrUndefined(user)) {
+  if (lstatIfPresent(user)) {
     checkOwnedFile(user);
     return { path: user, kind: "user" };
   }
@@ -529,7 +530,7 @@ var readHookConfig = (root) => {
   return { spool: { ...HOOK_DEFAULTS.spool }, roles, found, warnings, problems };
 };
 var configKeepDays = (path, section = "spool") => {
-  if (lstatOrUndefined(path) === void 0) {
+  if (lstatIfPresent(path) === void 0) {
     return void 0;
   }
   checkOwnedFile(path);
@@ -1041,14 +1042,14 @@ var pruneNotified = (dir, oldest) => {
 };
 var AFTER_EVERY_DAY = "\uFFFF";
 var dayFilesBefore = (dir, oldest) => {
-  if (!existsSync(dir)) {
+  if (lstatIfPresent(dir) === void 0) {
     return [];
   }
   const files = [];
   for (const name of readdirSync(dir)) {
     const day = DAY_FILE.exec(name)?.[1];
     const path = join(dir, name);
-    const stat = day !== void 0 && day < oldest ? lstatOrUndefined(path) : void 0;
+    const stat = day !== void 0 && day < oldest ? lstatIfPresent(path) : void 0;
     if (stat?.isFile() || stat?.isSymbolicLink()) {
       files.push({ day, path });
     }
@@ -1069,13 +1070,13 @@ var deleteDaysBefore = (dir, oldest, onFailure = () => {
   return [...deleted, ...pruneNotified(dir, oldest)];
 };
 var pruneSpool = (dir, keepDays, now = /* @__PURE__ */ new Date()) => {
-  if (!existsSync(dir)) {
+  if (lstatIfPresent(dir) === void 0) {
     return [];
   }
   return deleteDaysBefore(dir, localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays)));
 };
 var spoolDirExists = (dir) => {
-  const stat = lstatOrUndefined(dir);
+  const stat = lstatIfPresent(dir);
   if (stat === void 0) {
     return false;
   }
@@ -1649,6 +1650,7 @@ var trunkJoinPattern = (config) => {
 var DEFAULT_CONFIG = {
   keyPattern: "",
   keyIgnoreCase: false,
+  keyUrl: "",
   branches: { trunk: "main", promote: [] },
   github: { repo: "", accountPattern: "", pollSeconds: 60, mergeBy: "developer", promoteTitlePrefix: {} },
   packages: [],
@@ -1723,6 +1725,16 @@ var isGithubRepo = (repo) => {
   const parts = repo.split("/");
   return parts.length === 2 && parts.every((part) => REPO_PART.test(part));
 };
+var REMOTE_URL = /^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i;
+var REMOTE_SCP = /^(?:[\w.-]+@)?([\w.-]+):(?!\/\/)(.+)$/;
+var githubRepoOfRemote = (url, host) => {
+  const match = REMOTE_URL.exec(url) ?? REMOTE_SCP.exec(url);
+  if (!match || host !== void 0 && match[1].toLowerCase() !== host) {
+    return void 0;
+  }
+  const repo = match[2].replace(/\/+$/, "").replace(/\.git$/, "");
+  return isGithubRepo(repo) ? repo : void 0;
+};
 var plain = (pattern, linear) => linearRegExp(pattern, "", linear);
 var kindPatterns = (key, config) => {
   const defaults2 = DEFAULT_CONFIG.verification[key];
@@ -1791,9 +1803,20 @@ var isFraction = (value) => typeof value === "number" && value >= 0 && value <= 
 var isLimit = (value) => value === null || Number.isInteger(value) && value >= 0;
 var isRole = (value) => isPlainObject(value) && ROLE_STAGES.includes(value.stage) && (value.short === void 0 || typeof value.short === "string");
 var isRoleBudget = (value) => isPlainObject(value) && [value.toolCalls, value.verifyRounds].every((limit) => limit === void 0 || isLimit(limit));
+var isKeyUrl = (value) => {
+  if (value === "") {
+    return true;
+  }
+  if (typeof value !== "string" || !value.includes("{key}") || !URL.canParse(value)) {
+    return false;
+  }
+  const url = new URL(value);
+  return url.protocol === "https:" && !url.host.includes("{");
+};
 var isIntegerIn = (min, max) => (value) => Number.isInteger(value) && value >= min && value <= max;
 var DEFAULTED_KEYS = [
   ["keyIgnoreCase", "true or false", isBoolean],
+  ["keyUrl", "empty or an https: URL that contains {key} outside its host", isKeyUrl],
   ["github", OBJECT, isPlainObject],
   ["github.pollSeconds", `an integer from ${MIN_POLL_SECONDS} to ${MAX_POLL_SECONDS}`, isPollSeconds],
   ["github.mergeBy", "developer or agent", isMergeBy],
@@ -2076,9 +2099,14 @@ var uiConfig = (config, root) => {
     promote: [...config.branches.promote],
     docs,
     features: { answerFromUi: config.features.answerFromUi },
+    keyUrl: config.keyUrl,
     sessionFixtures: false
   };
 };
+
+// src/model/counts.ts
+var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+var isAmount = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
 // src/model/events.ts
 var SPOOL_EVENT_NAMES = [
@@ -2163,10 +2191,14 @@ var gitProblem = (data) => {
   const fields = Object.hasOwn(GIT_FIELDS, kind) ? GIT_FIELDS[kind] : void 0;
   return fields ? stringFields(data, fields) : `unknown git fact kind ${kind}`;
 };
+var isRepoMismatch = (value) => isFields(value) && isString(value.repo) && isStringList2(value.remotes);
 var ghProblem = (data) => {
   if (data.kind === "status") {
     const flags = typeof data.polling === "boolean" && typeof data.accountOk === "boolean";
-    return flags ? stringFields(data, [], ["activeAccount", "error"]) : "data.polling and data.accountOk must be booleans";
+    if (!flags) {
+      return "data.polling and data.accountOk must be booleans";
+    }
+    return isOptional(data.repoMismatch, isRepoMismatch) ? stringFields(data, [], ["activeAccount", "error"]) : "data.repoMismatch must be { repo, remotes }";
   }
   if (data.kind !== "pr") {
     return `unknown gh fact kind ${String(data.kind)}`;
@@ -2216,8 +2248,16 @@ var questionProblem = (data) => {
   const problem = stringFields(data, [], ["run", "answers", "id", "text", "node", "context", "relays"]);
   return problem ?? (isOptional(data.options, isStringList2) ? void 0 : "data.options must be a list of strings");
 };
+var RESUME_NUMBERS = ["contextTokens", "estimatedCacheWriteUsd", "secondsSinceLastResponse"];
+var resumeProblem = (data) => {
+  const wrong = RESUME_NUMBERS.find((key) => !isOptional(data[key], isAmount));
+  if (wrong) {
+    return `data.${wrong} must be a number >= 0`;
+  }
+  return isOptional(data.promptCacheLikelyExpired, isBoolean2) ? void 0 : "data.promptCacheLikelyExpired must be a boolean";
+};
 var DATA_CHECKS = {
-  "session.start": (data) => stringFields(data, [], ["source", "transcriptPath", "model"]),
+  "session.start": (data) => stringFields(data, [], ["source", "transcriptPath", "model"]) ?? resumeProblem(data),
   prompt: promptProblem,
   "tool.pre": (data) => stringFields(data, ["toolUseId", "tool"]) ?? toolInputProblem(data.input),
   "tool.post": (data) => stringFields(data, ["toolUseId", "tool"], ["stdoutTail", "agentId", "resolvedModel"]),
@@ -2448,6 +2488,8 @@ var validateMarkerInput = (kind, input, names = FIELD_NAMES, { caps = true } = {
 // src/model/hook-payload.ts
 var str = (value) => typeof value === "string" ? value : void 0;
 var num = (value) => typeof value === "number" ? value : void 0;
+var amount = (value) => isAmount(value) ? value : void 0;
+var bool = (value) => typeof value === "boolean" ? value : void 0;
 var cap = (value, max) => (str(value) ?? "").slice(0, max);
 var isObject3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var objects = (value) => Array.isArray(value) ? value.filter(isObject3) : [];
@@ -2570,7 +2612,17 @@ var hookPayloadToEvent = (payload, options) => {
   const response = payload.tool_response;
   switch (payload.hook_event_name) {
     case "SessionStart": {
-      const data = { source: str(payload.source) ?? "startup", transcriptPath: str(payload.transcript_path), model: str(payload.model), injectedChars: options.injectedChars };
+      const data = {
+        source: str(payload.source) ?? "startup",
+        transcriptPath: str(payload.transcript_path),
+        model: str(payload.model),
+        // A resume or a fork (design section 1.6); a field of another type is dropped, so the line passes `checkEvent`.
+        contextTokens: amount(payload.context_tokens),
+        promptCacheLikelyExpired: bool(payload.prompt_cache_likely_expired),
+        estimatedCacheWriteUsd: amount(payload.estimated_cache_write_usd),
+        secondsSinceLastResponse: amount(payload.seconds_since_last_response),
+        injectedChars: options.injectedChars
+      };
       return { ...envelope, src: "hook", event: "session.start", data };
     }
     case "SessionEnd":
@@ -3236,14 +3288,19 @@ var GATE_STAGE = { plan: "plan", merge: "merge", promote: "promote", docs: "docs
 var STAGE_LABELS = { plan: "Plan", build: "Build", join: "Join", review: "Review", fix: "Fix", pr: "PR", merge: "Merge", promote: "Promote", docs: "Docs" };
 var FINAL_STATES = /* @__PURE__ */ new Set(["done", "approved", "changes", "handed", "failed", "skipped"]);
 var ACTIVE_STATES = /* @__PURE__ */ new Set(["running", "waiting"]);
+var PAST_BUILD = ["join", "review", "pr", "merge"];
+var SETTLED = /* @__PURE__ */ new Set(["done", "failed", "skipped"]);
+var SETTLED_PAST_BUILD = /* @__PURE__ */ new Set([...SETTLED, "handed"]);
 var setStage = (run, id, state, at) => {
   const stage = run.stages[id];
   if (stage.state === state) {
     return;
   }
+  let started = false;
   if (!stage.startedAt && state !== "pending" && state !== "skipped") {
     stage.startedAt = at;
     run.tokens.marks.push({ at, stage: id, kind: "start" });
+    started = true;
   }
   if (FINAL_STATES.has(state)) {
     stage.endedAt = at;
@@ -3252,6 +3309,9 @@ var setStage = (run, id, state, at) => {
     delete stage.endedAt;
   }
   stage.state = state;
+  if (started && PAST_BUILD.includes(id)) {
+    passBuild(run, at);
+  }
 };
 var setGate = (run, id, state, line, source, note) => {
   const { at } = line;
@@ -3353,16 +3413,32 @@ var endPlan = (run, line) => {
     setGate(run, "plan", "done", line, run.gates.plan.source);
   }
 };
+var pastBuild = (run) => PAST_BUILD.some((id) => run.stages[id].startedAt !== void 0);
 var checkBuild = (run, at) => {
   if (run.streams.length === 0) {
     return;
   }
-  const allDone = run.streams.every((stream) => stream.state === "done" || stream.state === "failed" || stream.state === "skipped");
-  if (allDone) {
-    setStage(run, "build", run.streams.some((stream) => stream.state === "failed") ? "failed" : "done", at);
+  const settled = pastBuild(run) ? SETTLED_PAST_BUILD : SETTLED;
+  const settledAll = run.streams.every((stream) => settled.has(stream.state));
+  if (settledAll) {
+    let end = "done";
+    if (run.streams.some((stream) => stream.state === "failed")) {
+      end = "failed";
+    } else if (!run.stages.build.startedAt && run.streams.every((stream) => stream.state === "skipped")) {
+      end = "skipped";
+    }
+    setStage(run, "build", end, at);
   } else if (!ACTIVE_STATES.has(run.stages.build.state)) {
     setStage(run, "build", "running", at);
   }
+};
+var passBuild = (run, at) => {
+  for (const stream of run.streams) {
+    if (stream.planned && stream.state === "pending" && stream.agentIds.length === 0) {
+      stream.state = "skipped";
+    }
+  }
+  checkBuild(run, at);
 };
 var checkReview = (run, at) => {
   if (run.reviewers.length === 0) {
@@ -3378,6 +3454,7 @@ var checkReview = (run, at) => {
     setStage(run, "review", "done", at);
   }
 };
+var agentFix = (run, agentId) => [...run.fixes].reverse().find((fix) => fix.agentId === agentId);
 var checkFix = (run, at) => {
   if (run.fixes.length === 0) {
     return;
@@ -3408,18 +3485,34 @@ var closeQuestion = (run, question, state, line, via) => {
   }
 };
 var audienceOf = (origin) => origin === "report" ? "main" : "user";
-var addQuestion = (run, question) => {
-  if (run.questions.some((existing) => existing.id === question.id)) {
-    return;
-  }
-  const audience = audienceOf(question.origin);
-  run.questions.push({ ...question, audience, state: "open" });
+var logAsked = (run, question) => {
   const line = { at: question.createdAt, sessionId: question.sessionId };
-  if (audience === "main") {
+  if (audienceOf(question.origin) === "main") {
     logRun(run, line, `Question for the main thread: ${question.text}`, "normal", question.source.agentId);
   } else if (question.origin !== "permission") {
     logRun(run, line, `Question for you: ${question.text}`, "you", question.source.agentId);
   }
+};
+var addQuestion = (run, question) => {
+  if (run.questions.some((existing) => existing.id === question.id)) {
+    return;
+  }
+  run.questions.push({ ...question, audience: audienceOf(question.origin), state: "open" });
+  logAsked(run, question);
+};
+var reaskQuestion = (run, question, asked) => {
+  question.text = asked.text;
+  question.blocking = asked.blocking;
+  question.options = asked.options;
+  question.node = asked.node;
+  question.source = asked.source;
+  question.sessionId = asked.sessionId;
+  question.createdAt = asked.createdAt;
+  question.state = "open";
+  delete question.resolvedAt;
+  delete question.answeredVia;
+  delete question.messageId;
+  logAsked(run, asked);
 };
 var noteReport = (session, agentId) => {
   if (agentId !== "" && !(session.handbacks ?? []).includes(agentId)) {
@@ -3553,7 +3646,7 @@ var handleHandbacks = (state, session, line) => {
   return changed;
 };
 var agentNode = (run, agent) => {
-  const fix = run.fixes.find((item) => item.agentId === agent.id);
+  const fix = agentFix(run, agent.id);
   if (fix) {
     return { kind: "fix", id: fix.id };
   }
@@ -3765,6 +3858,7 @@ var settleVerification = (agent, entries, event, config) => {
 
 // src/model/sessions.ts
 var PROMPTS_CAP = 200;
+var RESUMES_CAP = MESSAGE_CAP;
 var SOURCES = /* @__PURE__ */ new Set(["startup", "resume", "clear", "compact"]);
 var KIND_ORDER = ["start", "worktree", "agent", "edit", "join", "git", "pr"];
 var RESUMES_WORK = /* @__PURE__ */ new Set([
@@ -3913,6 +4007,7 @@ var recordLine = (state, event, run) => {
   }
   if (event.event === "session.start") {
     noteSessionStart(session, event.at, event.data);
+    noteResume(session, event);
   }
   if (event.event === "prompt" && event.data.kind === "user" && !event.agentId) {
     const earliest = session.prompts.length === 0 || time(event.at) < time(session.prompts[0].at);
@@ -3950,6 +4045,29 @@ var noteSessionStart = (session, at, data) => {
   } else {
     delete session.model;
   }
+};
+var noteResume = (session, event) => {
+  const { source, contextTokens, promptCacheLikelyExpired, estimatedCacheWriteUsd, secondsSinceLastResponse } = event.data;
+  const fields = [contextTokens, promptCacheLikelyExpired, estimatedCacheWriteUsd, secondsSinceLastResponse];
+  if (fields.every((value) => value === void 0) || session.resumes.some((entry2) => entry2.id === event.id)) {
+    return;
+  }
+  const entry = { at: event.at, source, id: event.id };
+  if (contextTokens !== void 0) {
+    entry.contextTokens = contextTokens;
+  }
+  if (promptCacheLikelyExpired !== void 0) {
+    entry.cacheLikelyExpired = promptCacheLikelyExpired;
+  }
+  if (estimatedCacheWriteUsd !== void 0) {
+    entry.cacheWriteUsd = estimatedCacheWriteUsd;
+  }
+  if (secondsSinceLastResponse !== void 0) {
+    entry.idleSeconds = secondsSinceLastResponse;
+  }
+  session.resumes.push(entry);
+  session.resumes.sort(byLineTime);
+  session.resumes.splice(0, session.resumes.length - RESUMES_CAP);
 };
 var mainOf = (state, sessionId) => recordOf(state, sessionId)?.main;
 var sessionMain = (session, event, config) => {
@@ -4205,7 +4323,7 @@ var ensureSession = (state, event) => ownEntry(state.index.sessions, event.sessi
   const tokens = { points: [], byStage: {}, total: emptyCounts() };
   const cwd = normalizePath(event.cwd);
   const developerWait = { waits: 0, totalMs: 0, breaks: 0 };
-  return { startCwd: cwd, cwd, agentWorktrees: {}, runIds: [], startedAt: event.at, prompts: [], plans: [], branchWork: [], agentIds: [], messages: [], tokens, developerWait };
+  return { startCwd: cwd, cwd, agentWorktrees: {}, runIds: [], startedAt: event.at, prompts: [], plans: [], branchWork: [], agentIds: [], messages: [], tokens, developerWait, resumes: [] };
 });
 var findWorktree = (state, path, live = false) => {
   let end = path.length;
@@ -4340,6 +4458,9 @@ var mergeRun = (target, run) => {
     }
   }
   target.costUsd += run.costUsd;
+  if (pastBuild(target)) {
+    passBuild(target, time(run.lastEventAt) > time(target.lastEventAt) ? run.lastEventAt : target.lastEventAt);
+  }
 };
 var remapRunKeys = (entries, oldId, newId) => {
   for (const key of Object.keys(entries)) {
@@ -4645,8 +4766,10 @@ var readsOnly = (command) => {
   const segments = shellSegments(command).flatMap(backgroundParts);
   return segments.every((segment) => !writesFile(segment.code) && readsOnlyWords(shellWords(segment)));
 };
-var worktreeAddOf = (session, event) => {
-  for (const { words, cwd, cd } of bashSteps(session, event)) {
+var worktreeAddOf = (session, event) => worktreeAddIn(bashSteps(session, event));
+var worktreeAddOfCommand = (command, cwd) => worktreeAddIn(splitSteps(command, cwd ? normalizePath(cwd) : void 0));
+var worktreeAddIn = (steps) => {
+  for (const { words, cwd, cd } of steps) {
     if (cd) {
       continue;
     }
@@ -4687,7 +4810,7 @@ var worktreeAddFrom = (args, directoryWord, cwd) => {
 };
 var registerWorktreeAdd = (state, event, add, agentKey, config) => {
   const record = ownEntry(state.index.worktrees, add.path, () => ({ path: add.path }));
-  record.branch = record.branch ?? add.branch;
+  record.branch = record.removedAt !== void 0 && add.branch !== void 0 ? add.branch : record.branch ?? add.branch;
   delete record.removedAt;
   record.base = add.base;
   record.forkAt = event.at;
@@ -4898,6 +5021,22 @@ var staysRemoved = (state, run) => {
   const record = ownValue(state.index.worktrees, run.worktree);
   return run.removedAt !== void 0 && (record === void 0 || record.removedAt !== void 0);
 };
+var settleRemovedRun = (run, branch, at) => {
+  const end = later(at, run.lastEventAt) ? run.lastEventAt : at;
+  run.removedAt = at;
+  run.endedAt = run.endedAt ?? end;
+  for (const agent of Object.values(run.agents)) {
+    closePermissions(run, agent, factStamp(end), "unanswered");
+  }
+  expireOpenQuestions(run, factStamp(end), "worktree removed");
+  logRun(run, factStamp(at), `Worktree and branch ${branch} removed`, "done");
+};
+var settleRemovalOfClosedPr = (state, run) => {
+  const record = ownValue(state.index.worktrees, run.worktree);
+  if (run.removedAt === void 0 && record?.removedAt !== void 0 && record.branch === run.branch) {
+    settleRemovedRun(run, run.branch, record.removedAt);
+  }
+};
 var onWorktreeRemoved = (state, data, at) => {
   const path = normalizePath(data.worktree);
   const record = ownValue(state.index.worktrees, path);
@@ -4920,14 +5059,7 @@ var onWorktreeRemoved = (state, data, at) => {
   if (!run || run.pr?.state === "open" || run.pr?.state === "merged") {
     return [];
   }
-  const end = later(at, run.lastEventAt) ? run.lastEventAt : at;
-  run.removedAt = at;
-  run.endedAt = run.endedAt ?? end;
-  for (const agent of Object.values(run.agents)) {
-    closePermissions(run, agent, factStamp(end), "unanswered");
-  }
-  expireOpenQuestions(run, factStamp(end), "worktree removed");
-  logRun(run, factStamp(at), `Worktree and branch ${data.branch} removed`, "done");
+  settleRemovedRun(run, data.branch, at);
   return [run];
 };
 
@@ -4962,7 +5094,7 @@ var openedByCall = (pr, opener) => {
   if (opener.number !== void 0) {
     return opener.number === pr.number;
   }
-  const offset = time(pr.createdAt) - time(opener.at);
+  const offset = time(pr.createdAt) - opener.atMs;
   return offset >= -OPENER_BEFORE_MS && offset <= OPENER_AFTER_MS;
 };
 var applyOpener = (state, run) => {
@@ -5008,6 +5140,7 @@ var onTrunkPr = (state, pr, at, config) => {
       current.state = "closed";
       setGate(run, "merge", "pending", factStamp(at), run.gates.merge.source);
       logRun(run, factStamp(at), `PR #${pr.number} closed without merging`, "warn");
+      settleRemovalOfClosedPr(state, run);
     } else if (pr.state === "OPEN" && current.state === "closed") {
       current.state = "open";
       if (mergeWaits(config)) {
@@ -5121,7 +5254,16 @@ var onGhFact = (state, event, config) => {
   const data = event.data;
   if (data.kind === "status") {
     const github = { polling: data.polling, accountOk: data.accountOk, checkedAt: event.at };
-    state.board.github = { ...github, ...data.activeAccount ? { activeAccount: data.activeAccount } : {}, ...data.error ? { error: data.error } : {} };
+    if (data.activeAccount) {
+      github.activeAccount = data.activeAccount;
+    }
+    if (data.error) {
+      github.error = data.error;
+    }
+    if (data.repoMismatch) {
+      github.repoMismatch = data.repoMismatch;
+    }
+    state.board.github = github;
     return [];
   }
   const pr = data.pr;
@@ -5368,14 +5510,11 @@ var addMainMessage = (state, event, run) => {
   }
 };
 
-// src/model/counts.ts
-var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-
 // src/model/overhead.ts
 var OVERHEAD_CHARS_PER_TOKEN = 3;
 var LISTING_CHARS = 513;
 var TOOL_DEFINITION_CHARS = { plan: 1088, gate: 644, question: 1071 };
-var SKILL_BODY_CHARS = 6647;
+var SKILL_BODY_CHARS = 7593;
 var SKILL_NAMES = /* @__PURE__ */ new Set(["nurselog", "nurselog:nurselog"]);
 var MAIN = "main";
 var OVERHEAD_PART_KEYS = ["markers", "reportParagraph", "listing", "toolDefinitions", "markerCalls", "reportBlocks", "skill"];
@@ -5612,6 +5751,38 @@ var attachStream = (run, agent, target, line, sessions) => {
   agent.streamId = stream.id;
   setStage(run, "build", "running", at);
 };
+var reopenStream = (run, agent, at) => {
+  const stream = run.streams.find((item) => item.id === agent.streamId);
+  if (!stream || stream.agentIds[stream.agentIds.length - 1] !== agent.id) {
+    return;
+  }
+  stream.state = "running";
+  checkBuild(run, at);
+};
+var linkReReviews = (run, reviewerId, agentId, at) => {
+  let linked = false;
+  for (const fix of run.fixes) {
+    if (fix.reviewerId === reviewerId && !fix.reReview) {
+      fix.reReview = { agentId, state: "running" };
+      linked = true;
+      if (fix.state === "running" && fix.agentId === "main") {
+        fix.state = "done";
+      }
+    }
+  }
+  if (!linked) {
+    const newest2 = /* @__PURE__ */ new Map();
+    for (const fix of run.fixes) {
+      if (fix.reReview?.agentId === agentId) {
+        newest2.set(fix.streamId ?? "main", fix.reReview);
+      }
+    }
+    for (const reReview of newest2.values()) {
+      reReview.state = "running";
+    }
+  }
+  checkFix(run, at);
+};
 var startImplementer = (run, agent, target, line, sessions) => {
   endPlan(run, line);
   const reviewer = reviewerWithChanges(run);
@@ -5640,15 +5811,7 @@ var startReviewer = (run, agent, line, config) => {
     reviewer.agentId = agent.id;
     reviewer.state = "running";
     reviewer.model = agent.model ?? reviewer.model;
-    for (const fix of run.fixes) {
-      if (fix.reviewerId === short && !fix.reReview) {
-        fix.reReview = { agentId: agent.id, state: "running" };
-        if (fix.state === "running" && fix.agentId === "main") {
-          fix.state = "done";
-        }
-      }
-    }
-    checkFix(run, at);
+    linkReReviews(run, short, agent.id, at);
     logRun(run, line, `re-review (round ${reviewer.round})`, "normal", agent.id);
   } else {
     reviewer = { id: short, role: agent.role, agentId: agent.id, state: "running", round: 1, fixCount: 0 };
@@ -5658,6 +5821,26 @@ var startReviewer = (run, agent, line, config) => {
     run.reviewers.push(reviewer);
   }
   checkReview(run, at);
+};
+var resumeRoleStage = (run, agent, line) => {
+  const { at } = line;
+  const fix = agentFix(run, agent.id);
+  const changes = reviewerWithChanges(run);
+  const reviewer = run.reviewers.find((item) => item.id === agent.reviewerId);
+  if (fix && (!fix.reReview || !changes)) {
+    fix.state = "running";
+    checkFix(run, at);
+  } else if (fix && changes) {
+    startFix(run, changes, fix.streamId, agent.id, line);
+  } else if (agent.stage === "build" && agent.streamId !== void 0 && changes) {
+    startFix(run, changes, fixStreamFor(run, { id: agent.streamId }), agent.id, line);
+  } else if (agent.stage === "build" && agent.streamId !== void 0) {
+    reopenStream(run, agent, at);
+  } else if (reviewer && reviewer.agentId === agent.id) {
+    reviewer.state = "running";
+    linkReReviews(run, reviewer.id, agent.id, at);
+    checkReview(run, at);
+  }
 };
 var startRoleStage = (state, run, agent, target, line, config) => {
   if (agent.stage === "build") {
@@ -5719,14 +5902,14 @@ var detachStream = (run, agent) => {
     }
     stream.state = newest2.state;
   } else if (stream.planned) {
-    stream.state = "pending";
+    stream.state = pastBuild(run) ? "skipped" : "pending";
   } else {
     run.streams = run.streams.filter((item) => item !== stream);
   }
 };
 var rederiveImplementer = (state, run, agent, spawn2, line, config) => {
   const fromSpawn = streamFor(run, spawn2, config);
-  const fix = run.fixes.find((item) => item.agentId === agent.id);
+  const fix = agentFix(run, agent.id);
   if (fix) {
     fix.streamId = fixStreamFor(run, fromSpawn);
     agent.streamId = fix.streamId;
@@ -5804,9 +5987,9 @@ var reviewerVerdict = (agent) => {
   }
   return verdict ? "approved" : "done";
 };
-var setReport = (agent, text, via) => {
+var setReport = (agent, text, via, at) => {
   const parsed = parseReportBlock(text);
-  const report = { text, via };
+  const report = { text, via, at };
   if (parsed && isBlockError(parsed)) {
     report.blockError = parsed.blockError;
   } else if (parsed) {
@@ -5827,7 +6010,7 @@ var finalizeReviewer = (run, agent, at) => {
     reviewer.fixCount = rounds.reduce((sum, item) => sum + fixFollowups(item), 0);
   }
   for (const item of run.fixes) {
-    if (item.reReview?.agentId === agent.id) {
+    if (item.reReview?.agentId === agent.id && ACTIVE_STATES.has(item.reReview.state)) {
       item.reReview.state = verdict;
     }
   }
@@ -5835,7 +6018,7 @@ var finalizeReviewer = (run, agent, at) => {
 };
 var finalizeWorker = (run, agent, at, config) => {
   const hasReport = agent.report !== void 0 && agent.report.text.trim() !== "";
-  const fix = run.fixes.find((item) => item.agentId === agent.id);
+  const fix = agentFix(run, agent.id);
   if (fix) {
     fix.state = hasReport ? "done" : "failed";
     agent.state = fix.state;
@@ -5865,7 +6048,7 @@ var finalizeWorker = (run, agent, at, config) => {
   }
 };
 var finalLogLine = (run, agent) => {
-  const fix = run.fixes.find((item) => item.agentId === agent.id);
+  const fix = agentFix(run, agent.id);
   const failed = agent.state === "failed";
   if (fix) {
     return { text: `fix for ${fix.reviewerId}: ${fix.state}`, tone: failed ? "failed" : "normal" };
@@ -5910,16 +6093,27 @@ var copyRuns = (state, home, agentId) => {
 var endCopies = (state, home, agent, line, config) => {
   for (const run of copyRuns(state, home, agent.id)) {
     const copy = run.agents[agent.id];
-    if (!copy.report && agent.report) {
+    if (agent.report) {
       copy.report = structuredClone(agent.report);
     }
     closePermissions(run, copy, line, "unanswered");
     settleNodes(run, copy, line, config);
   }
 };
-var endedCopyRuns = (state, event, run) => {
+var resumeCopies = (state, home, agentId, line) => {
+  for (const run of copyRuns(state, home, agentId)) {
+    const copy = run.agents[agentId];
+    copy.state = "running";
+    copy.resumedAt = line.at;
+    delete copy.endedAt;
+    resumeRoleStage(run, copy, line);
+  }
+};
+var changedCopyRuns = (state, event, run) => {
   let agentId;
   if (event.event === "agent.stop") {
+    agentId = event.agentId;
+  } else if (event.event === "agent.start" && run && event.agentId && ownValue(run.agents, event.agentId)?.resumedAt === event.at) {
     agentId = event.agentId;
   } else if (event.event === "prompt" && event.data.kind === "task-notification") {
     agentId = event.data.taskId;
@@ -5929,11 +6123,20 @@ var endedCopyRuns = (state, event, run) => {
   }
   return agentId && run ? copyRuns(state, run, agentId) : [];
 };
+var reportOfLeg = (agent) => {
+  const reportAt = agent.report?.at;
+  return agent.resumedAt !== void 0 && reportAt !== void 0 && time(reportAt) >= time(agent.resumedAt);
+};
 var finalizeAgent = (run, agent, line, config) => {
   if (!settleNodes(run, agent, line, config)) {
     return;
   }
   const { at, sessionId } = line;
+  const leg = reportOfLeg(agent) ? agent.resumedAt : void 0;
+  const earlier = (itemAt) => leg !== void 0 && time(itemAt) < time(leg);
+  if (leg !== void 0) {
+    run.followups = run.followups.filter((item) => item.origin.agentId !== agent.id || !earlier(item.at));
+  }
   const block = agent.report?.block;
   if (!block) {
     return;
@@ -5949,7 +6152,13 @@ var finalizeAgent = (run, agent, line, config) => {
   block.questions.forEach((item, index) => {
     const source = { agentId: agent.id, role: agent.role };
     const node = agentNode(run, agent);
-    addQuestion(run, { id: `q-${agent.id}-${index + 1}`, text: item.text, blocking: item.blocking, options: item.options ?? [], origin: "report", source, node, sessionId, createdAt: at });
+    const question = { id: `q-${agent.id}-${index + 1}`, text: item.text, blocking: item.blocking, options: item.options ?? [], origin: "report", source, node, sessionId, createdAt: at };
+    const asked = run.questions.find((existing) => existing.id === question.id && earlier(existing.createdAt));
+    if (asked) {
+      reaskQuestion(run, asked, question);
+    } else {
+      addQuestion(run, question);
+    }
   });
 };
 var answeredByPrompt = (state, question, prompt) => {
@@ -5971,7 +6180,7 @@ var onPrompt = (state, event, config, answered) => {
       return void 0;
     }
     if (!agent.report && data.result) {
-      setReport(agent, data.result, "task-notification");
+      setReport(agent, data.result, "task-notification", event.at);
     }
     if (data.status !== "completed" && agent.state === "running") {
       agent.state = "failed";
@@ -6000,6 +6209,10 @@ var onPrompt = (state, event, config, answered) => {
   }
   return run;
 };
+var reportBeforeResume = (agent, at) => {
+  const resumedLeg = agent.resumedAt !== void 0 && time(at) >= time(agent.resumedAt);
+  return resumedLeg && !reportOfLeg(agent);
+};
 var onAgentStop = (state, event, config) => {
   const agentId = event.agentId;
   const runId = agentId ? state.index.agentRuns[agentId] : void 0;
@@ -6008,7 +6221,7 @@ var onAgentStop = (state, event, config) => {
     return hookRun(state, event, config);
   }
   if (!run) {
-    state.index.pendingStops[agentId] = event;
+    state.index.pendingStops[agentId] = { ...event, atMs: time(event.at) };
     return void 0;
   }
   const agent = ensureAgent(run, agentId, event, config);
@@ -6019,8 +6232,8 @@ var onAgentStop = (state, event, config) => {
   if (!agent.report && handback) {
     agent.report = structuredClone(handback);
   }
-  if (!agent.report && event.data.lastMessage.trim() !== "") {
-    setReport(agent, event.data.lastMessage, "stop");
+  if ((!agent.report || reportBeforeResume(agent, event.at)) && event.data.lastMessage.trim() !== "") {
+    setReport(agent, event.data.lastMessage, "stop", event.at);
   }
   closePermissions(run, agent, event, "unanswered");
   startRoleStageAtEnd(state, run, agent, event, config);
@@ -6036,7 +6249,7 @@ var onAgentPre = (state, run, parentAgent, event, config) => {
   const prompt = input.prompt ?? "";
   const paths = input.paths ?? [];
   const background = input.runInBackground ?? false;
-  const spawn2 = { toolUseId: event.data.toolUseId, runId: run.id, sessionId: event.sessionId, parentAgent, subagentType, at: event.at, prompt, paths, background };
+  const spawn2 = { toolUseId: event.data.toolUseId, runId: run.id, sessionId: event.sessionId, parentAgent, subagentType, at: event.at, atMs: time(event.at), prompt, paths, background };
   if (input.model) {
     spawn2.model = input.model;
   }
@@ -6054,7 +6267,7 @@ var onAgentPre = (state, run, parentAgent, event, config) => {
 var keepSpawnStream = (state, run, agentId, spawn2, config) => {
   const target = roleConfig(spawn2.subagentType, config).stage === "build" ? streamFor(run, spawn2, config) : void 0;
   if (target) {
-    state.index.agentStreams[agentId] = { id: target.id, package: target.package, at: spawn2.at };
+    state.index.agentStreams[agentId] = { id: target.id, package: target.package, at: spawn2.at, atMs: spawn2.atMs };
   }
 };
 var retireSpawn = (state, toolUseId) => {
@@ -6169,7 +6382,11 @@ var onAgentStart = (state, event, config) => {
       agent.budget.toolCallsAtFirstStop = firstStop;
     }
   }
-  agent.startedAt = event.at;
+  agent.startedAt = time(event.at) < time(agent.startedAt) ? event.at : agent.startedAt;
+  const resumed = stoppedAt !== void 0 && time(event.at) > time(stoppedAt);
+  if (resumed) {
+    agent.resumedAt = event.at;
+  }
   agent.state = "running";
   if (spawn2) {
     spawn2.agentId = agentId;
@@ -6187,7 +6404,10 @@ var onAgentStart = (state, event, config) => {
     }
   }
   logRun(run, event, "started", "normal", agentId);
-  if (stoppedAt) {
+  if (resumed) {
+    resumeRoleStage(run, agent, event);
+    resumeCopies(state, run, agentId, event);
+  } else if (stoppedAt) {
     const stopped = { at: stoppedAt, sessionId: event.sessionId };
     startRoleStageAtEnd(state, run, agent, stopped, config);
     finalizeAgent(run, agent, stopped, config);
@@ -6227,10 +6447,9 @@ var parsedTime = (at) => {
   currentTimes.set(at, parsed);
   return parsed;
 };
-var pruneOlder = (entries, floor, at) => {
+var pruneOlder = (entries, floor) => {
   for (const id of Object.keys(entries)) {
-    const entryAt = at(entries[id]);
-    if (entryAt !== void 0 && parsedTime(entryAt) < floor) {
+    if (entries[id].atMs < floor) {
       delete entries[id];
     }
   }
@@ -6264,12 +6483,12 @@ var pruneIndex = (state, at, config) => {
   }
   state.index.prunedAt = at;
   const floor = now - config.retention.indexHours * HOUR_MS;
-  pruneOlder(state.index.calls, floor, (call) => call.at);
-  pruneOlder(state.index.spawns, floor, (spawn2) => spawn2.at);
-  pruneOlder(state.index.requests, floor, (request) => request.at);
-  pruneOlder(state.index.pendingStops, floor, (stop) => stop.at);
-  pruneOlder(state.index.agentStreams, floor, (stream) => stream.at);
-  pruneOlder(state.index.prOpeners, floor, (opener) => opener.at);
+  pruneOlder(state.index.calls, floor);
+  pruneOlder(state.index.spawns, floor);
+  pruneOlder(state.index.requests, floor);
+  pruneOlder(state.index.pendingStops, floor);
+  pruneOlder(state.index.agentStreams, floor);
+  pruneOlder(state.index.prOpeners, floor);
   pruneBranches(state.board.branches, now);
 };
 
@@ -6417,7 +6636,8 @@ var sessionMetrics = (session) => {
   const tokens = { byStage, total: processedTokens(session.tokens.total), usd: session.tokens.total.usd };
   const tools = { main: toolMetrics(main ? [main] : []), subagents: toolMetrics(subagents) };
   const total = totalOf(roles);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens };
+  const resumes = resumeMetrics(session.resumes ?? []);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens, resumes };
   if (session.overhead) {
     metrics.overhead = overheadMetrics(session.overhead, total.usd);
   }
@@ -6426,6 +6646,11 @@ var sessionMetrics = (session) => {
 var overheadMetrics = (overhead, sessionUsd) => {
   const share = sessionUsd > 0 ? overhead.usd / sessionUsd : 0;
   return { ...structuredClone(overhead), share };
+};
+var resumeMetrics = (resumes) => {
+  const expired = resumes.filter((entry) => entry.cacheLikelyExpired === true).length;
+  const cacheWriteUsd = resumes.reduce((sum, entry) => sum + (entry.cacheWriteUsd ?? 0), 0);
+  return { count: resumes.length, expired, cacheWriteUsd, items: structuredClone(resumes) };
 };
 
 // src/model/tokens.ts
@@ -6543,7 +6768,7 @@ var onUsage = (state, event, config) => {
   const tokens = processedTokens(counts) - (previous ? processedTokens(previous.tokens) : 0);
   addPoint(run.tokens.points, { at: data.at, stage, agentId: agentKey, tokens, usd: counts.usd - (previous?.tokens.usd ?? 0) });
   const counted = addSessionTokens(state, event, previous, counts, stage, config);
-  const entry = { runId: run.id, agentKey, stage, tokens: counts, at: event.at };
+  const entry = { runId: run.id, agentKey, stage, tokens: counts, at: event.at, atMs: time(event.at) };
   state.index.requests[data.requestId] = counted ? { ...entry, ...counted } : entry;
   if (!agent.model || isModelAlias(agent.model)) {
     adoptModel(run, agent, data.model);
@@ -6755,7 +6980,7 @@ var onToolPre2 = (state, event, config, touched) => {
     addMainCall(own, call, config.budgets.warnAt);
   }
   const early = state.index.calls[toolUseId]?.early;
-  state.index.calls[toolUseId] = { runId: run.id, agentKey, at: event.at };
+  state.index.calls[toolUseId] = { runId: run.id, agentKey, at: event.at, atMs: time(event.at) };
   agent.budget.toolCalls.used += 1;
   updateMeter(state, run, agent, "tool calls", agent.budget.toolCalls, config.budgets.warnAt, event);
   if (tool === "Bash" && input.command) {
@@ -6768,7 +6993,7 @@ var onToolPre2 = (state, event, config, touched) => {
     onAgentPre(state, run, agentKey, event, config);
   }
   if (tool === "SubagentHandback" && input.message !== void 0 && agentKey !== "main") {
-    setReport(agent, input.message, "handback");
+    setReport(agent, input.message, "handback", event.at);
     if (agent.endedAt) {
       finalizeAgent(run, agent, event, config);
     }
@@ -6917,7 +7142,7 @@ var onToolEnd = (state, event, config, touched) => {
   const agent = ensureAgent(run, agentKey, event, config);
   const call = findCall(agent, event.data.toolUseId);
   if (!index && !call) {
-    state.index.calls[event.data.toolUseId] = { runId: run.id, agentKey, early: event, at: event.at };
+    state.index.calls[event.data.toolUseId] = { runId: run.id, agentKey, early: event, at: event.at, atMs: time(event.at) };
     return run;
   }
   delete state.index.calls[event.data.toolUseId];
@@ -7048,7 +7273,7 @@ var onPrCreated = (state, run, index, event, call, succeeded, touched, config) =
   const landed = run.branch === "?" ? void 0 : run.branch;
   const branch = index.prHead ? target?.branch ?? index.prHead : landed;
   if (succeeded && branch) {
-    const opener = { agentId: index.agentKey, sessionId: event.sessionId, at: event.at };
+    const opener = { agentId: index.agentKey, sessionId: event.sessionId, at: event.at, atMs: time(event.at) };
     notePrOpener(state, branch, number === void 0 ? opener : { ...opener, number });
   }
   if (target && target !== run) {
@@ -7100,12 +7325,14 @@ var isVisible = (run, config) => {
   return subagents || mainEdits || keyed || prompted || run.pr !== void 0 || run.plan !== void 0;
 };
 var stageLabel = (run, stage) => {
-  if (stage === "build" && run.streams.length > 1) {
-    const done = run.streams.filter((stream) => stream.state === "done").length;
-    return `Build \xB7 ${done}/${run.streams.length} at join`;
-  }
-  if (stage === "build" && run.streams.length === 1) {
-    return `Build \xB7 ${run.streams[0].id}`;
+  if (stage === "build") {
+    const counted = run.streams.filter((stream) => stream.state !== "skipped");
+    if (counted.length > 1) {
+      return `Build \xB7 ${counted.filter((stream) => stream.state === "done").length}/${counted.length} at join`;
+    }
+    if (counted.length === 1) {
+      return `Build \xB7 ${counted[0].id}`;
+    }
   }
   if (stage === "review" && run.reviewers.length > 0) {
     const approved = run.reviewers.filter((reviewer) => reviewer.state === "approved").length;
@@ -7140,11 +7367,12 @@ var chipTone = (run) => {
     return "done";
   }
   const warm = ACTIVE_STATES.has(run.stages.fix.state) || run.reviewers.some((reviewer) => reviewer.state === "changes");
+  const handed = !pastBuild(run) && run.streams.some((stream) => stream.state === "handed");
   const rules = [
     ["failed", run.agents.main?.state === "failed"],
     ["you", waitText(run) !== void 0],
     ["done", doneText(run) !== void 0],
-    ["amber", run.streams.some((stream) => stream.state === "handed")],
+    ["amber", handed],
     ["warm", warm]
   ];
   return rules.find(([, applies]) => applies)?.[0] ?? "normal";
@@ -7439,7 +7667,7 @@ var applyEvent = (state, event, config) => {
       const run = onHookEvent(state, event, config, changed);
       recordLine(state, event, run);
       onOverheadLine(state, event);
-      const others = [...changed, ...closeSessionPermissions(state, event), ...endedCopyRuns(state, event, run)].filter((item) => item !== run);
+      const others = [...changed, ...closeSessionPermissions(state, event), ...changedCopyRuns(state, event, run)].filter((item) => item !== run);
       touched = [...new Set(run ? [run, ...others] : others)];
       resumeActivity = event.event !== "session.end";
       break;
@@ -7556,6 +7784,15 @@ var mergeAgent = (lead, rest, config) => {
     merged.now = structuredClone(newestOpen);
   }
   merged.filesChanged = [...new Set(agents.flatMap((agent) => agent.filesChanged))];
+  delete merged.resumedAt;
+  for (const agent of agents) {
+    if (time(agent.startedAt) < time(merged.startedAt)) {
+      merged.startedAt = agent.startedAt;
+    }
+    if (agent.resumedAt !== void 0 && (merged.resumedAt === void 0 || time(agent.resumedAt) > time(merged.resumedAt))) {
+      merged.resumedAt = agent.resumedAt;
+    }
+  }
   return merged;
 };
 var openedBranch = (state, agentId) => {
@@ -7669,7 +7906,7 @@ var rowReviewers = (ctx, runs, fixes) => {
   const all = [...seen.values()].sort((a, b) => byAgentStart(a.agent, b.agent));
   return all.filter(({ agent }) => ownAgent2(ctx, agent.id)).map((entry) => {
     const round = all.filter((other) => other.reviewerId === entry.reviewerId).indexOf(entry) + 1;
-    const afterFix = fixes.find((fix) => fix.reReview?.agentId === entry.agent.id)?.id;
+    const afterFix = fixes.filter((fix) => fix.reReview?.agentId === entry.agent.id).at(-1)?.id;
     return { ...agentNode2(entry.agent, ctx.agents[entry.agent.id]), reviewerId: entry.reviewerId, round, ...afterFix === void 0 ? {} : { afterFix } };
   });
 };
@@ -7752,14 +7989,14 @@ var settleTime = (row, pr, continuedAt) => {
   return at;
 };
 var latestReviewers = (reviewers) => [...new Map(reviewers.map((reviewer) => [reviewer.reviewerId, reviewer])).values()];
-var building = (stream) => {
+var building = (stream, past) => {
   const latest = stream.runs.at(-1);
-  return latest !== void 0 && (ACTIVE_STATES.has(latest.state) || latest.state === "handed");
+  return latest !== void 0 && (ACTIVE_STATES.has(latest.state) || latest.state === "handed" && !past);
 };
-var activeStage = (row) => {
+var activeStage = (row, past) => {
   const reviewing = latestReviewers(row.reviewers).some((reviewer) => ACTIVE_STATES.has(reviewer.state) || reviewer.state === "changes");
   const columns = [
-    ["build", row.streams.some(building)],
+    ["build", row.streams.some((stream) => building(stream, past))],
     ["join", row.join !== void 0 && ACTIVE_STATES.has(row.join.state)],
     ["review", reviewing],
     ["fix", row.fixes.some((fix) => ACTIVE_STATES.has(fix.state))],
@@ -7880,11 +8117,32 @@ var branchEntries = (state, branch) => {
   const entries = Object.hasOwn(state.index.branchSessions, branch) ? state.index.branchSessions[branch] : [];
   return [...entries].sort((a, b) => time(a.at) - time(b.at) || compareText(a.sessionId, b.sessionId));
 };
+var workedBeyondStart = (state, sessionId, branch) => {
+  const works = recordOf(state, sessionId)?.branchWork ?? [];
+  return works.some((work) => {
+    const run = work.how === "start" ? void 0 : ownValue(state.board.runs, work.runId);
+    return run !== void 0 && branchWorkKey(run) === branch;
+  });
+};
+var branchWorkers = (state, branch) => {
+  const entries = branchEntries(state, branch);
+  const worked = entries.filter((entry) => workedBeyondStart(state, entry.sessionId, branch));
+  return { entries, workers: new Set((worked.length > 0 ? worked : entries).map((entry) => entry.sessionId)) };
+};
+var workerNeighbour = (sessions, sessionId, step) => {
+  const position = sessions.entries.findIndex((entry) => entry.sessionId === sessionId);
+  if (position === -1) {
+    return void 0;
+  }
+  const side = step === 1 ? sessions.entries.slice(position + 1) : sessions.entries.slice(0, position).reverse();
+  return side.find((entry) => sessions.workers.has(entry.sessionId));
+};
+var branchOwner = (sessions) => sessions.entries.filter((entry) => sessions.workers.has(entry.sessionId)).at(-1)?.sessionId;
 var buildRow = (ctx, row) => {
-  const entries = branchEntries(ctx.state, row.branch);
-  const position = entries.findIndex((entry) => entry.sessionId === ctx.sessionId);
-  const owner = entries.length === 0 || entries[entries.length - 1].sessionId === ctx.sessionId;
-  const continuedAt = !owner && position !== -1 ? entries[position + 1]?.at : void 0;
+  const workers = branchWorkers(ctx.state, row.branch);
+  const ownerId = branchOwner(workers);
+  const owner = ownerId === void 0 || ownerId === ctx.sessionId;
+  const continuedAt = owner ? void 0 : workerNeighbour(workers, ctx.sessionId, 1)?.at;
   const streams = rowStreams(ctx, row.runs);
   const fixes = ownFixes(ctx, row.runs);
   const reviewers = rowReviewers(ctx, row.runs, fixes);
@@ -7921,7 +8179,7 @@ var buildRow = (ctx, row) => {
     built.stage = continued.stage;
     built.stageText = continued.text;
   } else {
-    built.stage = settled ?? activeStage(built) ?? reachedStage(built);
+    built.stage = settled ?? activeStage(built, row.runs.some(pastBuild)) ?? reachedStage(built);
     built.stageText = stageText(built, built.stage);
   }
   built.live = isLiveRow(built);
@@ -8095,16 +8353,15 @@ var afterOf = (session) => {
   return source === "clear" || source === "resume" ? source : void 0;
 };
 var firstRowOf = (state, session) => groupRows(state, session)[0];
-var neighbourOnBranch = (state, branch, sessionId, step) => {
-  const entries = branchEntries(state, branch);
-  const position = entries.findIndex((entry) => entry.sessionId === sessionId);
-  return position === -1 ? void 0 : entries[position + step]?.sessionId;
-};
 var continuedOf = (state, sessionId) => {
   const session = recordOf(state, sessionId);
   const first = session ? firstRowOf(state, session) : void 0;
-  const previous = first ? neighbourOnBranch(state, first.branch, sessionId, -1) : void 0;
-  return first && previous !== void 0 ? { sessionId: previous, branch: first.branch, at: first.firstWorkAt } : void 0;
+  if (!first) {
+    return void 0;
+  }
+  const workers = branchWorkers(state, first.branch);
+  const previous = workerNeighbour(workers, sessionId, -1);
+  return previous ? { sessionId: previous.sessionId, branch: first.branch, at: first.firstWorkAt, counts: workers.workers.has(sessionId) } : void 0;
 };
 var sessionKey = (state, sessionId, config) => keyOf(state, sessionId, config, /* @__PURE__ */ new Set());
 var keyOf = (state, sessionId, config, seen) => {
@@ -8177,7 +8434,7 @@ var continuedInLinks = (state, sessionId, rows, config) => {
   const found = [];
   for (const candidate of candidates) {
     const continued = continuedOf(state, candidate);
-    if (continued?.sessionId === sessionId) {
+    if (continued?.sessionId === sessionId && continued.counts) {
       found.push({ ...continued, sessionId: candidate });
     }
   }
@@ -8185,7 +8442,7 @@ var continuedInLinks = (state, sessionId, rows, config) => {
   return found.map((item) => linkTo(state, item.sessionId, item.branch, afterOf(recordOf(state, item.sessionId)), config));
 };
 var rowContinuedIn = (state, sessionId, row, config) => {
-  const next = row.owner ? void 0 : neighbourOnBranch(state, row.branch, sessionId, 1);
+  const next = row.owner ? void 0 : workerNeighbour(branchWorkers(state, row.branch), sessionId, 1)?.sessionId;
   return next === void 0 ? void 0 : linkTo(state, next, row.branch, afterOf(recordOf(state, next)), config);
 };
 
@@ -8408,6 +8665,10 @@ var placeColumn = (place, rows, docs) => {
       return place.kind;
   }
 };
+var rowPastBuild = (state, row) => {
+  const runs = row.runIds.map((id) => ownValue(state.board.runs, id));
+  return runs.some((run) => run !== void 0 && pastBuild(run));
+};
 var handedOpen = (stream) => {
   const unfinished = (index) => stream.runs.slice(index + 1).every((node) => ACTIVE_STATES.has(node.state));
   return stream.runs.some((node, index) => node.state === "handed" && unfinished(index));
@@ -8418,8 +8679,8 @@ var fixing = (row) => {
 };
 var branches = (count) => `${count} ${count === 1 ? "branch" : "branches"}`;
 var CHIP_STAGES = { worktree: "build", build: "build", built: "build", join: "join", review: "review", fix: "fix", pr: "pr", merge: "merge" };
-var stageChip = (rows, open) => {
-  const amber = open.some((row) => row.streams.some(handedOpen));
+var stageChip = (state, rows, open) => {
+  const amber = open.some((row) => !rowPastBuild(state, row) && row.streams.some(handedOpen));
   const tone = amber ? "amber" : open.some(fixing) ? "warm" : "normal";
   const at = (stage) => open.filter((row) => CHIP_STAGES[row.stage] === stage);
   const texts = [
@@ -8463,7 +8724,7 @@ var baseChip = (input) => {
   if (open.length === 0) {
     return mainThreadChip(input.main);
   }
-  return stageChip(current, open);
+  return stageChip(input.state, current, open);
 };
 var followupsOf = (ctx) => {
   const runIds = new Set(ctx.runIds);
@@ -8533,7 +8794,7 @@ var projectSession = (state, sessionId, config) => {
   const outcome = outcomeOf(kind, finishedAt, rows, promote);
   const exploring = planAgents.some((id) => isExplorer(agents[id]));
   const waitingGate = GATE_ORDER.find(gateWaits);
-  const chipInput = { kind, rows, pipeline: current, questions, docs, finishedAt, outcome, exploring, main: { plan, agents } };
+  const chipInput = { state, kind, rows, pipeline: current, questions, docs, finishedAt, outcome, exploring, main: { plan, agents } };
   if (waitingGate) {
     chipInput.waitingGate = waitingGate;
   }
@@ -8570,7 +8831,8 @@ var projectSession = (state, sessionId, config) => {
     ...session.overhead === void 0 ? {} : { overhead: structuredClone(session.overhead) },
     ...planAt === void 0 ? {} : { planAt },
     costUsd: session.tokens.total.usd,
-    developerWait: structuredClone(session.developerWait)
+    developerWait: structuredClone(session.developerWait),
+    resumes: structuredClone(session.resumes)
   };
 };
 
@@ -8581,6 +8843,11 @@ var linksOf = (entry) => ({
   up: entry?.continues ? [entry.continues.sessionId] : [],
   down: (entry?.continuedIn ?? []).map((link) => link.sessionId)
 });
+var namesOf = (entry) => {
+  const rows = (entry?.rows ?? []).flatMap((row) => row.continuedIn ? [row.continuedIn.sessionId] : []);
+  const links = linksOf(entry);
+  return [.../* @__PURE__ */ new Set([...links.up, ...links.down, ...rows])];
+};
 var createStore = (config, options = {}) => {
   const windowMs = options.windowMs ?? 1e3;
   const seenMarginMs = options.seenMarginMs ?? SEEN_MARGIN_MS;
@@ -8597,6 +8864,7 @@ var createStore = (config, options = {}) => {
   const project = options.project ?? projectSession;
   const affected = options.affected ?? sessionsAffected;
   const cache = /* @__PURE__ */ new Map();
+  const namedBy = /* @__PURE__ */ new Map();
   const marked = /* @__PURE__ */ new Set();
   const skewed = /* @__PURE__ */ new Set();
   const failures = /* @__PURE__ */ new Map();
@@ -8793,6 +9061,20 @@ var createStore = (config, options = {}) => {
       }
     }
   };
+  const reindex = (sessionId, before, after) => {
+    for (const target of before) {
+      const referrers = namedBy.get(target);
+      referrers?.delete(sessionId);
+      if (referrers?.size === 0) {
+        namedBy.delete(target);
+      }
+    }
+    for (const target of after) {
+      const referrers = namedBy.get(target) ?? /* @__PURE__ */ new Set();
+      referrers.add(sessionId);
+      namedBy.set(target, referrers);
+    }
+  };
   const reproject = (sessionId) => {
     const previous = cache.get(sessionId);
     try {
@@ -8802,6 +9084,7 @@ var createStore = (config, options = {}) => {
       }
       const before = linksOf(previous);
       const after = linksOf(next);
+      reindex(sessionId, namesOf(previous), namesOf(next));
       if (next) {
         cache.set(sessionId, next);
       } else {
@@ -8860,6 +9143,9 @@ var createStore = (config, options = {}) => {
         const { up, down } = links.get(sessionId);
         for (const other of mode === "root" ? up : []) {
           queue.push([other, "leaf"]);
+        }
+        for (const other of mode === "leaf" ? [] : namedBy.get(sessionId) ?? []) {
+          queue.push([other, cache.get(other)?.continues?.sessionId === sessionId ? "down" : "leaf"]);
         }
         for (const other of mode === "leaf" ? [] : down) {
           queue.push([other, "down"]);
@@ -9059,7 +9345,7 @@ var createHistoryHandler = (store, keyConfig, observers = [], onError = ignoreEr
 };
 
 // src/spool/reader.ts
-import { closeSync as closeSync2, constants as constants2, existsSync as existsSync3, fstatSync as fstatSync2, lstatSync as lstatSync2, openSync as openSync2, readdirSync as readdirSync2, readFileSync, readSync as readSync2, watch } from "fs";
+import { closeSync as closeSync2, constants as constants2, fstatSync as fstatSync2, lstatSync as lstatSync2, openSync as openSync2, readdirSync as readdirSync2, readFileSync, readSync as readSync2, watch } from "fs";
 import { join as join3 } from "path";
 var FILE_NAME = /^events-(\d{4}-\d{2}-\d{2})\.ndjson$/;
 var CHUNK_BYTES = 1 << 20;
@@ -9101,7 +9387,7 @@ var openNoFollow = (path) => {
 };
 var lineTexts = (complete) => complete.toString("utf8").split("\n").filter((line) => line.trim() !== "");
 var listSpoolFiles = (dir) => {
-  if (!existsSync3(dir)) {
+  if (lstatSync2(dir, { throwIfNoEntry: false }) === void 0) {
     return [];
   }
   const files = [];
@@ -9199,7 +9485,10 @@ var createSpoolReader = (options) => {
     let stat;
     try {
       stat = lstatSync2(path);
-    } catch {
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
       forget(path);
       return true;
     }
@@ -9255,21 +9544,32 @@ var createSpoolReader = (options) => {
       report(`history of ${file.path} not read at start: ${error.message}`);
     }
   };
+  const lastFailure = /* @__PURE__ */ new Map();
+  const reportOnce = (source, message) => {
+    if (lastFailure.get(source) !== message) {
+      lastFailure.set(source, message);
+      report(message);
+    }
+  };
   const cleanUp = () => {
     const today = localDay(now());
     if (today !== cleanedDay) {
-      cleanedDay = today;
       deleteExpiredFiles(options.dir, options.keepDays, now());
-      try {
-        options.onCleanUp?.(now());
-      } catch (error) {
-        report(`clean-up of ${options.dir} failed: ${error.message}`);
-      }
+      options.onCleanUp?.(now());
+      cleanedDay = today;
+    }
+  };
+  const runCleanUp = () => {
+    try {
+      cleanUp();
+      lastFailure.delete("clean-up");
+    } catch (error) {
+      reportOnce("clean-up", `clean-up of ${options.dir} failed: ${error.message}`);
     }
   };
   const poll = () => {
+    runCleanUp();
     try {
-      cleanUp();
       const files = listSpoolFiles(options.dir);
       const listed = new Set(files.map((file) => file.path));
       for (const path of [...offsets.keys()].filter((known) => !listed.has(known))) {
@@ -9278,8 +9578,9 @@ var createSpoolReader = (options) => {
       for (const file of files) {
         readNew(file.path);
       }
+      lastFailure.delete("poll");
     } catch (error) {
-      report(`spool poll failed: ${error.message}`);
+      reportOnce("poll", `spool poll failed: ${error.message}`);
     }
   };
   const schedulePoll = () => {
@@ -9293,7 +9594,7 @@ var createSpoolReader = (options) => {
   return {
     start() {
       ensurePrivateDir(options.dir);
-      cleanUp();
+      runCleanUp();
       const first = localDay(readWindowStart(now(), options.readDays));
       history = options.onHistory;
       try {
@@ -9399,7 +9700,7 @@ export {
   DEFAULT_CONFIG,
   mergeConfig,
   isBranchName,
-  isGithubRepo,
+  githubRepoOfRemote,
   MIN_POLL_SECONDS,
   MAX_POLL_SECONDS,
   validateConfig,
@@ -9433,6 +9734,7 @@ export {
   recordOf,
   sessionRunIds,
   sessionsAffected,
+  worktreeAddOfCommand,
   promoteCarries,
   MAIN_AGENT,
   displayState,

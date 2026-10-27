@@ -1,6 +1,7 @@
 {
   "keyPattern": "PROJ-\\d+",
   "keyIgnoreCase": false,
+  "keyUrl": "",
   "branches": { "trunk": "dev", "promote": ["qa", "main"] },
   "github": {
     "repo": "acme/acme-shop",

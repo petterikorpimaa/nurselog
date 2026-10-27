@@ -338,6 +338,11 @@ p { margin: 0; }
 .card-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 14px 16px 4px; }
 .card-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 320px; }
 .card-key { font: 600 12.5px var(--f-mono); color: var(--fg-2); white-space: nowrap; }
+/* the ticket link of a key with keyUrl (card headers, rows, the ranking, the modal title): the key's own colour and
+   font, underlined only on hover, the focus ring on keyboard focus */
+.ticket-link { color: inherit; font: inherit; text-decoration: none; text-underline-offset: 3px; border-radius: 4px; }
+.ticket-link:hover { text-decoration: underline; }
+.ticket-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .card-heading { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
 .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; font-size: 12px; color: var(--fg-2); }
 .branch {

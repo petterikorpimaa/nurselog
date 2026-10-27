@@ -2,8 +2,8 @@
 // The Nurselog CLI: `node "<plugin root>/bin/nurselog" <command> [--repo <path>]` from any directory, or
 // `pnpm nurselog ...` in this repository. The repository is `--repo` or the git worktree of the current directory.
 // `emit`, `status` and `link` run from hooks/markers.mjs and need no build, so markers from a fresh worktree land and a
-// statusline gets its link at once; `start` (the default), `open`, `init`, `purge`, `fixture` and `insights` run
-// dist/cli.js and build the package once when dist/ is missing (design section 9).
+// statusline gets its link at once; `start` (the default), `open`, `init`, `purge`, `fixture`, `insights` and
+// `install-cli` run dist/cli.js and build the package once when dist/ is missing (design section 9).
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

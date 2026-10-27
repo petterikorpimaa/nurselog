@@ -12,7 +12,8 @@ reference is the README at the plugin root, two levels above this skill's base d
 each part needs). Read a section there when a detail below is not enough.
 
 `nurselog` is on the Bash tool's PATH while the plugin is enabled, so run it as a plain command. The user's terminal
-does not have it; give the user the absolute commands the CLI prints.
+has it once `~/.local/bin/nurselog` exists ("Terminal command" below): then hand the user `nurselog <command>`,
+otherwise the absolute commands the CLI prints.
 
 ## Starting the board
 
@@ -97,4 +98,15 @@ it; `--from -` reads a complete proposal from stdin instead of detecting. It nev
    JSON
    ```
 
-   Then run `nurselog status` and hand the user the start command.
+6. Unless `~/.local/bin/nurselog` exists, ask once whether to install the terminal command (recommended: yes); only on
+   a yes run `nurselog install-cli` ("Terminal command" below).
+7. Run `nurselog status` and hand the user `nurselog open`, or the start command it prints without a terminal command.
+
+## Terminal command
+
+`nurselog install-cli` writes `~/.local/bin/nurselog`, which gives the user's terminal `nurselog` (the newest installed
+plugin copy, or the clone); `--remove` deletes it. Run it only when the user asks ("install the terminal command", no
+setup needed) or agrees. Pass on what it prints: a refusal (a file it did not write stays the user's) and the PATH line
+for `~/.zshrc` or `~/.bashrc`, which the user adds; never edit a shell file. After a PATH line, hand over
+`~/.local/bin/nurselog <command>` until the user has added it: your Bash tool always finds the plugin's `nurselog`, so it
+cannot tell.

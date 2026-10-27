@@ -17,11 +17,11 @@ import {
   runLink,
   runStatus,
   startNurselog
-} from "./chunk-ULUUDCIE.js";
+} from "./chunk-VGB744M5.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-3275CMAI.js";
+} from "./chunk-ODEVUTYB.js";
 import {
   BRANCH_KEY_PATTERN,
   DEFAULT_CONFIG,
@@ -46,8 +46,8 @@ import {
   excludeFromBackup,
   excludedFromBackup,
   findConfig,
+  githubRepoOfRemote,
   isBranchName,
-  isGithubRepo,
   launch,
   loadConfig,
   localDay,
@@ -76,12 +76,12 @@ import {
   userConfigPath,
   validateConfig,
   waitForBoard
-} from "./chunk-3KGMWC3I.js";
+} from "./chunk-WVTBF6C4.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
-import { dirname as dirname3, join as join2, resolve as resolve2 } from "path";
-import { parseArgs as parseArgs6 } from "util";
+import { dirname as dirname4, join as join3, resolve as resolve3 } from "path";
+import { parseArgs as parseArgs7 } from "util";
 
 // src/cli/fixture.ts
 import { writeFileSync } from "fs";
@@ -212,13 +212,7 @@ var detectTrunk = async (root, run) => {
   }
   return void 0;
 };
-var githubRepoOf = (url) => {
-  const scp = /^(?:[\w.-]+@)?github\.com:(.+)$/i.exec(url);
-  const full = /^(?:https?|ssh):\/\/(?:[^@/]+@)?github\.com(?::\d+)?\/(.+)$/i.exec(url);
-  const path = scp?.[1] ?? full?.[1];
-  const repo = path?.replace(/\/+$/, "").replace(/\.git$/, "");
-  return repo && isGithubRepo(repo) ? repo : void 0;
-};
+var githubRepoOf = (url) => githubRepoOfRemote(url, "github.com");
 var detectRepo = async (root, run) => {
   const url = await attempt(() => run("git", [...SAFE_GIT, "remote", "get-url", "origin"], root));
   return url ? githubRepoOf(url) : void 0;
@@ -471,14 +465,18 @@ var exists = (path) => {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
   }
 };
-var spoolBaseOf = (root) => {
+var spoolBaseOf = (root, io) => {
   try {
     return dirname(spoolDirFor(readHookConfig(root), root));
-  } catch {
+  } catch (error) {
+    io.err(`nurselog init: the spool directory is not excluded from backups: ${stripControl(error.message)}`);
     return void 0;
   }
 };
@@ -545,8 +543,8 @@ var runInit = async (args, io, run = runCommand, backup = {}) => {
   if (values["repo-file"] && exists(userPath)) {
     io.out(`The user config ${tildeHome(userPath)} takes precedence over this file.`);
   }
-  const base = spoolBaseOf(root);
-  if (base !== void 0 && (backup.platform ?? process.platform) === "darwin") {
+  const base = (backup.platform ?? process.platform) === "darwin" ? spoolBaseOf(root, io) : void 0;
+  if (base !== void 0) {
     const excluded = excludeFromBackup(base, backup);
     const undo = `tmutil removeexclusion ${shellWord(stripControl(base))}`;
     const shownBase = stripControl(tildeHome(base));
@@ -1195,9 +1193,137 @@ Usage: ${SYNOPSIS2}`);
   return 0;
 };
 
+// src/cli/install-cli.ts
+import { randomBytes } from "crypto";
+import { chmodSync, lstatSync as lstatSync2, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
+import { homedir } from "os";
+import { basename as basename2, delimiter, dirname as dirname2, isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "path";
+import { parseArgs as parseArgs4 } from "util";
+var OWNER_LINE = "# Written by nurselog install-cli; remove it with: nurselog install-cli --remove";
+var PATH_LINE = 'export PATH="$HOME/.local/bin:$PATH"';
+var CACHE_PARENT = "/plugins/cache/nurselog/nurselog";
+var VERSION_DIR = /^\d+\.\d+\.\d+$/;
+var HEAD_BYTES = 4096;
+var terminalCommandPath = () => join2(homedir(), ".local", "bin", "nurselog");
+var cacheDirOf = (root) => {
+  const parent = dirname2(root);
+  return VERSION_DIR.test(basename2(root)) && parent.endsWith(CACHE_PARENT) ? parent : void 0;
+};
+var singleQuoted = (text) => `'${text.replaceAll("'", "'\\''")}'`;
+var terminalCommandScript = (root) => {
+  const cache = cacheDirOf(root);
+  const lines = ["#!/bin/sh", OWNER_LINE];
+  if (cache === void 0) {
+    lines.push(`exec node ${singleQuoted(join2(root, "bin", "nurselog"))} "$@"`);
+  } else {
+    lines.push(
+      "# Runs bin/nurselog of the newest plugin copy in this directory that no update or uninstall has orphaned.",
+      `cache=${singleQuoted(cache)}`,
+      "newest_copy() {",
+      '  command ls -d "$cache"/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | while IFS= read -r dir; do',
+      "    name=${dir%/}",
+      "    name=${name##*/}",
+      "    case $name in",
+      "      *[!0-9.]* | .* | *. | *..* | *.*.*.*) continue ;;",
+      "      *.*.*) ;;",
+      "      *) continue ;;",
+      "    esac",
+      `    [ -e "\${dir}.orphaned_at" ] || printf '%s\\n' "$dir"`,
+      "  done | tail -1",
+      "}",
+      "copy=$(newest_copy)",
+      "case $copy in",
+      "  /*/) ;;",
+      "  *) copy= ;;",
+      "esac",
+      'if [ -z "$copy" ] || [ ! -f "${copy}bin/nurselog" ]; then',
+      "  echo 'nurselog: the plugin is not installed' >&2",
+      "  exit 1",
+      "fi",
+      'exec node "${copy}bin/nurselog" "$@"'
+    );
+  }
+  return `${lines.join("\n")}
+`;
+};
+var onPath = (dir, path) => {
+  const entries = path.split(delimiter);
+  const absolute = entries.filter((entry) => isAbsolute2(entry));
+  return absolute.some((entry) => resolve2(entry) === dir);
+};
+var lstatOf = (path) => {
+  try {
+    return lstatSync2(path);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return void 0;
+    }
+    throw error;
+  }
+};
+var foreignReason = (path, stat) => {
+  if (stat.isSymbolicLink()) {
+    return "is a symbolic link";
+  }
+  if (!stat.isFile()) {
+    return "is not a regular file";
+  }
+  const ownerLine = readSmallFile(path, HEAD_BYTES, { head: true }).split("\n")[1];
+  return ownerLine === OWNER_LINE ? void 0 : "was not written by nurselog install-cli";
+};
+var replaceFile = (target, text) => {
+  const temporary = join2(dirname2(target), `.nurselog-${randomBytes(6).toString("hex")}`);
+  try {
+    writeFileSync3(temporary, text, { mode: 493, flag: "wx" });
+    chmodSync(temporary, 493);
+    renameSync(temporary, target);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    const code = error.code ?? "write failed";
+    throw new Error(`cannot write ${stripControl(tildeHome(target))} (${code})`, { cause: error });
+  }
+};
+var runInstallCli = (args, io, deps = {}) => {
+  const { values } = parseArgs4({ args, options: { remove: { type: "boolean" } } });
+  const target = terminalCommandPath();
+  const shown = stripControl(tildeHome(target));
+  const stat = lstatOf(target);
+  const reason = stat === void 0 ? void 0 : foreignReason(target, stat);
+  if (reason !== void 0) {
+    const action = values.remove ? "not removed" : "not replaced; move it away first to let Nurselog write that path";
+    io.err(`nurselog install-cli: ${shown} ${reason}; ${action}`);
+    return 1;
+  }
+  if (values.remove) {
+    if (stat === void 0) {
+      io.out(`Nothing to remove: ${shown} does not exist`);
+      return 0;
+    }
+    unlinkSync(target);
+    io.out(`Removed ${shown}`);
+    return 0;
+  }
+  const root = deps.packageRoot ?? PACKAGE_ROOT;
+  const cache = cacheDirOf(root);
+  mkdirSync(dirname2(target), { recursive: true, mode: 493 });
+  replaceFile(target, terminalCommandScript(root));
+  const cloneBin = stripControl(tildeHome(join2(root, "bin", "nurselog")));
+  const newestCopy = `the newest installed plugin copy in ${stripControl(tildeHome(cache ?? root))}`;
+  const runs = cache === void 0 ? cloneBin : newestCopy;
+  const verb = stat === void 0 ? "Installed" : "Updated";
+  io.out(`${verb} ${shown}: it runs ${runs}`);
+  if (cache === void 0 && lstatOf(join2(root, ".git"))?.isFile() === true) {
+    io.err(`nurselog install-cli: ${stripControl(tildeHome(root))} is a linked git worktree; the terminal command now runs it and stops working when the worktree is removed`);
+  }
+  if (!onPath(dirname2(target), deps.path ?? process.env.PATH ?? "")) {
+    io.out(`~/.local/bin is not on PATH; add this line to ~/.zshrc or ~/.bashrc, then open a new shell: ${PATH_LINE}`);
+  }
+  return 0;
+};
+
 // src/cli/open.ts
 import { existsSync as existsSync2 } from "fs";
-import { parseArgs as parseArgs4 } from "util";
+import { parseArgs as parseArgs5 } from "util";
 var OPEN_WAIT_MS = 5e3;
 var XDG_OPEN_GRACE_MS = 1e3;
 var DEFAULT_DEPS = {
@@ -1249,7 +1375,7 @@ var openDefaultBrowser = async (url, deps) => {
   return xdgOpen !== void 0 && await deps.launch(xdgOpen, [url], XDG_OPEN_GRACE_MS);
 };
 var runOpen = async (args, io, deps = DEFAULT_DEPS) => {
-  const { values } = parseArgs4({ args, options: { app: { type: "boolean" } } });
+  const { values } = parseArgs5({ args, options: { app: { type: "boolean" } } });
   const board = await boardAddress(io, deps);
   if (board === void 0) {
     return 1;
@@ -1281,9 +1407,9 @@ var runOpen = async (args, io, deps = DEFAULT_DEPS) => {
 };
 
 // src/cli/purge.ts
-import { basename as basename2, dirname as dirname2 } from "path";
+import { basename as basename3, dirname as dirname3 } from "path";
 import { createInterface } from "readline";
-import { parseArgs as parseArgs5 } from "util";
+import { parseArgs as parseArgs6 } from "util";
 var DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 var isCalendarDay = (text) => {
   const match = DAY.exec(text);
@@ -1326,16 +1452,16 @@ var orphanName = (orphan) => {
   }
   return `${tildeHome(orphan.root)} (checkout moved or gone)`;
 };
-var targetsOf = (all, repo, cwd) => {
+var targetsOf = (all, repo, cwd, onError) => {
   if (all) {
     const repositories = listRepositories().map((repository) => ({ name: repository.name, root: repository.root }));
-    const orphans = listOrphanedSpools().map((orphan) => ({ name: orphanName(orphan), dir: orphan.dir }));
+    const orphans = listOrphanedSpools(/* @__PURE__ */ new Date(), onError).map((orphan) => ({ name: orphanName(orphan), dir: orphan.dir }));
     return [...repositories, ...orphans];
   }
   const root = resolveRepository(repo, cwd);
   const hash = repoHash(root);
   const listed2 = listRepositories().find((repository) => repository.hash === hash);
-  return [{ name: listed2?.name ?? basename2(root), root }];
+  return [{ name: listed2?.name ?? basename3(root), root }];
 };
 var repositorySpoolDir = (root, name, io) => {
   const config = readHookConfig(root);
@@ -1350,7 +1476,7 @@ var runPurge = async (args, io, deps = {}) => {
   const options = { repo: { type: "string" }, all: { type: "boolean" }, before: { type: "string" }, yes: { type: "boolean" } };
   let values;
   try {
-    values = parseArgs5({ args, options }).values;
+    values = parseArgs6({ args, options }).values;
   } catch (error) {
     io.err(`nurselog purge: ${error.message}`);
     return 2;
@@ -1368,12 +1494,15 @@ var runPurge = async (args, io, deps = {}) => {
     return 2;
   }
   const before2 = values.before;
-  const targets = targetsOf(values.all === true, values.repo, io.cwd);
+  let failed = false;
+  const targets = targetsOf(values.all === true, values.repo, io.cwd, (message) => {
+    io.err(`nurselog purge: ${stripControl(message)}`);
+    failed = true;
+  });
   if (targets.length === 0) {
     io.out(`Nothing to delete: no repository is recorded in ${tildeHome(defaultRoot())}.`);
-    return 0;
+    return failed ? 1 : 0;
   }
-  let failed = false;
   const found = [];
   for (const target of targets) {
     const name = stripControl(target.name);
@@ -1440,7 +1569,7 @@ var runPurge = async (args, io, deps = {}) => {
     };
     try {
       const deleted = purgeSpool(target.dir, before2, onFailure);
-      const files = deleted.filter((path) => dirname2(path) === target.dir).length;
+      const files = deleted.filter((path) => dirname3(path) === target.dir).length;
       deletedFiles += files;
       deletedMarkers += deleted.length - files;
       const taken = target.aggregates === "failed" ? 0 : purgeAggregates(target.dir, before2);
@@ -1476,12 +1605,12 @@ var defaultIo = () => ({
   tty: process.stdout.isTTY === true
 });
 var fixturePath = (name) => {
-  const candidates = [resolve2(name), join2(PACKAGE_ROOT, "fixtures", name), join2(PACKAGE_ROOT, "fixtures", `${name}.ndjson`)];
-  return candidates.find((path) => existsSync3(path)) ?? resolve2(name);
+  const candidates = [resolve3(name), join3(PACKAGE_ROOT, "fixtures", name), join3(PACKAGE_ROOT, "fixtures", `${name}.ndjson`)];
+  return candidates.find((path) => existsSync3(path)) ?? resolve3(name);
 };
 var fixturePaths = (list) => list.split(",").map((name) => name.trim()).filter(Boolean).map(fixturePath);
 var replayConfig = (replay, root) => {
-  const beside = join2(dirname3(replay), "nurselog.config.json");
+  const beside = join3(dirname4(replay), "nurselog.config.json");
   if (existsSync3(beside)) {
     return { path: beside, kind: "repository" };
   }
@@ -1497,7 +1626,7 @@ var runningMessage = async (state, root) => {
 };
 var start = async (args, io) => {
   const options = { replay: { type: "string" }, speed: { type: "string" }, port: { type: "string" }, repo: { type: "string" } };
-  const { values } = parseArgs6({ args, options });
+  const { values } = parseArgs7({ args, options });
   const speed = values.speed === void 0 ? 1 : Number(values.speed);
   if (!(speed > 0)) {
     io.err("--speed must be a positive number");
@@ -1517,7 +1646,7 @@ var start = async (args, io) => {
   const port = values.port === void 0 ? void 0 : Number(values.port);
   let replayStart;
   if (replay) {
-    const root = repository ?? resolve2(cwd);
+    const root = repository ?? resolve3(cwd);
     const found = replayConfig(replay[0], repository);
     replayStart = { fixtures: replay, speed, root, config: loadConfig(found, root, (message) => io.err(`nurselog: ${message}`)) };
   } else {
@@ -1597,6 +1726,9 @@ var main = async (argv, io = defaultIo()) => {
     }
     if (first === "insights") {
       return await runInsights(rest, io);
+    }
+    if (first === "install-cli") {
+      return runInstallCli(rest, io);
     }
     if (first === "help" || first === "--help" || first === "-h") {
       io.out(USAGE);
