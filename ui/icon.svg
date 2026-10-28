@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="tile"><rect width="64" height="64" rx="14"/></clipPath>
+    <linearGradient id="trunk" x1="0" y1="0" x2="46" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9ebf0" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#e9ebf0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#111318"/>
+  <rect x="-8" y="36" width="58" height="16" rx="8" fill="url(#trunk)" clip-path="url(#tile)"/>
+  <circle cx="42" cy="44" r="8" fill="#e9ebf0"/>
+  <circle cx="42" cy="44" r="5" fill="none" stroke="#7d8492" stroke-width="2"/>
+  <circle cx="42" cy="44" r="2" fill="#7d8492"/>
+  <path d="M29.5 36 C29.5 29.5 30.1 26.6 31.2 24.3" fill="none" stroke="#7dd8d0" stroke-width="3" stroke-linecap="round"/>
+  <path d="M31.9 23 Q26.9 15 18.7 16.7 Q21.7 25.3 31.9 23 Z" fill="#7dd8d0"/>
+  <path d="M31.9 23 Q34.9 13.3 44.1 12.7 Q43 22.5 31.9 23 Z" fill="#7dd8d0"/>
+  <rect id="hairline" x=".5" y=".5" width="63" height="63" rx="13.5" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1"/>
+</svg>

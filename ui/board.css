@@ -1,0 +1,650 @@
+/* The board page (design section 15): tokens, fonts, page, top bar and its repository tabs, card, card header,
+   progress chip, collapse, the conversations, the Finished runs panel, the toast and the questions section.
+   One dark theme. The tokens follow reference/demo.html. Package colours come from the config as --pkg-<id> and stage
+   colours as --st-<key>, set on the root by src/ui/context.ts; the stage values below are the defaults until then.
+   The graph styles are in graph.css, the agent table and log line styles in table.css. */
+/* the bundled fonts, served same-origin from src/ui/fonts (design section 15, "Fonts") */
+@font-face {
+  font-family: Inter; src: url("fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Variable.ttf") format("truetype");
+  font-weight: 100 800; font-style: normal; font-display: swap;
+}
+/* no ligatures: commands and paths read as typed ("!=" stays "!="); important because each font shorthand resets it */
+* { font-variant-ligatures: none !important; }
+:root {
+  --page: #08090b; --card: #111318; --card-2: #171a20; --card-3: #1f232a;
+  --border: rgba(255, 255, 255, .075); --border-2: rgba(255, 255, 255, .14);
+  --fg: #e9ebf0; --fg-2: #a4aab6; --fg-3: #7d8492; --dot: #4a505b;
+  --shared: #d3d7df; --focus: #8cb4ff;
+  --rev: #7dd8d0; --warm: #ff9a7a; --amber: #f5c26b; --red: #ff6b6b; --you: #ffffff;
+  --ink: #0b0c0f;
+  --st-plan: #aeb4bf; --st-implement: #8fa6cc; --st-review: #7dd8d0; --st-fix: #ff9a7a; --st-pr: #e8eaef;
+  --st-docs: #e9d28c; --st-wait: #ffffff;
+  --f-ui: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+/* the page colour is a gradient of one colour: Chrome draws a tile that holds only a plain colour without colour
+   management, so on a display with its own colour profile the empty part of a short page came out a shade darker from
+   a tile edge down; a gradient tile is drawn like the rest. The body has no background of its own, which would make
+   its empty tiles plain again. */
+html { background: var(--page) linear-gradient(var(--page), var(--page)); }
+body {
+  margin: 0; color: var(--fg); font-family: var(--f-ui); font-size: 14px; line-height: 1.45;
+  -webkit-font-smoothing: antialiased; padding-block: 20px 64px; overflow-x: clip;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code { font-family: var(--f-mono); }
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; text-wrap: balance; }
+p { margin: 0; }
+.page { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.button {
+  border: 1px solid var(--border-2); background: var(--card-2); border-radius: 7px; padding: 3px 10px; font-size: 12px;
+  cursor: pointer; color: var(--fg);
+}
+.button:hover:not(:disabled) { border-color: rgba(255, 255, 255, .3); }
+.button:disabled { cursor: default; color: var(--fg-3); background: transparent; }
+.button[aria-expanded="true"] { background: var(--fg); color: var(--ink); border-color: var(--fg); }
+.icon-button {
+  border: 1px solid var(--border-2); background: var(--card-2); border-radius: 7px; width: 26px; height: 24px; padding: 0;
+  display: inline-grid; place-items: center; cursor: pointer; color: var(--fg-2);
+}
+.icon-button:hover { color: var(--fg); }
+.icon-button svg { width: 13px; height: 13px; transition: transform .35s var(--ease); }
+
+/* top bar: sticky on the page colour, so the tabs stay in view on a long board, with a hairline under it only while it
+   is stuck (topbar.ts sets data-stuck when the sentinel, out of the flow on the line where the bar sticks, leaves the
+   view; its bottom edge is the bar's top edge, 10 px above the page's content). Above 760 px it keeps one row: the
+   brand block takes the free width, its strip scrolls inside it and the status block stays at the right. */
+.topbar {
+  position: sticky; top: 0; z-index: 40; display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
+  gap: 8px 18px; margin-block: -10px; padding-block: 10px; background: var(--page); font-size: 12.5px; color: var(--fg-2);
+  transition: box-shadow .2s;
+}
+.topbar[data-stuck="true"] { box-shadow: 0 1px 0 var(--border); }
+.topbar-sentinel { position: absolute; width: 1px; height: 1px; margin-top: -11px; pointer-events: none; }
+.topbar-brand { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 0; }
+.topbar-name { font-size: 15px; font-weight: 600; color: var(--fg); letter-spacing: -.01em; flex: none; }
+
+/* repository tabs (topbar.ts): borderless 34 px tabs in a tablist; one shared raised indicator sits under the selected
+   tab (topbar.ts sets its left and width and plays its inchworm move; the transition follows a tab that changes width).
+   A tab's running count (dot and number) and its waiting count, a filled badge in the you colour, are hidden at 0. The
+   badge of an unselected tab pulses with the chip's halo, and pings three times when its count rises (.ping, removed
+   on the animation's end or on select). The strip scrolls sideways when the tabs do not fit, the page never; its
+   padding keeps the ping clear of the scroll clip, and clips the indicator's drop shadow to 2 px as the demo's strip
+   does. While tabs lie past an edge that edge fades, and a marker filled like the badge sits on it, inside the content
+   column, while a waiting tab's name or badge lies past it or under its fade; the marker pulses with the halo, and its
+   18 px disc has a 24 px hit area. */
+.topbar-tabs-box { position: relative; display: flex; min-width: 0; }
+.topbar-tabs {
+  position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; padding: 2px; margin: -2px;
+  overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
+}
+.topbar-tabs[data-more-start="true"] { mask-image: linear-gradient(to right, transparent, #000 24px); }
+.topbar-tabs[data-more-end="true"] { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+.topbar-tabs[data-more-start="true"][data-more-end="true"] {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+.tabs-indicator {
+  position: absolute; z-index: 0; top: 2px; left: 0; width: 0; height: 34px; border-radius: 9px; pointer-events: none;
+  background: var(--card-2); border: 1px solid var(--border-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04), 0 4px 14px rgba(0, 0, 0, .35);
+  transition: left .3s var(--ease), width .3s var(--ease);
+}
+.tabs-marker {
+  position: absolute; top: 50%; z-index: 1; width: 18px; height: 18px; margin-top: -9px; padding: 0; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--you); color: var(--ink); font: 700 12px/1 var(--f-mono); cursor: pointer;
+}
+.tabs-marker::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; }
+.tabs-marker::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  animation: chip-halo 2.2s ease-out infinite;
+}
+.tabs-marker[data-edge="start"] { left: 0; }
+.tabs-marker[data-edge="end"] { right: 0; }
+.tabs-marker:hover { background: color-mix(in srgb, var(--you) 82%, var(--page)); }
+.repo-tab {
+  position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; flex: none; height: 34px; padding: 0 12px;
+  border-radius: 9px; color: var(--fg-3); text-decoration: none; white-space: nowrap; font: 500 12.5px/16px var(--f-mono);
+  transition: color .2s;
+}
+.repo-tab:hover { color: var(--fg-2); }
+.repo-tab[aria-selected="true"] { color: var(--fg); }
+.repo-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.repo-tab.leaving { pointer-events: none; }
+.repo-tab-name { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; }
+.repo-tab-running {
+  display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--f-mono); color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.repo-tab-running i { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--fg-2); }
+.repo-tab-waiting {
+  position: relative; display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 999px;
+  background: var(--you); color: var(--ink); font: 700 10.5px/1 var(--f-mono); font-variant-numeric: tabular-nums;
+}
+.repo-tab:not([aria-selected="true"]) .repo-tab-waiting::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  animation: chip-halo 2.2s ease-out infinite;
+}
+.repo-tab.ping .repo-tab-waiting { animation: tab-ping 1.3s ease-out 3; }
+.repo-tab.ping .repo-tab-waiting::after { animation: none; }
+@keyframes tab-ping { 0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .7); } 100% { box-shadow: 0 0 0 9px rgba(255, 255, 255, 0); } }
+
+/* a lost event stream (topbar.ts sets data-connection): the tab counts and the markers dim like the cards, and the halo
+   and the ping of the badges and the halo of the markers hold still */
+.topbar:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.repo-tab-running, .repo-tab-waiting, .tabs-marker) {
+  opacity: .6;
+}
+.topbar:is([data-connection="reconnecting"], [data-connection="disconnected"]) .repo-tab-waiting,
+.topbar:is([data-connection="reconnecting"], [data-connection="disconnected"]) .repo-tab-waiting::after,
+.topbar:is([data-connection="reconnecting"], [data-connection="disconnected"]) .tabs-marker::after { animation-play-state: paused; }
+
+.topbar-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-width: 0; }
+.topbar-connection { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px var(--f-mono); white-space: nowrap; }
+.topbar-connection i { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); flex: none; }
+.topbar-connection[data-state="live"] i { background: var(--rev); }
+.topbar-connection[data-state="replay"] i { background: var(--st-implement); }
+.topbar-connection[data-state="reconnecting"] { color: var(--amber); }
+.topbar-connection[data-state="reconnecting"] i { background: var(--amber); }
+.topbar-connection[data-state="disconnected"] { color: var(--red); }
+.topbar-connection[data-state="disconnected"] i { background: var(--red); }
+.topbar-github { font: 500 11.5px var(--f-mono); max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-github[data-tone="off"] { color: var(--fg-3); }
+.topbar-github[data-tone="bad"] { color: var(--amber); }
+.topbar-warnings { position: relative; }
+.warnings-button[data-tone="some"] { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+.warnings-button[data-tone="some"][aria-expanded="true"] { color: var(--ink); background: var(--amber); border-color: var(--amber); }
+.warnings-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; margin: 0; padding: 4px 0; list-style: none;
+  width: min(440px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
+  background: var(--card-2); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+}
+.warnings-list li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 6px 12px; font-size: 12px; color: var(--fg-2); }
+.warnings-list li + li { border-top: 1px solid var(--border); }
+.warning-time { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
+.warning-text { overflow-wrap: anywhere; }
+
+/* board: one stack per repository (board-page.ts); on a tab switch the previous one stays at the top, without its empty
+   note, footnote or finished bar, while it slides out, and the next one slides in on top of it (later in the DOM) */
+.board { position: relative; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.board-repository { position: relative; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.board-repository.leaving { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; }
+.board-repository.leaving > .board-empty, .board-repository.leaving > .board-footnote,
+.board-repository.leaving > .conversations, .board-repository.leaving > .finished-panel { display: none; }
+.board-note, .board-empty {
+  color: var(--fg-2); font-size: 13px; text-align: center; padding: 28px 16px;
+  border: 1px dashed var(--border-2); border-radius: 14px;
+}
+.board-footnote { margin-top: -10px; padding: 0 4px; font-size: 11px; color: var(--fg-3); }
+.board-footnote .cost-mark { width: auto; margin-right: 4px; }
+/* a list's leaving cards sit out of the flow at their old top in the repository's stack (cards.ts), so cards, notes or
+   a list gap that move around them do not move them; a list without a card that stays has no box and so no gap */
+.cards { display: flex; flex-direction: column; gap: 22px; min-width: 0; transition: opacity .3s; }
+.cards.vacant { display: contents; }
+
+/* a finished card that leaves for the panel folds away in place (cards.ts), clipped, without pointer events; a card
+   that opens from its conversation row travels above the cards it passes */
+.card.folding { pointer-events: none; }
+.card.morphing { z-index: 2; }
+
+/* run and session rows (session-row.ts), the demo's finished rows: one line on a grid with hairlines between rows, starting with a
+   dot (8 px in a 10 px column), the key and the title; a run's empty key is hidden and the title takes its place
+   (.keyless), a session's reads "no ticket" in the key's style, or is hidden as a run's in a repository without
+   ticket keys (ticketless). A conversation row
+   adds its meta (branch, chip, elapsed, cost; one flex group of its own below 760 px) and keeps its questions under
+   it; a finished row adds outcome, facts, ago and its Show and Clear buttons, with the run's card in a detail that
+   opens under it */
+.run-rows { list-style: none; margin: 0; padding: 0 10px 6px; }
+.run-row { border-bottom: 1px solid var(--border); overflow: hidden; }
+.run-row:last-child { border-bottom: 0; }
+.run-row-line {
+  display: grid; align-items: center; gap: 10px; padding: 9px 4px; font-size: 12.5px; color: var(--fg-2); border-radius: 8px;
+  transition: background .2s;
+}
+.run-row.conversation .run-row-line {
+  grid-template-columns: 10px auto minmax(10ch, 1fr) auto auto auto auto; grid-template-areas: "d k t br ch el co";
+}
+.run-row.conversation.keyless .run-row-line { grid-template-areas: "d t t br ch el co"; }
+.run-row.finished .run-row-line { grid-template-columns: 10px auto minmax(0, 1fr) auto auto auto auto; grid-template-areas: "d k t o f a s"; }
+.run-row.finished.keyless .run-row-line { grid-template-areas: "d t t o f a s"; }
+/* the board link (decision 104, D10) lights a session's conversation or Finished sessions row as a ranking row's .hl */
+.run-row.hl > .run-row-line { background: var(--card-2); }
+/* positioned, for the waiting dot's ring and so the hidden tone label in a finished row's dot (session-row.ts) is
+   clipped with its row: placed from an ancestor above the Finished sessions list, the labels of a closed list kept the
+   page as tall as the open list */
+.row-dot { position: relative; grid-area: d; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
+.row-key { grid-area: k; font: 600 11.5px var(--f-mono); color: var(--fg); white-space: nowrap; }
+.row-title { grid-area: t; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.row-meta { display: contents; font-size: 12px; }
+.row-meta .branch { grid-area: br; max-width: 40ch; min-width: 0; }
+.row-meta .progress-chip { grid-area: ch; justify-self: start; }
+.row-meta .elapsed { grid-area: el; font-size: 12px; }
+.row-meta .cost { grid-area: co; }
+.run-row .questions { padding: 0 4px 8px; }
+.run-row .questions-heading { margin-top: 0; }
+/* the dot of a finished row: one colour per outcome kind; of a conversation: its main thread as the agent table draws
+   it, filled while running, a ring while idle or ended, and the dashed you ring that pulses while it waits for you
+   (its `state-halo` keyframes are in table.css) */
+.row-dot[data-tone="merged"] { background: var(--shared); }
+.row-dot[data-tone="promoted"] { background: var(--rev); }
+.row-dot[data-state="running"] { background: var(--shared); }
+.row-dot[data-state="idle"], .row-dot[data-state="ended"] { background: transparent; border: 1px solid var(--fg-3); }
+.row-dot[data-state="waiting"] { background: transparent; border: 1.5px dashed var(--you); }
+.row-dot[data-state="waiting"]::after {
+  content: ""; position: absolute; inset: -1.5px; border-radius: 50%; border: 1px solid var(--you); pointer-events: none;
+  animation: state-halo 2.2s ease-out infinite;
+}
+/* in a conversation row the state dot carries the pulse, so a waiting chip keeps its tone without its halo */
+.run-row.conversation .progress-chip::after { content: none; }
+/* an ended conversation during its hold: dimmed, its chip muted */
+.run-row.ended .run-row-line { opacity: .55; }
+.run-row.ended .progress-chip { color: var(--fg-2); background: transparent; border-color: var(--border-2); border-style: solid; }
+.run-row.ended .progress-chip::after { content: none; }
+.row-outcome { grid-area: o; }
+.row-facts { grid-area: f; }
+.row-ago { grid-area: a; min-width: 78px; text-align: right; }
+.row-outcome, .row-facts, .row-ago { font: 500 11px var(--f-mono); white-space: nowrap; }
+.row-outcome { color: var(--fg-2); }
+.row-facts, .row-ago { color: var(--fg-3); }
+.row-actions { grid-area: s; display: flex; gap: 4px; }
+.row-button {
+  min-height: 24px; border: 1px solid var(--border-2); background: transparent; border-radius: 7px; padding: 2px 9px;
+  font-size: 12px; color: var(--fg-2); cursor: pointer;
+}
+.row-button:hover { color: var(--fg); border-color: rgba(255, 255, 255, .3); }
+.row-button[aria-expanded="true"] { background: var(--fg); color: var(--ink); border-color: var(--fg); }
+.row-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.row-detail.open { grid-template-rows: 1fr; }
+.row-detail-inner { overflow: hidden; min-height: 0; }
+.row-detail-inner > .card { margin: 2px 0 12px; }
+/* the note of a Finished sessions row while its summarised session loads or after the load failed (the demo's .frsum) */
+.row-detail-note { margin: 0; padding: 4px 4px 14px 24px; font-size: 12.5px; color: var(--fg-3); }
+.row-detail-note[data-tone="failed"] { color: var(--amber); }
+/* text for assistive technology only, such as the tone of a Finished sessions row's outcome dot */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* a new finished row waits unseen while its key flies to the count (finished.ts) */
+.run-row.awaiting { opacity: 0; }
+/* a row whose update or frame threw (data-error): dimmed and stilled like such a card, with a note under its line */
+.row-error { display: none; margin: 0 4px 8px 24px; font-size: 12px; color: var(--amber); }
+.run-row[data-error] .row-error { display: block; }
+.run-row[data-error] > :not(.row-error) { opacity: .6; }
+.run-row[data-error] *, .run-row[data-error] *::before, .run-row[data-error] *::after { animation-play-state: paused !important; }
+
+/* the bars of the conversations section and the Finished runs panel: a title and its count in a pill */
+.section-bar { display: flex; align-items: center; padding: 8px 12px 2px 14px; }
+.section-heading { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: inherit; letter-spacing: 0; }
+.section-title { font-weight: 600; font-size: 13.5px; color: var(--fg); }
+.section-count {
+  font-weight: 600; font-size: 11px; color: var(--fg-2); background: var(--card-3); border-radius: 999px; padding: 1px 8px;
+  min-width: 24px; text-align: center;
+}
+
+/* conversations (conversations.ts): a card-like section under the stack; it folds away as a whole, clipped, when its
+   last row goes */
+.conversations { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+.conversations.folding { overflow: hidden; pointer-events: none; }
+
+/* the Finished runs panel (finished.ts), always at the bottom: the bar with the quiet disclosure toggle (its chevron
+   turns when open), the count pill and, while open, "Clear all"; the body opens with a grid-rows transition */
+.finished-panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+.finished-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px 8px 6px; }
+.finished-toggle {
+  display: flex; align-items: center; gap: 10px; border: 0; background: transparent; cursor: pointer; padding: 6px 8px;
+  border-radius: 8px; color: var(--fg); text-align: left;
+}
+.finished-toggle:hover { background: var(--card-2); }
+.finished-toggle svg { width: 12px; height: 12px; color: var(--fg-3); flex: none; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.finished-toggle[aria-expanded="true"] svg { transform: none; }
+.finished-hint { color: var(--fg-3); font-size: 12px; }
+.finished-clear { margin-left: auto; }
+.finished-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.finished-body.open { grid-template-rows: 1fr; }
+.finished-body-inner { overflow: hidden; min-height: 0; }
+.finished-body .run-rows { border-top: 1px solid var(--border); }
+.finished-body .run-rows:empty { display: none; }
+.finished-empty { color: var(--fg-3); font-size: 12.5px; padding: 14px 14px 16px; border-top: 1px solid var(--border); }
+/* the key of a leaving card on its arc to the count (cards.ts) */
+.finished-fly {
+  position: fixed; left: 0; top: 0; z-index: 65; pointer-events: none; white-space: nowrap; max-width: 28ch;
+  overflow: hidden; text-overflow: ellipsis; font: 600 11.5px var(--f-mono); color: var(--fg); background: var(--card-3);
+  border: 1px solid var(--border-2); border-radius: 999px; padding: 3px 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+
+/* the page's toast (toast.ts): bottom centre, as wide as its text up to the viewport, an Undo and a 2 px progress line
+   that runs down */
+.toast {
+  position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom, 0px)); z-index: 70; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px; width: max-content; max-width: calc(100vw - 32px); overflow: hidden;
+  padding: 9px 10px 9px 16px; background: var(--card-3); border: 1px solid var(--border-2); border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .6); font-size: 13px;
+}
+.toast-undo {
+  flex: none; min-height: 24px; border: 0; background: var(--fg); color: var(--ink); font-weight: 600; font-size: 12.5px;
+  border-radius: 7px; padding: 4px 12px; cursor: pointer;
+}
+.toast-progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--fg-3); transform-origin: left; }
+
+/* a lost event stream (board-page.ts sets data-connection): the board panels, the cards, the conversations and the Finished
+   runs panel dim and their CSS animations hold still, so a stale board shows no motion that looks live; the next
+   snapshot brings both back */
+.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .cards, .conversations, .finished-panel) { opacity: .6; }
+.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .cards, .conversations, .finished-panel) :is(*, *::before, *::after) {
+  animation-play-state: paused !important;
+}
+
+/* card */
+.card {
+  position: relative; min-width: 0; padding-bottom: 12px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px; transition: border-color .25s, box-shadow .25s;
+}
+.card.leaving { position: absolute; left: 0; right: 0; pointer-events: none; }
+.card-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 14px 16px 4px; }
+.card-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 320px; }
+.card-key { font: 600 12.5px var(--f-mono); color: var(--fg-2); white-space: nowrap; }
+/* the ticket link of a key with keyUrl (card headers, rows, the ranking, the modal title): the key's own colour and
+   font, underlined only on hover, the focus ring on keyboard focus */
+.ticket-link { color: inherit; font: inherit; text-decoration: none; text-underline-offset: 3px; border-radius: 4px; }
+.ticket-link:hover { text-decoration: underline; }
+.ticket-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.card-heading { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; font-size: 12px; color: var(--fg-2); }
+.branch {
+  font-size: 11.5px; color: var(--fg-2); background: var(--card-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 1px 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stream-count, .elapsed { white-space: nowrap; }
+.cost { font: 500 12px var(--f-mono); color: var(--fg); white-space: nowrap; }
+.worktree { font: 500 11px var(--f-mono); color: var(--fg-3); padding: 0 16px; overflow-wrap: anywhere; }
+.graph-host { overflow-x: auto; padding: 0 4px; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
+/* a session card (session-card.ts): the graph track never scrolls, the graph fits its width (fit.ts), so the run
+   card's overflow rule above does not apply; the chips row hides while empty; the meta names the main thread's model
+   as the demo's .mmdl and .mdl do */
+.session-graph-host { min-width: 0; padding: 0 4px; }
+.chips-row:empty { display: none; }
+/* a link jump focuses the target's heading: the ring shows for the keyboard only, as on every other focus target */
+.card-heading:focus { outline: none; }
+.card-heading:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+
+/* the chips row of a session card (chips.ts; the demo's .bchips and .bch): a branch chip with its package dot and its
+   PR or stage state, a fold chip per foldable pipeline with the Finished toggle's chevron, and the dashed link look
+   with a ring dot on the "continues" chip and on a continued branch's chip; pointing at a chip or at its branch in the
+   graph (.hl) tints it in the branch colour --c. 12 px set an unfolded pipeline's chips apart from the next one's, as
+   the last chip's inline-end margin, so a wrapped line never starts indented (a line-end margin shows nothing). A
+   chip wraps its own words rather than the page scrolling sideways; its entry and bump run in chips.ts. */
+.chips-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 4px; }
+.session-chip {
+  display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: 7px; max-width: 100%; min-width: 0;
+  border: 1px solid var(--border); background: var(--card-2); border-radius: 999px; padding: 2px 10px 2px 8px;
+  font: inherit; font-size: 11.5px; color: var(--fg-2); text-align: left; cursor: pointer;
+  transition: border-color .2s, background-color .2s;
+}
+.session-chip:hover, .session-chip.hl {
+  border-color: color-mix(in srgb, var(--c) 60%, transparent); background: color-mix(in srgb, var(--c) 8%, var(--card-2));
+}
+.chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.session-chip code { font-size: 11px; color: var(--fg); min-width: 0; overflow-wrap: anywhere; }
+/* a branch label's description beside the role in code, in the UI font as the demo's .bch text */
+.chip-desc { font-size: 11.5px; color: var(--fg-2); min-width: 0; overflow-wrap: anywhere; }
+.chip-status, .chip-note { font: 500 10.5px var(--f-mono); color: var(--fg-3); min-width: 0; overflow-wrap: anywhere; }
+.chip-status[data-tone="open"] { color: var(--fg-2); }
+.chip-status[data-tone="merged"] { color: var(--rev); }
+.chip-status[data-tone="promoted"] { color: var(--amber); }
+.chip-status[data-tone="you"] { color: var(--you); }
+.session-chip.link { border-style: dashed; }
+.session-chip.link .chip-dot { background: transparent; border: 1.5px solid var(--c); }
+.session-chip.fold svg { width: 12px; height: 12px; color: var(--fg-3); flex: none; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.session-chip.fold[aria-expanded="true"] svg { transform: none; }
+.session-chip.pipeline-end { margin-inline-end: 6px; }
+.main-model { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
+/* a 3 px by 5 px larger hit area that the negative margin takes back, so the layout is the text's; the min-width keeps
+   "copied" from moving the meta row */
+.session-id {
+  min-width: calc(8ch + 6px); margin: -5px -3px; padding: 5px 3px; border: 0; border-radius: 4px; background: none;
+  font: 500 11px var(--f-mono); color: var(--fg-3); text-align: left; white-space: nowrap; cursor: pointer;
+}
+.session-id:hover { color: var(--fg-2); }
+/* the fixture download after the id, dimmed like it, with the same larger hit area; the min-width keeps "saving…" from
+   moving the meta row */
+.session-fixture {
+  min-width: calc(7ch + 6px); margin: -5px -3px; padding: 5px 3px; border-radius: 4px;
+  font: 500 11px var(--f-mono); color: var(--fg-3); text-decoration: none; white-space: nowrap;
+}
+.session-fixture:hover { color: var(--fg-2); }
+.session-fixture:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.model-letter {
+  display: inline-grid; place-items: center; width: 17px; height: 17px; flex: none;
+  border-radius: 4px; background: var(--card-3); color: var(--fg-2); font: 700 10px var(--f-mono);
+}
+/* the model icons (model-icons.ts) in currentColor; the stroke widths of a graph node's icon are in graph.css, the 11 px
+   icon of a badge or the legend keeps 1.3 and 1.15 at any scale */
+.model-icon .glyph-stroke, .model-icon .glyph-thin { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+.model-icon .glyph-fill { fill: currentColor; }
+.badge-icon { display: block; flex: none; }
+.badge-icon .glyph-stroke, .badge-icon .glyph-thin { vector-effect: non-scaling-stroke; }
+.badge-icon .glyph-stroke { stroke-width: 1.3; }
+.badge-icon .glyph-thin { stroke-width: 1.15; }
+/* the flash of a link jump's target card (the demo's cflash), off under reduced motion like every animation */
+.card.flash { animation: card-flash 1.3s ease; }
+@keyframes card-flash { 0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .55); } 100% { box-shadow: 0 0 0 16px rgba(255, 255, 255, 0); } }
+/* under reduced motion the target takes the demo's static .linked border for the flash's 1.3 s instead; the board link
+   (a lane, a ranking row, a promotion dot or the session itself pointed at) gives its sessions' cards the same border */
+.card.linked, .card.board-link { border-color: rgba(255, 255, 255, .3); box-shadow: 0 0 0 3px rgba(255, 255, 255, .05); }
+
+/* a card whose update or frame threw (cards.ts sets data-error): dimmed and stilled like the cards of a lost stream,
+   with a note under the header to reload the page */
+.card-error { display: none; margin: 4px 16px 2px; font-size: 12px; color: var(--amber); }
+.card[data-error] .card-error { display: block; }
+.card[data-error] > :not(.card-error) { opacity: .6; }
+.card[data-error] *, .card[data-error] *::before, .card[data-error] *::after { animation-play-state: paused !important; }
+
+/* progress chip: the tone of RunState.chip as data-tone; it bumps on a change (card.ts) and `you` pulses with a halo
+   that grows a fixed 6 px outward, whatever the chip's size */
+.progress-chip {
+  position: relative; font: 600 11.5px var(--f-mono); color: var(--fg); white-space: nowrap;
+  border: 1px solid var(--border-2); border-radius: 999px; padding: 1px 9px;
+  transition: color .3s, border-color .3s, background-color .3s;
+}
+.progress-chip[data-tone="warm"] { border-color: color-mix(in srgb, var(--warm) 60%, transparent); color: var(--warm); }
+.progress-chip[data-tone="amber"] { border-color: color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); }
+.progress-chip[data-tone="you"] { border-style: dashed; border-color: var(--you); color: var(--you); }
+.progress-chip[data-tone="you"]::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  animation: chip-halo 2.2s ease-out infinite;
+}
+@keyframes chip-halo { 0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .55); } 100% { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); } }
+.progress-chip[data-tone="done"] { background: var(--fg); color: var(--ink); border-color: var(--fg); }
+.progress-chip[data-tone="failed"] { border-color: color-mix(in srgb, var(--red) 70%, transparent); color: var(--red); }
+
+/* collapse: the table and log hosts fold away with a height transition, the header and the graph stay */
+.card-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .45s var(--ease), opacity .35s; }
+.card-body-inner { overflow: hidden; min-height: 0; }
+.card.collapsed .card-body { grid-template-rows: 0fr; opacity: 0; }
+.card.collapsed .collapse-button svg { transform: rotate(180deg); }
+
+/* questions section (questions.ts): under the graph, so a collapsed card keeps it. A blocking question has a dashed
+   border in the you colour, a non-blocking one a quiet border; a resolved one dims and drops its options. The section
+   and its items slide in and out with height animations, clipping their content only while they slide. */
+.questions { display: flow-root; padding: 0 16px; }
+.questions.sliding, .question-slot.sliding { overflow: hidden; }
+.questions-heading {
+  display: flex; align-items: center; gap: 8px; margin-top: 4px;
+  font: 600 11px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.questions-count { color: var(--fg-2); }
+.questions-list { margin-bottom: 4px; }
+.question-slot { display: flow-root; }
+.question-slot.leaving { pointer-events: none; }
+.question {
+  margin-top: 8px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 14px;
+  border: 1.5px dashed var(--you); border-radius: 12px; background: color-mix(in srgb, var(--you) 3%, var(--card));
+  transition: border-color .25s, background-color .25s, box-shadow .25s, opacity .3s;
+}
+.question[data-blocking="false"] { border: 1px solid var(--border-2); background: var(--card-2); }
+.question-icon {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--you); color: var(--ink); font-weight: 800; font-size: 14px;
+}
+.question[data-blocking="false"] .question-icon { background: transparent; border: 1.5px solid var(--you); color: var(--you); }
+.question-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.question-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 11.5px; color: var(--fg-3); }
+.question-pill { font: 600 10.5px var(--f-mono); color: var(--you); border: 1px dashed var(--you); border-radius: 999px; padding: 0 7px; white-space: nowrap; }
+.question[data-blocking="false"] .question-pill { color: var(--fg-2); border: 1px solid var(--border-2); }
+.question-when { white-space: nowrap; }
+.question-text { font-size: 14.5px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+.question-context { font-size: 12.5px; color: var(--fg-2); overflow-wrap: anywhere; }
+.question-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.question-option {
+  border: 1px solid var(--border-2); background: var(--card-3); border-radius: 8px; padding: 5px 12px; font-size: 12.5px;
+  cursor: pointer; color: var(--fg);
+}
+.question-option:first-child { background: var(--you); color: var(--ink); border-color: var(--you); font-weight: 600; }
+.question-option:hover:not(:disabled) { border-color: var(--you); }
+.question-option:disabled { cursor: default; opacity: .6; }
+.question-note { font: 500 11px var(--f-mono); color: var(--fg-3); }
+.question-resolution { font-size: 12.5px; color: var(--rev); }
+.question:not([data-state="open"]) { border: 1px solid var(--border); background: transparent; opacity: .75; }
+.question:not([data-state="open"]) .question-icon { background: var(--card-3); border: 0; color: var(--rev); }
+.question:not([data-state="open"]) .question-options { display: none; }
+.question[data-state="expired"] .question-icon, .question[data-state="expired"] .question-resolution { color: var(--fg-3); }
+.question-relay { font-size: 12px; color: var(--fg-3); overflow-wrap: anywhere; }
+/* a question for the main thread (a report-block question): one quiet line under the developer's questions with the
+   agent's stream name in a grey pill, the node, the text cut to one line and its state at the end; its icon and text
+   columns line up with the full item's (26 px icon column, 14 px padding, 12 px gap), and its icon pends with a grey
+   ring, the running node ring's, until the main thread handled or relayed it */
+.question.compact {
+  margin-top: 4px; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; align-items: center; padding: 4px 14px;
+  border: 1px solid var(--border); border-radius: 8px; background: transparent;
+}
+.question.compact .question-icon {
+  position: relative; justify-self: center; width: 16px; height: 16px; font-size: 10px;
+  background: transparent; border: 1px solid var(--fg-3); color: var(--fg-2);
+}
+.question.compact:not([data-state="open"]) .question-icon { background: var(--card-3); border-color: transparent; color: var(--rev); }
+.question.compact .question-body { flex-direction: row; align-items: center; gap: 8px; }
+.question.compact .question-meta { flex: none; flex-wrap: nowrap; gap: 6px; }
+.question.compact .question-pill { font-weight: 500; color: var(--fg-2); background: var(--card-3); border: 1px solid var(--border-2); }
+.question.compact .question-text { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.question.compact .question-resolution { flex: none; font-size: 11.5px; color: var(--fg-3); white-space: nowrap; }
+.question.compact[data-state="handled"] .question-resolution, .question.compact[data-state="relayed"] .question-resolution { color: var(--fg-2); }
+.question.pending .question-icon::after {
+  content: ""; position: absolute; inset: -1px; border: 1px solid var(--fg-2); border-radius: 50%; pointer-events: none;
+  animation: question-ring 1.8s ease-out infinite;
+}
+@keyframes question-ring { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(1.7); opacity: 0; } }
+/* marked from the graph: a "?" bubble is hovered or selected (a reduced-motion select marks it for a moment) */
+.question.highlighted, .question.flashed { border-color: var(--you); box-shadow: 0 0 0 3px rgba(255, 255, 255, .12); }
+.question[data-blocking="false"].highlighted, .question[data-blocking="false"].flashed { background: var(--card-3); }
+/* a quiet row is marked in grey: an --fg-2 border and a faint ring, not the "you" outline */
+.question.compact.highlighted, .question.compact.flashed { border-color: var(--fg-2); box-shadow: 0 0 0 3px rgba(255, 255, 255, .05); background: transparent; }
+/* the chip that flies in the card: "? question" from a new question's bubble to its item (questions.ts) in the you
+   colour, and "+ open issue" from a new follow-up's agent to its column (followups.ts) in its type's colour --c */
+.fly-chip {
+  position: absolute; left: 0; top: 0; z-index: 30; pointer-events: none; white-space: nowrap;
+  font: 600 11px var(--f-mono); padding: 3px 9px; border-radius: 999px; color: var(--ink); background: var(--c, var(--you));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .4);
+}
+
+/* follow-ups section (followups.ts): between the questions and the agent table, hidden until the first follow-up. Three
+   read-only columns, each in its type's colour --c (issue --amber, improvement --rev, fix --warm), the newest four items
+   with the agent table's "Show all (N)". The heading is the questions section's, 4 px under the graph like it, and a
+   disclosure toggle with the earlier messages toggle's trailing chevron, so the text keeps the columns' edge; the
+   chevron turns when open, and the columns, folded by default, open with the Finished runs panel's grid-rows
+   transition. The section and a new item enter in followups.ts; the chip of a new follow-up (.fly-chip) flies from
+   its agent's node to its column's heading, or to the section's heading while folded, drawn in the card. */
+.followups { display: flex; flex-direction: column; padding: 0 16px 16px; }
+.followups-toggle {
+  position: relative; align-self: flex-start; border: 0; background: transparent; cursor: pointer; padding: 3px 6px; margin: 1px 0 -3px -6px;
+  border-radius: 6px; text-align: left;
+}
+.followups-toggle:hover { background: var(--card-2); color: var(--fg-2); }
+/* inset, as the region's overflow clips the ring's top edge */
+.followups-toggle:focus-visible { outline-offset: -2px; }
+.followups-toggle svg { width: 11px; height: 11px; flex: none; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.followups-toggle[aria-expanded="true"] svg { transform: none; }
+.followups-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.followups-body.open { grid-template-rows: 1fr; }
+.followups-body-inner { overflow: hidden; min-height: 0; }
+.followup-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.followup-column {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px;
+  background: var(--card-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.followup-column h4 { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--c); }
+.followup-column h4 svg { width: 14px; height: 14px; flex: none; }
+.followup-column-count { margin-left: auto; font: 500 11px var(--f-mono); color: var(--fg-3); }
+.followup-list { display: flex; flex-direction: column; gap: 8px; }
+.followup-list:empty { display: none; }
+.followup-item { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; border-top: 1px solid var(--border); }
+.followup-item:first-child { padding-top: 0; border-top: 0; }
+.followup-text { margin: 0; font-size: 12.5px; color: var(--fg); overflow-wrap: anywhere; }
+.followup-file { font-size: 11px; color: var(--fg-2); overflow-wrap: anywhere; }
+.followup-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--fg-3); }
+.followup-branch { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.followup-branch code { font-size: 11px; color: var(--fg-2); overflow-wrap: anywhere; }
+.followup-empty { font-size: 12px; color: var(--fg-3); }
+/* the agent table's .show-all (table.css), its text aligned with the items */
+.followup-column .show-all { align-self: flex-start; margin-inline-start: -8px; }
+@media (max-width: 820px) {
+  .followup-columns { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  /* the title takes its own row; the collapse button stays at its top right instead of wrapping with the meta */
+  .card-header { position: relative; padding: 12px 12px 4px; }
+  .worktree { padding: 0 12px; }
+  .chips-row { padding: 0 12px 4px; }
+  .questions { padding: 0 12px; }
+  .followups { padding-inline: 12px; }
+  .card-error { margin-inline: 12px; }
+  .question { padding: 10px 12px; gap: 10px; }
+  /* a quiet row keeps the full item's columns and wraps, so its text gets a row of its own */
+  .question.compact { padding: 4px 12px; gap: 10px; }
+  .question.compact .question-body { flex-wrap: wrap; row-gap: 2px; }
+  .question.compact .question-text { order: 3; flex-basis: 100%; }
+  .card-title { flex-basis: 100%; padding-right: 36px; }
+  .collapse-button { position: absolute; top: 11px; right: 12px; }
+  /* a run row wraps like a question item: dot, key and title keep the first row, the rest goes to rows of its own; a
+     conversation's meta is one flex group with the card meta's rhythm */
+  .run-row-line { gap: 5px 10px; }
+  .run-row.conversation .run-row-line { grid-template-columns: 10px auto minmax(0, 1fr); grid-template-areas: "d k t" ". mt mt"; }
+  .run-row.conversation.keyless .run-row-line { grid-template-areas: "d t t" ". mt mt"; }
+  .row-meta { grid-area: mt; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+  .row-meta .branch { max-width: 100%; }
+  .run-row.finished .run-row-line {
+    grid-template-columns: 10px auto minmax(0, 1fr) auto; grid-template-areas: "d k t t" ". o o o" ". f f a" ". s s s";
+  }
+  .run-row.finished.keyless .run-row-line { grid-template-areas: "d t t t" ". o o o" ". f f a" ". s s s"; }
+  .row-actions { justify-self: end; }
+  .topbar-github { max-width: 100%; }
+  /* the top bar wraps: the brand block takes its tabs' width and moves to a row of its own when they do not fit */
+  .topbar { flex-wrap: wrap; }
+  .topbar-brand { flex: 0 1 auto; }
+}
+@media (max-width: 480px) {
+  .repo-tab-name { max-width: 16ch; }
+  /* a chip that wraps its words becomes a rounded box; a one-line chip stays a pill */
+  .session-chip { border-radius: 12px; }
+}
+@media (max-width: 560px) {
+  /* the meta row would wrap with the session id and the fixture link (and already wraps at 390 px): secondary items, so they go first */
+  .session-id, .session-fixture { display: none; }
+}
+@media (max-width: 480px) {
+  /* next, "main <letter>" goes, so the Summary button stays on the meta row with a typical progress chip */
+  .card-meta .main-model { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* the sign-in notice (sign-in.ts): the board note in place of the cards while this browser holds no board token */
+.sign-in-note code { color: var(--fg); }

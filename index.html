@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nurselog demo</title>
+  <meta name="theme-color" content="#08090b">
+  <link rel="icon" href="ui/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="ui/board.css">
+  <link rel="stylesheet" href="ui/graph.css">
+  <link rel="stylesheet" href="ui/table.css">
+  <link rel="stylesheet" href="ui/messages.css">
+  <link rel="stylesheet" href="ui/overview.css">
+  <link rel="stylesheet" href="ui/branches.css">
+  <script type="module" src="live-demo.js"></script>
+</head>
+<body>
+  <!-- The live demo page (design section 15, "Live demo"), built as index.html into dist/live-demo. The script is the
+       tsup bundle of src/ui/live-demo.ts, which plays the replay fixtures in the page; every link is relative, as
+       GitHub Pages serves the site under a path of its own. Same-origin assets only, as the meta CSP says; the board
+       sets styles through the CSSOM, never in a style attribute. -->
+  <div class="page">
+    <header class="topbar" id="topbar"><strong class="topbar-name">Nurselog</strong></header>
+    <main class="board" id="board">
+      <p class="board-note">Loading the demo…</p>
+    </main>
+  </div>
+</body>
+</html>

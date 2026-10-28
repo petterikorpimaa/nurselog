@@ -1,0 +1,140 @@
+/* The board panels and the legend (design section 5, "Board panels", "Token ranking" and "Legend"; decisions 79, 82
+   and 83), ported from the overview, ranking and legend styles of reference/demo.html. overview.ts draws the section
+   above the card stack with the token ranking, legend.ts the Legend button's panel under the top bar. The colours are
+   the tokens of board.css; the stage and package colours come from the config as --st-<key> and --pkg-<id>. */
+
+/* the section: one column for a panel alone, 1.9fr and 1fr for both, one column again at 980 px and narrower */
+.overview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.overview[data-panels="2"] { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }
+@media (max-width: 980px) { .overview[data-panels="2"] { grid-template-columns: minmax(0, 1fr); } }
+.overview-panel {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; min-width: 0;
+  position: relative;
+}
+.overview-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.overview-head h2 { font-size: 13.5px; }
+.overview-sub { color: var(--fg-3); font-size: 12px; }
+
+/* the token ranking: a row is the dot, the key, the title and "<tokens> · <cost>" over the stacked bar; a button with
+   the board link (the session view), a list item without it */
+.rank-head {
+  display: flex; justify-content: space-between; padding: 0 6px 4px; color: var(--fg-3);
+  font: 600 10px var(--f-mono); letter-spacing: .05em; text-transform: uppercase;
+}
+.rank-list { display: flex; flex-direction: column; gap: 2px; }
+.rank-row {
+  display: grid; grid-template-columns: 10px auto minmax(0, 1fr) auto; grid-template-areas: "d k t v" ". b b b";
+  gap: 4px 8px; align-items: center; width: 100%; padding: 6px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--fg-2); font: inherit; text-align: left; transition: background .2s;
+}
+/* with the board link a row whose ticket has a session to open (.opens, D12) takes the pointer and the hover
+   background; a source elsewhere lights its rows. A row without one takes none under its own hover or focus, though
+   that hover lights it (.hl) too */
+.overview-ranking.linkable .rank-row.opens { cursor: pointer; }
+.overview-ranking.linkable .rank-row.opens:hover, .rank-row.hl { background: var(--card-2); }
+.overview-ranking.linkable .rank-row.hl:not(.opens):is(:hover, :focus-visible) { background: transparent; }
+/* the ring inside the row, since the rest behind the toggle clips what overflows */
+.rank-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.rank-dot { grid-area: d; width: 8px; height: 8px; border-radius: 50%; background: var(--fg); }
+.rank-dot.finished { background: transparent; border: 1.5px solid var(--fg-3); }
+/* the padding, taken back by the margin, keeps a ticket link's focus ring inside the cut; the max-width still holds 22 characters */
+.rank-key {
+  grid-area: k; max-width: calc(22ch + 8px); padding: 4px; margin: -4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 600 11.5px var(--f-mono); color: var(--fg);
+}
+.rank-title { grid-area: t; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-value { grid-area: v; font: 500 11px var(--f-mono); color: var(--fg-2); white-space: nowrap; }
+.rank-bar { grid-area: b; display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: var(--card-3); }
+.rank-bar i { display: block; flex: none; height: 100%; width: 0; background: var(--c); transition: width .7s var(--ease); }
+/* a 1 px cut in the bar's colour between neighbours, so close colours (PR and the main thread) stay apart */
+.rank-bar i + i { box-shadow: inset 1px 0 0 var(--card-3); }
+.rank-more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.rank-more.open { grid-template-rows: 1fr; }
+.rank-more-inner { overflow: hidden; min-height: 0; }
+/* the toggle is a .show-all button (table.css) */
+.rank-toggle { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.rank-toggle svg { width: 11px; height: 11px; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.rank-toggle[aria-expanded="true"] svg { transform: none; }
+
+/* the Legend button at the right end of the top bar, its chevron turning when open */
+.legend-button { display: inline-flex; align-items: center; gap: 6px; }
+.legend-button svg { width: 11px; height: 11px; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.legend-button[aria-expanded="true"] svg { transform: none; }
+
+/* the legend's panel under the top bar, in the page flow: closed it takes back the page's 22 px gap */
+.legend-disclosure {
+  display: grid; grid-template-rows: 0fr; opacity: 0; margin-top: -22px;
+  transition: grid-template-rows .45s var(--ease), opacity .35s, margin-top .45s var(--ease);
+}
+.legend-disclosure.open { grid-template-rows: 1fr; opacity: 1; margin-top: 0; }
+.legend-disclosure-inner { overflow: hidden; min-height: 0; }
+/* the samples carry the session graph's classes (graph.css), so the body is a .session-graph without its padding */
+.legend.session-graph {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--card);
+  border: 1px solid var(--border); border-radius: 12px;
+}
+/* a group: the title in a column of its own, on the first line, the items and the closing note wrapping under the
+   first item; every line is 26 px high, the tallest sample */
+.legend-row {
+  display: grid; grid-template-columns: 78px minmax(0, 1fr); column-gap: 16px; align-items: start; font-size: 12px;
+  color: var(--fg-2);
+}
+.legend-title {
+  color: var(--fg-3); font: 600 10px/26px var(--f-mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.legend-items { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-width: 0; }
+.legend-item, .legend-swatch, .legend-note { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; }
+.legend-item svg { display: block; flex: none; overflow: visible; }
+.legend .bubble { cursor: default; }
+.legend-swatch i { width: 16px; height: 4px; border-radius: 2px; background: var(--c); }
+.legend-swatch i.dashed { background: repeating-linear-gradient(90deg, var(--c) 0 3px, transparent 3px 6px); }
+.legend-note { color: var(--fg-3); }
+/* the models note wraps between its lead and its models, each icon with its name */
+.legend-note.legend-models { flex-wrap: wrap; row-gap: 4px; max-width: 100%; }
+.legend-models-lead { white-space: nowrap; }
+.legend-model { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* the samples hold still while the panel is closed */
+.legend-disclosure:not(.open) .legend :is(*, *::before, *::after) { animation-play-state: paused; }
+
+/* the session card's tokens by stage (the demo's .tok): the bar under the log line, closed by default; the chart and the
+   totals open above it with the .tokd transition (board.css turns the motion off for reduced motion); the demo's 6 px gap
+   under the log is padding here, because the log line has no bottom margin and this region clips its overflow */
+.session-tokens { padding: 6px 16px 10px; display: flex; flex-direction: column; }
+.tokens-toggle {
+  align-self: flex-end; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent;
+  background: transparent; border-radius: 7px; padding: 3px 6px 3px 9px; cursor: pointer; color: var(--fg-2);
+  transition: border-color .2s, background .2s;
+}
+.tokens-toggle:hover { border-color: var(--border-2); background: var(--card-2); }
+.tokens-total { font: 500 11.5px var(--f-mono); color: var(--fg-2); white-space: nowrap; }
+.tokens-chevron { color: var(--fg-3); display: grid; place-items: center; transition: transform .35s var(--ease); }
+.tokens-chevron svg { width: 12px; height: 12px; transform: rotate(180deg); }
+.tokens-toggle[aria-expanded="true"] .tokens-chevron { transform: rotate(180deg); color: var(--fg); }
+.tokens-details {
+  display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s var(--ease), opacity .35s;
+}
+.tokens-details.open { grid-template-rows: 1fr; opacity: 1; }
+.tokens-clip { overflow: hidden; min-height: 0; }
+.tokens-inner {
+  display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 18px; padding: 12px 0 6px; align-items: center;
+  border-top: 1px solid var(--border); margin-top: 6px;
+}
+@media (max-width: 760px) {
+  .session-tokens { padding-inline: 12px; }
+  .tokens-inner { grid-template-columns: 1fr; }
+}
+.tokens-chart { display: block; width: 100%; height: 84px; }
+.tokens-grid, .tokens-plan-line { stroke: var(--border); stroke-width: 1; }
+.tokens-plan-line { stroke-dasharray: 2 3; }
+.tokens-plan-label { font: 500 9.5px var(--f-mono); fill: var(--fg-3); }
+.tokens-area { fill: var(--c); fill-opacity: .42; stroke: none; }
+.tokens-line { fill: none; stroke: var(--c); stroke-width: 1.2; stroke-linejoin: round; }
+.tokens-totals { display: flex; flex-direction: column; gap: 5px; }
+.tokens-row {
+  display: grid; grid-template-columns: 60px minmax(0, 1fr) 54px; gap: 8px; align-items: center;
+  font: 500 11px var(--f-mono); color: var(--fg-3); transition: opacity .3s;
+}
+.tokens-row.off { opacity: .45; }
+.tokens-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--card-3); }
+.tokens-bar i { display: block; flex: none; height: 100%; width: 0; background: var(--c); transition: width .7s var(--ease); }
+.tokens-value { text-align: right; color: var(--fg-2); }

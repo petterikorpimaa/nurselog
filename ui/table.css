@@ -1,0 +1,288 @@
+/* The agent table, agent details and log line of a card (design sections 5 and 15), after the table and log of
+   reference/demo.html: its grid, sizes, colours and timings, with the tokens of board.css. A row's colour is --c, its
+   package colour (var(--pkg-<id>)), the reviewer colour or the shared colour, set by src/ui/table/index.ts. Motion that
+   is not a transition here runs through element.animate in the views, behind prefers-reduced-motion. */
+
+/* table */
+.agent-table { margin: 8px 10px 0; font-size: 12.5px; }
+.agent-grid {
+  display: grid; align-items: center; gap: 10px; padding: 7px 8px; border-top: 1px solid var(--border);
+  grid-template-columns: 76px minmax(120px, 1.1fr) 128px minmax(0, 2.3fr) 96px 52px 84px 56px 62px 22px;
+}
+.agent-table-head {
+  border-top: 0; padding-bottom: 5px; color: var(--fg-3);
+  font: 600 10px var(--f-mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.agent-table-head span:nth-child(n+5) { text-align: right; }
+.agent-row { --c: var(--shared); cursor: pointer; transition: background-color .2s, opacity .4s; }
+.agent-row:hover { background: rgba(255, 255, 255, .025); }
+.agent-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+/* .7 keeps --fg-2 text on --card above 4.5:1 */
+.agent-item.dim .agent-row { opacity: .7; }
+.agent-item.dim .agent-row:hover, .agent-item.dim .agent-row:focus-visible, .agent-item.dim .agent-row[aria-expanded="true"] { opacity: .85; }
+/* a session card's main-thread row (the demo's .row.mainrow; :where keeps the row's hover above it), and the mark of the
+   agent or branch another view points at (the demo's .row.hl), fading with the row's background transition */
+:where(.agent-item.main) > .agent-row { background: rgba(255, 255, 255, .015); }
+.agent-item.hl > .agent-row { background: rgba(255, 255, 255, .05); }
+
+/* Stream: the package pill */
+.stream-pill {
+  justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 500 11px var(--f-mono); color: var(--c); border-radius: 999px; padding: 1px 8px;
+  background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  transition: color .3s, background-color .3s, border-color .3s;
+}
+/* Branch: a session row without a branch, "session" or "main checkout" (the demo's .rp.none) */
+.stream-pill.muted { --c: var(--fg-3); }
+
+/* Agent: role and the model badge, the model's icon (model-icons.ts) or its letter */
+.agent-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg); }
+.agent-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-letter {
+  display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 4px; flex: none;
+  background: var(--card-3); color: var(--fg-2); font: 700 10px var(--f-mono);
+}
+.model-letter:empty { display: none; }
+
+/* State: dot and text. Waiting for the developer is the only state that pulses (design section 15). */
+.agent-state { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--fg-2); white-space: nowrap; }
+.agent-state i {
+  position: relative; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--c, var(--fg-3));
+  transition: background-color .3s, border-color .3s;
+}
+.agent-state[data-state="handed"] { color: var(--amber); }
+.agent-state[data-state="handed"] i { background: var(--amber); }
+.agent-state[data-state="changes"] { color: var(--warm); }
+.agent-state[data-state="changes"] i { background: var(--warm); }
+.agent-state[data-state="approved"] { color: var(--rev); }
+.agent-state[data-state="approved"] i { background: var(--rev); }
+.agent-state[data-state="failed"] { color: var(--red); }
+.agent-state[data-state="failed"] i { background: var(--red); }
+.agent-state[data-state="pending"] i, .agent-state[data-state="skipped"] i, .agent-state[data-state="idle"] i { background: transparent; border: 1px solid var(--fg-3); }
+.agent-state[data-state="idle"] { color: var(--fg-3); }
+.agent-state[data-state="stale"] { color: var(--fg-2); }
+.agent-state[data-state="stale"] i { background: var(--fg-3); }
+.agent-state[data-state="waiting"] { color: var(--you); }
+.agent-state[data-state="waiting"] i { background: transparent; border: 1.5px dashed var(--you); }
+.agent-state[data-state="waiting"] i::after {
+  content: ""; position: absolute; inset: -1.5px; border-radius: 50%; border: 1px solid var(--you); pointer-events: none;
+  animation: state-halo 2.2s ease-out infinite;
+}
+@keyframes state-halo { 0% { opacity: .7; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } }
+
+/* Now: the open call, a permission wait, or the report's first line */
+.agent-now { min-width: 0; font: 400 12px var(--f-mono); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-now b { color: var(--fg); font-weight: 600; margin-right: 6px; }
+.agent-now .now-note { font-family: var(--f-ui); }
+.agent-now[data-kind="permission"] .now-note, .agent-now[data-kind="waiting"] .now-note { color: var(--you); }
+.agent-now .now-fail { color: var(--red); }
+
+/* Calls, Verify, Ctx, Cost: one cell each on wide screens, a wrapped line on narrow ones */
+.agent-table .meter, .agent-cost, .agent-time {
+  font: 500 11px var(--f-mono); color: var(--fg-2); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.agent-table .meter { display: flex; align-items: center; gap: 6px; justify-content: flex-end; transition: color .3s; }
+.agent-cost, .agent-time { text-align: right; font-size: 11.5px; }
+.meter-bar { display: inline-block; flex: none; width: 34px; height: 4px; border-radius: 2px; background: var(--card-3); overflow: hidden; }
+.meter-bar b { display: block; width: 0; height: 100%; border-radius: 2px; background: var(--fg-2); transition: width .5s var(--ease), background-color .3s; }
+.meter[data-level="warn"], .budget-bar[data-level="warn"] { color: var(--amber); }
+.meter[data-level="warn"] .meter-bar b, .budget-bar[data-level="warn"] .meter-bar b { background: var(--amber); }
+.meter[data-level="limit"], .budget-bar[data-level="limit"] { color: var(--red); }
+.meter[data-level="limit"] .meter-bar b, .budget-bar[data-level="limit"] .meter-bar b { background: var(--red); }
+.verify-pips { display: inline-flex; gap: 3px; justify-content: flex-end; min-width: 0; }
+/* At most seven pips (src/ui/table/verify.ts): seven at their 4 px minimum and the gaps fit the 52 px column. A fail
+   pip carries a dark diagonal besides its colour, so it does not rest on colour alone. */
+.verify-pips i {
+  flex: 0 1 auto; width: 8px; min-width: 4px; height: 8px; border-radius: 2px; background-color: var(--card-3);
+  transition: background-color .3s, box-shadow .3s;
+}
+.verify-pips i[data-state="pass"] { background-color: var(--rev); }
+.verify-pips i[data-state="fail"] {
+  background-color: var(--warm);
+  background-image: linear-gradient(135deg, transparent 38%, var(--ink) 38% 62%, transparent 62%);
+}
+.verify-pips i[data-state="running"] { background-color: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-2); }
+.verify-pips i[data-state="unknown"] { background-color: transparent; outline: 1px dashed var(--fg-3); outline-offset: -1px; }
+.verify-pips i.over { background-color: var(--red); }
+.verify-pips i.over[data-state="running"], .verify-pips i.over[data-state="unknown"] { background-color: transparent; outline: 0; box-shadow: inset 0 0 0 1.5px var(--red); }
+.cost-mark { display: inline-block; width: .7em; text-align: left; color: var(--fg-3); }
+.row-chevron { justify-self: end; color: var(--fg-3); transition: transform .3s var(--ease), color .2s; }
+.row-chevron svg { display: block; width: 12px; height: 12px; }
+.agent-row[aria-expanded="true"] .row-chevron { transform: rotate(90deg); color: var(--fg); }
+
+/* agent details: a grid-rows transition from 0fr to 1fr */
+.agent-details { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--ease); }
+.agent-details.open { grid-template-rows: 1fr; }
+.details-clip { overflow: hidden; min-height: 0; }
+.details-inner {
+  display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: 18px;
+  padding: 10px 12px 14px 92px; border-top: 1px dashed var(--border);
+}
+.details-heading { margin-bottom: 6px; color: var(--fg-3); font: 600 10px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; }
+.recent-calls {
+  display: grid; grid-template-columns: 40px auto minmax(0, 1fr) 12px auto; gap: 2px 8px; align-items: baseline;
+  font: 400 11.5px var(--f-mono); color: var(--fg-2);
+}
+.call-time, .call-duration { color: var(--fg-3); white-space: nowrap; }
+.call-duration { text-align: right; }
+.call-tool { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-weight: 600; }
+.call-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-mark { text-align: center; color: var(--fg-3); }
+.call-mark[data-mark="failed"], .call-mark[data-mark="denied"], .call-mark[data-mark="interrupted"] { color: var(--red); }
+.call-mark[data-mark="waiting"] { color: var(--you); }
+.recent-empty { grid-column: 1 / -1; color: var(--fg-3); }
+/* a session row's note while its calls load or after the load failed */
+.details-note { margin: 6px 0 0; font-size: 12px; color: var(--fg-3); }
+.details-note[data-tone="failed"] { color: var(--amber); }
+.budget-bars { display: flex; flex-direction: column; gap: 7px; }
+.budget-bar { display: grid; grid-template-columns: 52px minmax(0, 1fr) 72px; gap: 8px; align-items: center; font: 500 11px var(--f-mono); color: var(--fg-2); }
+.budget-bar .meter-bar { width: 100%; height: 6px; }
+.budget-bar .meter-bar[hidden] { display: block !important; visibility: hidden; }
+.budget-text { text-align: right; white-space: nowrap; }
+/* a session row's Progress section above its recent calls (decision 140) reads as the report section, the next heading 12 px under it */
+.details-report, .details-progress { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--fg-2); }
+.details-report .details-heading, .details-progress .details-heading { margin-bottom: 0; }
+.details-progress { margin-bottom: 12px; }
+.details-report .details-heading:not(:first-child) { margin-top: 6px; }
+.report-text { white-space: pre-line; overflow-wrap: anywhere; max-height: 16em; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
+.report-text b { margin-right: 2px; color: var(--fg); font: 600 12px var(--f-mono); }
+.details-files { display: flex; flex-direction: column; gap: 1px; font: 400 11px var(--f-mono); color: var(--fg-3); overflow-wrap: anywhere; }
+
+/* the rows beyond the visible set: they open with a height transition under "Show all" */
+.agent-rows-more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease); }
+.agent-rows-more.open { grid-template-rows: 1fr; }
+.agent-rows-more > .agent-rows { overflow: hidden; min-height: 0; }
+.agent-table-foot { display: flex; flex-direction: column; align-items: flex-start; margin: 0 10px; }
+.show-all { border: 0; background: transparent; color: var(--fg-3); font-size: 12px; cursor: pointer; padding: 6px 8px; text-align: left; }
+.show-all:hover { color: var(--fg); }
+
+/* log line: who takes the Stream pill's colour (--c, log.ts); the square the tone's colour, for a normal entry the agent's
+   package colour */
+.log-line {
+  --c: var(--fg); --tone: var(--fg-3);
+  display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 6px 16px 0; padding: 8px 10px; border-radius: 8px;
+  background: var(--card-2); border: 1px solid var(--border); font: 400 12px var(--f-mono); color: var(--fg-2);
+}
+.log-line.has-package { --tone: var(--c); }
+.log-line[data-tone="you"] { --tone: var(--you); }
+.log-line[data-tone="done"] { --tone: var(--rev); }
+.log-line[data-tone="warn"] { --tone: var(--amber); }
+.log-line[data-tone="failed"] { --tone: var(--red); }
+.log-mark { width: 7px; height: 7px; border-radius: 2px; flex: none; background: var(--tone); transform: translateY(-1px); transition: background-color .3s; }
+.log-who { color: var(--c); font-weight: 600; }
+.log-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-time { flex: none; color: var(--fg-3); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .agent-table-head { display: none; }
+  .agent-row {
+    grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 5px;
+    grid-template-areas: "p a c" "s s t" "n n n" "m m m";
+  }
+  .agent-row .stream-pill { grid-area: p; }
+  .agent-row .agent-name { grid-area: a; }
+  .agent-row .row-chevron { grid-area: c; }
+  .agent-row .agent-state { grid-area: s; }
+  .agent-row .agent-time { grid-area: t; }
+  .agent-row .agent-now { grid-area: n; white-space: normal; overflow-wrap: anywhere; }
+  .agent-row .agent-meters { grid-area: m; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .details-inner { grid-template-columns: 1fr; padding-left: 12px; }
+  .log-line { margin-inline: 12px; }
+  .log-text { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (min-width: 761px) {
+  .agent-row .agent-meters { display: contents; }
+}
+/* a session card's table: the Branch column is the demo's 118 px and the details indent with it; below 961 px the
+   wider Branch and Agent columns leave Now no room, so its rows stack as the run rows do below 761 px, the Branch pill
+   shrinking before the agent's name, which keeps half the row */
+@media (min-width: 961px) {
+  .agent-table.session .agent-grid { grid-template-columns: 118px minmax(150px, 1.3fr) 128px minmax(0, 2fr) 96px 52px 84px 56px 62px 22px; }
+  .agent-table.session .details-inner { padding-left: 134px; }
+}
+@media (max-width: 960px) {
+  .agent-table.session .agent-table-head { display: none; }
+  .agent-table.session .agent-row {
+    grid-template-columns: auto minmax(50%, 1fr) auto; row-gap: 5px;
+    grid-template-areas: "p a c" "s s t" "n n n" "m m m";
+  }
+  .agent-table.session .agent-row .stream-pill { grid-area: p; }
+  .agent-table.session .agent-row .agent-name { grid-area: a; }
+  .agent-table.session .agent-row .row-chevron { grid-area: c; }
+  .agent-table.session .agent-row .agent-state { grid-area: s; }
+  .agent-table.session .agent-row .agent-time { grid-area: t; }
+  .agent-table.session .agent-row .agent-now { grid-area: n; white-space: normal; overflow-wrap: anywhere; }
+  .agent-table.session .agent-row .agent-meters { grid-area: m; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .agent-table.session .details-inner { grid-template-columns: 1fr; padding-left: 12px; }
+}
+
+/* the session card's Summary panel (summary.ts; the demo's .sum, .suminner, .dh, .tblw, .bars and .brr): the panel opens
+   with the demo's grid-rows transition (the global reduced-motion rule turns it and the bar easing off), its two
+   columns stack at 860 px as the demo's, the section headings are .details-heading and the bars .meter-bar, kept per
+   key so a changed width eases; a collapsed card folds it with the tokens region */
+.summary-panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease); }
+.summary-panel.open { grid-template-rows: 1fr; }
+.summary-clip { overflow: hidden; min-height: 0; }
+.summary-inner {
+  display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 20px;
+  border-top: 1px solid var(--border); padding: 14px 16px 16px;
+}
+.summary-column { min-width: 0; }
+.summary-section { margin-bottom: 14px; }
+.summary-section:last-child { margin-bottom: 0; }
+.summary-subheading { margin: 8px 0 4px; font: 500 11px var(--f-mono); color: var(--fg-2); }
+.summary-subheading:first-child { margin-top: 0; }
+.summary-empty { margin: 0; font-size: 12px; color: var(--fg-3); }
+.summary-overhead-head { margin: 0 0 8px; font: 500 12px var(--f-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.summary-note { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--fg-3); }
+.summary-table-wrap { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
+.summary-table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 12px; }
+.summary-table th, .summary-table td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.summary-table th { font: 600 10px var(--f-mono); color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; }
+.summary-table td { font-family: var(--f-mono); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.summary-table th:first-child, .summary-table td:first-child { text-align: left; }
+.summary-table td:first-child { color: var(--fg); }
+.summary-table tfoot td { color: var(--fg); font-weight: 600; border-bottom: 0; }
+.summary-agent { display: flex; align-items: center; gap: 6px; }
+.summary-bars { display: flex; flex-direction: column; gap: 6px; }
+.summary-bars.tools { --text-w: 150px; }
+/* The widest part text, "999.9k · <$0.001": 16 characters of the mono face at 11.5px, about 110px. */
+.summary-bars.overhead { --text-w: 116px; }
+.summary-bar {
+  --c: var(--shared);
+  display: grid; grid-template-columns: minmax(56px, 112px) minmax(0, 1fr) var(--text-w, 70px); gap: 8px; align-items: center;
+  font: 500 11.5px var(--f-mono); color: var(--fg-2);
+}
+.summary-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.summary-bar .meter-bar { width: 100%; height: 6px; }
+.summary-bar .meter-bar b { background: var(--c); opacity: .75; }
+.summary-bar-text { text-align: right; color: var(--fg-3); white-space: nowrap; }
+.summary-verify { display: flex; flex-direction: column; gap: 6px; }
+.summary-verify-row {
+  display: grid; grid-template-columns: minmax(64px, .9fr) repeat(3, minmax(0, 1fr)) auto; gap: 4px 12px; align-items: baseline;
+  font: 500 11.5px var(--f-mono); color: var(--fg-2);
+}
+.summary-verify-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.summary-verify-failed { margin-left: 6px; color: var(--red); }
+.summary-verify-kind[data-tone="warn"] { color: var(--amber); }
+/* The resume lines: no part wraps or shrinks below its text, and the amount column is as wide as the widest amount,
+   "<$0.001" or "$999.99" (7 characters of the mono face), so the lines stay aligned. */
+.summary-verify.resumes { --amount-w: 7ch; }
+.summary-verify.resumes .summary-verify-row { grid-template-columns: minmax(min-content, .6fr) repeat(3, minmax(min-content, 1fr)) var(--amount-w); }
+.summary-verify.resumes .summary-verify-row > span { white-space: nowrap; }
+.summary-verify-mean { text-align: right; color: var(--fg-3); white-space: nowrap; }
+@media (max-width: 860px) {
+  .summary-inner { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .summary-inner { padding-inline: 12px; }
+}
+@media (max-width: 480px) {
+  .summary-bar, .summary-bars.tools .summary-bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "n t" "b b"; row-gap: 3px; }
+  .summary-bar-name { grid-area: n; }
+  .summary-bar-text { grid-area: t; }
+  .summary-bar .meter-bar { grid-area: b; }
+  .summary-verify-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .summary-verify-role, .summary-verify-mean { grid-column: 1 / -1; text-align: left; }
+  .summary-verify.resumes .summary-verify-row { grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
+}
