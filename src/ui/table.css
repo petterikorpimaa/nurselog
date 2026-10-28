@@ -139,8 +139,10 @@
 .budget-bar .meter-bar { width: 100%; height: 6px; }
 .budget-bar .meter-bar[hidden] { display: block !important; visibility: hidden; }
 .budget-text { text-align: right; white-space: nowrap; }
-.details-report { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--fg-2); }
-.details-report .details-heading { margin-bottom: 0; }
+/* a session row's Progress section above its recent calls (decision 140) reads as the report section, the next heading 12 px under it */
+.details-report, .details-progress { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--fg-2); }
+.details-report .details-heading, .details-progress .details-heading { margin-bottom: 0; }
+.details-progress { margin-bottom: 12px; }
 .details-report .details-heading:not(:first-child) { margin-top: 6px; }
 .report-text { white-space: pre-line; overflow-wrap: anywhere; max-height: 16em; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
 .report-text b { margin-right: 2px; color: var(--fg); font: 600 12px var(--f-mono); }

@@ -1,10 +1,10 @@
 // hooks/verification.mjs
-var VERIFICATION_RUNNERS = Object.freeze(["pnpm", "npm", "npx", "yarn", "node", "turbo", "tsc", "eslint", "vitest"]);
-var VERIFICATION_KINDS = Object.freeze({ typecheck: "\\b(typecheck|tsc)\\b", lint: "\\b(lint|eslint)\\b", test: "\\b(vitest|test:run)\\b|\\bpnpm\\b.*\\btest\\b" });
+var VERIFICATION_RUNNERS = Object.freeze(["pnpm", "npm", "npx", "yarn", "bun", "node", "turbo", "make", "tsc", "eslint", "vitest"]);
+var VERIFICATION_KINDS = Object.freeze({ typecheck: "\\b(typecheck|tsc)\\b", lint: "\\b(lint|eslint)\\b", test: "\\b(vitest|test:run)\\b|\\b(pnpm|npm|yarn|bun|make)\\b[^&|;]*\\btest\\b" });
 var VERIFICATION_FAIL_PATTERNS = Object.freeze({
   typecheck: "error TS\\d+|Found [1-9]\\d* errors?\\b",
   lint: "\\([1-9]\\d* errors?, \\d+ warnings?\\)",
-  test: "\\b[1-9]\\d* failed\\b|\\bErrors +[1-9]\\d* errors?\\b"
+  test: "\\b[1-9]\\d* fail(?:ed)?\\b|\\bErrors +[1-9]\\d* errors?\\b"
 });
 var STDOUT_TAIL = 300;
 var FAILURE_ERROR_CHARS = 500;
@@ -13,6 +13,11 @@ var MAX_COMMAND_CHARS = 4e3;
 var SCRIPT_RUNNERS = /* @__PURE__ */ new Set(["pnpm", "npm", "yarn", "bun", "turbo"]);
 var SCRIPT_VERBS = /* @__PURE__ */ new Set(["run", "exec"]);
 var BINARY_RUNNERS = /* @__PURE__ */ new Set(["npx", "bunx"]);
+var TARGET_RUNNERS = /* @__PURE__ */ new Set(["make"]);
+var KIND_TARGET = /^(?:typecheck|tsc|lint|eslint|vitest|test)(?:[:._-]|$)/;
+var EXEC_TOOLS = /* @__PURE__ */ new Set(["tsc", "eslint", "vitest", "typecheck", "lint"]);
+var UNSAFE_OPTIONS = ["script-shell", "userconfig", "preload"];
+var BUN_PRELOAD = /^-[A-Za-z]*r/;
 var PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
 var URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 var NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
@@ -130,21 +135,40 @@ var isSilentPrefix = (stages) => {
   const assignments = texts[0] === "export" ? texts.slice(1) : texts;
   return assignments.length > 0 && assignments.every((text) => SAFE_ASSIGNMENT.test(text));
 };
+var isUnsafeOption = (runner, text) => {
+  const name = /^--([^=]{3,})/.exec(text)?.[1];
+  if (name !== void 0 && UNSAFE_OPTIONS.some((option) => option.startsWith(name))) {
+    return true;
+  }
+  return runner === "bun" && BUN_PRELOAD.test(text);
+};
 var toolWord = (runner, args) => {
   if (runner.text === "node") {
     return NODE_SCRIPT.test(args[0]?.text ?? "") ? args[0] : void 0;
+  }
+  if (TARGET_RUNNERS.has(runner.text)) {
+    const kindTargets = args.length > 0 && args.every((arg) => PLAIN_WORD.test(arg.text) && KIND_TARGET.test(arg.text));
+    return kindTargets ? args[0] : void 0;
   }
   const script = SCRIPT_RUNNERS.has(runner.text);
   if (!script && !BINARY_RUNNERS.has(runner.text)) {
     return runner;
   }
   const verb = script ? args[0]?.text : void 0;
+  const shellExec = runner.text === "bun" && verb === "exec";
+  if (shellExec || script && args.some((arg) => isUnsafeOption(runner.text, arg.text))) {
+    return void 0;
+  }
   const hasVerb = SCRIPT_VERBS.has(verb) || runner.text === "pnpm" && verb === "dlx";
   const tool = hasVerb ? args[1] : args[0];
   if (!tool || !PLAIN_WORD.test(tool.text)) {
     return void 0;
   }
-  const fetches = !script || hasVerb && verb !== "run";
+  const exec = hasVerb && verb !== "run";
+  if (exec && !EXEC_TOOLS.has(tool.text) || runner.text === "bun" && tool.text.includes(".")) {
+    return void 0;
+  }
+  const fetches = !script || exec;
   return fetches && URL_SCHEME.test(tool.text) ? void 0 : tool;
 };
 var isVerification = (words) => {
@@ -284,26 +308,60 @@ var DEFAULT_ROLES = {
 var CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "bin", "nurselog");
 var UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\\]/;
 var HIDDEN_PATH = "path hidden: it holds a control character or a backslash";
-var shellWord = (text) => /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`;
-var cliCommand = (root, subcommand, cli = CLI_PATH) => {
+var singleQuoted = (text) => `'${text.replaceAll("'", "'\\''")}'`;
+var shellWord = (text) => /^[\w@%+=:,./-]+$/.test(text) ? text : singleQuoted(text);
+var OWNER_LINE = "# Written by nurselog install-cli; remove it with: nurselog install-cli --remove";
+var CACHE_PARENT = "/plugins/cache/nurselog/nurselog";
+var VERSION_DIR = /^\d+\.\d+\.\d+$/;
+var TERMINAL_COMMAND_BYTES = 16 * 1024;
+var terminalCommandPath = (home = homedir()) => join(home, ".local", "bin", "nurselog");
+var cacheDirOf = (root) => {
+  const parent = dirname(root);
+  return VERSION_DIR.test(basename(root)) && parent.endsWith(CACHE_PARENT) ? parent : void 0;
+};
+var terminalCommandLine = (root) => {
+  const cache = cacheDirOf(root);
+  return cache === void 0 ? `exec node ${singleQuoted(join(root, "bin", "nurselog"))} "$@"` : `cache=${singleQuoted(cache)}`;
+};
+var shortCommandWorks = (cli, deps = {}) => {
+  try {
+    const home = deps.home ?? homedir();
+    if (!isAbsolute(home)) {
+      return false;
+    }
+    const target = resolve(terminalCommandPath(home));
+    const lines = readSmallFile(target, TERMINAL_COMMAND_BYTES, { head: true }).split("\n");
+    if (lines[1] !== OWNER_LINE || !lines.includes(terminalCommandLine(dirname(dirname(cli))))) {
+      return false;
+    }
+    const ownBin = resolve(dirname(cli));
+    const entries = (deps.path ?? process.env.PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry) && resolve(entry) !== ownBin);
+    const found = resolveCommand("nurselog", entries.join(delimiter));
+    return found !== void 0 && resolve(found) === target;
+  } catch {
+    return false;
+  }
+};
+var cliCommand = (root, subcommand, cli = CLI_PATH, short = shortCommandWorks(cli)) => {
   const where = root === void 0 ? "" : " in the repository directory";
-  if (UNSAFE_PATH.test(cli)) {
+  if (!short && UNSAFE_PATH.test(cli)) {
     return `run node with bin/nurselog of the Nurselog plugin: ${subcommand}${where} (${HIDDEN_PATH})`;
   }
+  const program = short ? "nurselog" : `node ${shellWord(cli)}`;
   if (root === void 0) {
-    return `node ${shellWord(cli)} ${subcommand}`;
+    return `${program} ${subcommand}`;
   }
   if (UNSAFE_PATH.test(root)) {
-    return `run node ${shellWord(cli)} ${subcommand}${where} (${HIDDEN_PATH})`;
+    return `run ${program} ${subcommand}${where} (${HIDDEN_PATH})`;
   }
-  return `node ${shellWord(cli)} ${subcommand} --repo ${shellWord(root)}`;
+  return `${program} ${subcommand} --repo ${shellWord(root)}`;
 };
-var startCommand = (cli = CLI_PATH) => cliCommand(void 0, "start", cli);
-var notSetUpMessage = (cli = CLI_PATH) => {
-  if (UNSAFE_PATH.test(cli)) {
+var startCommand = (cli = CLI_PATH, short = shortCommandWorks(cli)) => cliCommand(void 0, "start", cli, short);
+var notSetUpMessage = (cli = CLI_PATH, short = shortCommandWorks(cli)) => {
+  if (!short && UNSAFE_PATH.test(cli)) {
     return `Nurselog is not set up for this repository; run init of bin/nurselog in the Nurselog plugin with node (${HIDDEN_PATH})`;
   }
-  return `Nurselog is not set up for this repository; run: node ${shellWord(cli)} init`;
+  return `Nurselog is not set up for this repository; run: ${cliCommand(void 0, "init", cli, short)}`;
 };
 var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 var stripControlLines = (text) => text.split("\n").map(stripControl).join("\n  ");
@@ -825,6 +883,8 @@ var BODY_FIELDS = ["content", "new_string", "old_string", "new_source"];
 var RESPONSE_SCALARS = ["is_error", "exitCode", "exit_code", "interrupted", "isAsync", "agentId", "status", "resolvedModel"];
 var ERROR_LINE = 300;
 var MARKER_TEXT = 300;
+var ANSWER_TEXT = 500;
+var ANSWERS_CAP = 10;
 var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isSecretFileWord = (word) => {
   const directories = word.toLowerCase().split("/");
@@ -880,7 +940,42 @@ var textOf = (value) => {
   return value.map((item) => isObject(item) && typeof item.text === "string" ? item.text : "").join("\n");
 };
 var firstLine = (value) => redactString(textOf(value)).split("\n").find((line) => line.trim())?.trim().slice(0, ERROR_LINE);
-var slimResponse = (response, tool, command, sensitive) => {
+var answerText = (text) => redactString(text).slice(0, ANSWER_TEXT);
+var SECRET_QUESTION = /(?<![A-Za-z0-9])(?:pass(?:word|phrase|wd)s?|secrets?|api[\s_-]?(?:keys?|tokens?)|(?:access|auth)[\s_-]?tokens?|private[\s_-]?keys?|credentials?)(?![A-Za-z0-9])/i;
+var optionLabel = (option) => {
+  if (typeof option === "string") {
+    return option;
+  }
+  return isObject(option) && typeof option.label === "string" ? option.label : void 0;
+};
+var optionLabels = (input, response) => {
+  const questions = [input.questions, response.questions].filter(Array.isArray).flat().filter(isObject);
+  const options = questions.flatMap((question) => Array.isArray(question.options) ? question.options : []);
+  return new Set(options.map(optionLabel).filter((label) => label !== void 0));
+};
+var isOptionAnswer = (answer, labels) => labels.has(answer) || answer.split(", ").every((part) => labels.has(part));
+var keptAnswers = (input, response) => {
+  if (!isObject(response.answers)) {
+    return void 0;
+  }
+  const annotations = isObject(response.annotations) ? response.annotations : {};
+  const labels = optionLabels(input, response);
+  const answered = Object.entries(response.answers).filter(([, answer]) => typeof answer === "string").slice(0, ANSWERS_CAP);
+  const kept = answered.map(([question, answer]) => {
+    const annotation = Object.hasOwn(annotations, question) ? annotations[question] : void 0;
+    const notes = isObject(annotation) ? annotation.notes : void 0;
+    const secret = SECRET_QUESTION.test(question);
+    const typed = secret && !isOptionAnswer(answer, labels);
+    const item = { question: answerText(question), answer: typed ? REDACTED : answerText(answer) };
+    if (typeof notes !== "string" || notes === "") {
+      return item;
+    }
+    return { ...item, notes: secret ? REDACTED : answerText(notes) };
+  });
+  return kept.length > 0 ? kept : void 0;
+};
+var slimResponse = (response, tool, input, sensitive) => {
+  const command = typeof input.command === "string" ? input.command : "";
   const slim = { responseChars: JSON.stringify(response ?? null).length };
   if (MARKER_TOOL.test(tool)) {
     slim.text = redactString(textOf(isObject(response) ? response.content : response)).slice(0, MARKER_TEXT);
@@ -912,6 +1007,10 @@ var slimResponse = (response, tool, command, sensitive) => {
       slim.stdout = stdout;
     }
   }
+  const answers = tool === "AskUserQuestion" ? keptAnswers(input, response) : void 0;
+  if (answers) {
+    slim.answers = answers;
+  }
   return slim;
 };
 var slimFailureError = (error, sensitive) => {
@@ -925,7 +1024,6 @@ var minimizePayload = (payload) => {
     return payload;
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
-  const command = typeof input.command === "string" ? input.command : "";
   const sensitive = touchesSecret(input);
   const slim = { ...payload };
   if (payload.error !== void 0) {
@@ -940,7 +1038,7 @@ var minimizePayload = (payload) => {
     slim.tool_input = slimInput(input, sensitive);
   }
   if (payload.tool_response !== void 0) {
-    slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === "string" ? payload.tool_name : "", command, sensitive);
+    slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === "string" ? payload.tool_name : "", input, sensitive);
   }
   return slim;
 };
@@ -2234,6 +2332,12 @@ var stringFields = (data, required, optional = [], prefix = "data") => {
 };
 var INPUT_STRINGS = ["command", "description", "filePath", "pattern", "path", "glob", "subagentType", "model", "prompt", "message", "name", "pageId", "issueIdOrKey"];
 var isQuestionList = (value) => Array.isArray(value) && value.every((item) => isFields(item) && isString(item.question) && isOptional(item.options, isStringList2));
+var isQuestionAnswer = (item) => isFields(item) && isString(item.question) && isString(item.answer) && isOptional(item.notes, isString);
+var toolPostProblem = (data) => {
+  const problem = stringFields(data, ["toolUseId", "tool"], ["stdoutTail", "agentId", "resolvedModel"]);
+  const answers = isOptional(data.answers, (value) => Array.isArray(value) && value.every(isQuestionAnswer));
+  return problem ?? (answers ? void 0 : "data.answers must be a list of { question, answer, notes }");
+};
 var toolInputProblem = (input) => {
   if (!isFields(input)) {
     return "data.input must be an object";
@@ -2259,6 +2363,7 @@ var promptProblem = (data) => {
   }
   return `unknown prompt kind ${String(data.kind)}`;
 };
+var GIT_OPTIONAL = { worktree: ["alias"] };
 var GIT_FIELDS = {
   worktree: ["worktree", "branch"],
   fork: ["branch", "base", "sha"],
@@ -2281,7 +2386,7 @@ var gitProblem = (data, record) => {
   if (!fields) {
     return `unknown git fact kind ${kind}`;
   }
-  const problem = stringFields(data, fields);
+  const problem = stringFields(data, fields, GIT_OPTIONAL[kind]);
   return problem ?? (kind === "diff" ? diffProblem(data, record) : void 0);
 };
 var isRepoMismatch = (value) => isFields(value) && isString(value.repo) && isStringList2(value.remotes);
@@ -2353,7 +2458,7 @@ var DATA_CHECKS = {
   "session.start": (data) => stringFields(data, [], ["source", "transcriptPath", "model"]) ?? resumeProblem(data),
   prompt: promptProblem,
   "tool.pre": (data) => stringFields(data, ["toolUseId", "tool"]) ?? toolInputProblem(data.input),
-  "tool.post": (data) => stringFields(data, ["toolUseId", "tool"], ["stdoutTail", "agentId", "resolvedModel"]),
+  "tool.post": toolPostProblem,
   "tool.fail": (data) => stringFields(data, ["toolUseId", "tool"], ["error"]),
   permission: (data) => stringFields(data, ["tool"]) ?? toolInputProblem(data.input),
   "agent.stop": (data) => stringFields(data, ["lastMessage"], ["transcriptPath"]),
@@ -2588,6 +2693,9 @@ var cap = (value, max) => (str(value) ?? "").slice(0, max);
 var isObject3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var objects = (value) => Array.isArray(value) ? value.filter(isObject3) : [];
 var STOP_MESSAGE_CAP = 8e3;
+var PROMPT_TEXT_CAP = 4e3;
+var ANSWER_TEXT_CAP = 500;
+var ANSWERS_CAP2 = 10;
 var REPORT_HEAD = 4e3;
 var CUT = "\n[...]\n";
 var capReport = (value, max) => {
@@ -2610,7 +2718,7 @@ var summarizeToolInput = (tool, input) => {
   if (tool === "Bash") {
     return { command: cap(input.command, 2e3), description: str(input.description), runInBackground: input.run_in_background === true || void 0 };
   }
-  if (tool === "Read" || tool === "Write" || tool === "Edit" || tool === "NotebookEdit") {
+  if (tool === "Read" || tool === "Write" || tool === "Edit" || tool === "MultiEdit" || tool === "NotebookEdit") {
     const filePath = str(input.file_path) ?? str(input.notebook_path);
     return tool === "Read" ? { filePath, offset: num(input.offset), limit: num(input.limit) } : { filePath };
   }
@@ -2674,7 +2782,27 @@ var promptData = (prompt, keyConfig) => {
       result: capReport(tag(prompt, "result"), 16e3) || void 0
     };
   }
-  return { kind: "user", text: prompt.slice(0, 300), keys: promptKeys(prompt, keyConfig), length: prompt.length };
+  return { kind: "user", text: prompt.slice(0, PROMPT_TEXT_CAP), keys: promptKeys(prompt, keyConfig), length: prompt.length };
+};
+var questionAnswer = (question, answer, notes) => {
+  if (typeof question !== "string" || typeof answer !== "string") {
+    return [];
+  }
+  const item = { question: question.slice(0, ANSWER_TEXT_CAP), answer: answer.slice(0, ANSWER_TEXT_CAP) };
+  return typeof notes === "string" && notes !== "" ? [{ ...item, notes: notes.slice(0, ANSWER_TEXT_CAP) }] : [item];
+};
+var rawAnswers = (result) => {
+  const answers = isObject3(result.answers) ? result.answers : {};
+  const annotations = isObject3(result.annotations) ? result.annotations : {};
+  return Object.entries(answers).flatMap(([question, answer]) => {
+    const annotation = Object.hasOwn(annotations, question) ? annotations[question] : void 0;
+    return questionAnswer(question, answer, isObject3(annotation) ? annotation.notes : void 0);
+  });
+};
+var questionAnswers = (result) => {
+  const listed = Array.isArray(result.answers) ? objects(result.answers).flatMap((item) => questionAnswer(item.question, item.answer, item.notes)) : void 0;
+  const answers = (listed ?? rawAnswers(result)).slice(0, ANSWERS_CAP2);
+  return answers.length > 0 ? answers : void 0;
 };
 var backgroundTasks = (value) => {
   const tasks = objects(value);
@@ -2746,6 +2874,7 @@ var hookPayloadToEvent = (payload, options) => {
         ...base,
         toolUseId: str(payload.tool_use_id) ?? "",
         tool,
+        answers: tool === "AskUserQuestion" ? questionAnswers(result) : void 0,
         durationMs: num(payload.duration_ms),
         responseChars: num(result.responseChars) ?? JSON.stringify(response ?? null).length,
         exitCode: tool === "Bash" ? num(result.exitCode ?? result.exit_code) : void 0,
@@ -3096,6 +3225,8 @@ var isBlockError = (result) => "blockError" in result;
 // src/model/paths.ts
 var time = (at) => Date.parse(at);
 var compareText = (a, b) => Number(a > b) - Number(a < b);
+var digitsByValue = (text) => text.replace(/\d+/g, (run) => run.padStart(16, "0"));
+var compareIds = (a, b) => compareText(digitsByValue(a), digitsByValue(b)) || compareText(a, b);
 var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|test|perf|build|ci)\//, "");
 var normalizePath = (path) => {
   const prefix = path.startsWith("~/") || path === "~" ? "~" : "";
@@ -3114,9 +3245,32 @@ var resolvePath = (base, path) => normalizePath(isAbsolute2(path) ? path : `${ba
 var isInside2 = (path, root) => path === root || path.startsWith(`${root}/`);
 var baseName = (path) => path.split("/").filter(Boolean).pop() ?? path;
 var escapeRegExp2 = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var relativePath = (run, path) => {
+var worktreeRoot = (run, path, aliases) => {
+  if (isInside2(path, run.worktree)) {
+    return run.worktree;
+  }
+  for (let end = path.length; end > 0; end = path.lastIndexOf("/", end - 1)) {
+    const prefix = path.slice(0, end);
+    if (ownValue(aliases, prefix) === run.worktree) {
+      return prefix;
+    }
+  }
+  return void 0;
+};
+var relativePath = (run, path, aliases) => {
   const normalized = isAbsolute2(path) ? normalizePath(path) : path;
-  return isInside2(normalized, run.worktree) ? normalized.slice(run.worktree.length + 1) : normalized;
+  const root = worktreeRoot(run, normalized, aliases);
+  return root === void 0 ? normalized : normalized.slice(root.length + 1);
+};
+var inWorktree = (run, path, aliases) => worktreeRoot(run, normalizePath(path), aliases) !== void 0;
+var resolveAlias = (path, aliases) => {
+  for (let end = path.length; end > 0; end = path.lastIndexOf("/", end - 1)) {
+    const real = ownValue(aliases, path.slice(0, end));
+    if (real !== void 0) {
+      return `${real}${path.slice(end)}`;
+    }
+  }
+  return path;
 };
 var packageOf = (relative, config) => config.packages.find((pkg) => pkg.paths.some((path) => relative === path || relative.startsWith(`${path}/`)))?.id;
 var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
@@ -3315,6 +3469,7 @@ var JOINS_CAP = 20;
 var REBASES_CAP = JOINS_CAP;
 var MESSAGE_CAP = 50;
 var MESSAGE_TEXT_BUDGET = 64e3;
+var PROMPT_LINE_CHARS = 300;
 var RECENT_CAP = 20;
 var WARNING_CAP = 50;
 var factStamp = (at) => ({ at, sessionId: "" });
@@ -3354,14 +3509,19 @@ var newRun = (id, worktree, branch, at) => ({
   tokens: { points: [], byStage: {}, total: emptyCounts(), marks: [] },
   costUsd: 0
 });
-var keepMessages = (messages) => {
+var keepNewest = (messages, size) => {
   let start = Math.max(0, messages.length - MESSAGE_CAP);
-  let total = messages.slice(start).reduce((sum, message) => sum + message.text.length, 0);
+  let total = messages.slice(start).reduce((sum, message) => sum + size(message), 0);
   while (start < messages.length - 1 && total > MESSAGE_TEXT_BUDGET) {
-    total -= messages[start].text.length;
+    total -= size(messages[start]);
     start += 1;
   }
   return messages.slice(start);
+};
+var keepMessages = (messages) => keepNewest(messages, (message) => message.text.length);
+var keepDeveloperMessages = (messages) => {
+  const ordered = [...messages].sort((a, b) => time(a.at) - time(b.at) || compareIds(a.id, b.id));
+  return keepNewest(ordered, (message) => message.text.length + (message.notes?.length ?? 0));
 };
 var warn = (state, at, text) => {
   state.board.warnings.push({ at, text, tone: "warn" });
@@ -3471,8 +3631,24 @@ var currentStage = (run) => {
   }
   return active ?? reached;
 };
-var openPermission = (run) => Object.values(run.agents).some((agent) => agent.recent.some((call) => call.permission === "waiting"));
-var syncWaits = (run, at) => {
+var sessionMainFix = (run, sessionId) => [...run.fixes].reverse().find((fix) => fix.agentId === "main" && fix.state === "running" && fix.sessionId === sessionId);
+var mainNode = (run, sessionId) => {
+  const fix = sessionMainFix(run, sessionId);
+  return fix ? { kind: "fix", id: fix.id } : { kind: "stage", id: "plan" };
+};
+var mainStage = (run, sessionId) => sessionMainFix(run, sessionId) ? "fix" : "plan";
+var toMainNode = (trunkLike, agentId) => trunkLike && (agentId === void 0 || agentId === "main");
+var permissionStages = (run, current, trunkLike) => {
+  const stages = /* @__PURE__ */ new Set();
+  for (const agent of Object.values(run.agents)) {
+    for (const call of agent.recent.filter((item) => item.permission === "waiting")) {
+      const asker = toMainNode(trunkLike, agent.id) ? run.questions.find((question) => question.id === `q-perm-${call.toolUseId}`)?.sessionId : void 0;
+      stages.add(asker === void 0 ? current : mainStage(run, asker));
+    }
+  }
+  return stages;
+};
+var syncWaits = (run, at, trunkLike) => {
   const wanted = /* @__PURE__ */ new Map();
   const want = (stage, reason) => wanted.set(stage, (wanted.get(stage) ?? /* @__PURE__ */ new Set()).add(reason));
   for (const gate of Object.values(run.gates)) {
@@ -3485,9 +3661,10 @@ var syncWaits = (run, at) => {
       want(nodeStage(question.node), "question");
     }
   }
-  const current = currentStage(run);
-  if (openPermission(run) && run.stages[current].state !== "pending") {
-    want(current, "permission");
+  for (const stage of permissionStages(run, currentStage(run), trunkLike)) {
+    if (run.stages[stage].state !== "pending") {
+      want(stage, "permission");
+    }
   }
   for (const id of STAGE_ORDER) {
     const stage = run.stages[id];
@@ -4032,28 +4209,55 @@ var noteBranchWork = (state, sessionId, run, how, at) => {
   session.branchWork.sort(byWorkTime);
   addBranchSession(state.index.branchSessions, branchWorkKey(run), { sessionId, at });
 };
-var moveBranchWork = (state, oldId, newId) => {
+var noteTrunkEdit = (state, sessionId, run, at) => {
+  const session = recordOf(state, sessionId);
+  if (session && isTrunkBranch(state, run.branch)) {
+    keepTrunkEdit(session, at);
+  }
+};
+var keepTrunkEdit = (session, at) => {
+  if (session.trunkEditAt === void 0 || time(at) < time(session.trunkEditAt)) {
+    session.trunkEditAt = at;
+  }
+};
+var moveBranchWork = (state, oldId, newId, oldKey = oldId) => {
   const run = state.board.runs[newId];
   const drop = run === void 0 || isTrunkBranch(state, run.branch);
-  for (const session of Object.values(state.index.sessions)) {
+  const movers = /* @__PURE__ */ new Set();
+  for (const [sessionId, session] of Object.entries(state.index.sessions)) {
     if (!hasBranchWork(session, oldId)) {
       continue;
     }
+    movers.add(sessionId);
     const moved = [];
     for (const work of session.branchWork) {
       if (work.runId !== oldId) {
         addWork(moved, work);
       } else if (!drop) {
         addWork(moved, { ...work, runId: newId });
+      } else if (run !== void 0 && work.how === "edit") {
+        keepTrunkEdit(session, work.at);
       }
     }
     session.branchWork = moved.sort(byWorkTime);
   }
-  const entries = Object.hasOwn(state.index.branchSessions, oldId) ? state.index.branchSessions[oldId] : [];
-  delete state.index.branchSessions[oldId];
-  if (run && !drop) {
-    for (const entry of entries) {
-      addBranchSession(state.index.branchSessions, branchWorkKey(run), entry);
+  const newKey = run === void 0 ? void 0 : branchWorkKey(run);
+  if (newKey === oldKey) {
+    return;
+  }
+  const byRunId = oldKey === oldId;
+  const worksOnKey = (sessionId) => state.index.sessions[sessionId].branchWork.some((work) => state.board.runs[work.runId]?.branch === oldKey);
+  const keeps = (sessionId) => !byRunId && (!movers.has(sessionId) || worksOnKey(sessionId));
+  const entries = Object.hasOwn(state.index.branchSessions, oldKey) ? state.index.branchSessions[oldKey] : [];
+  const staying = entries.filter((entry) => keeps(entry.sessionId));
+  if (staying.length > 0) {
+    state.index.branchSessions[oldKey] = staying;
+  } else {
+    delete state.index.branchSessions[oldKey];
+  }
+  if (newKey !== void 0 && !drop) {
+    for (const entry of entries.filter((item) => byRunId || movers.has(item.sessionId))) {
+      addBranchSession(state.index.branchSessions, newKey, entry);
     }
   }
 };
@@ -4120,7 +4324,7 @@ var recordLine = (state, event, run) => {
     if (earliest && run) {
       noteBranchWork(state, event.sessionId, run, "start", event.at);
     }
-    session.prompts.push({ at: event.at, line: firstLine2(event.data.text), keys: [...event.data.keys], id: event.id });
+    session.prompts.push({ at: event.at, line: firstLine2(event.data.text.slice(0, PROMPT_LINE_CHARS)), keys: [...event.data.keys], id: event.id });
     session.prompts.sort(byLineTime);
     session.prompts.splice(0, session.prompts.length - PROMPTS_CAP);
   }
@@ -4295,7 +4499,8 @@ var syncMainCalls = (state, event) => {
 };
 var requestSessionId = (state, event) => sessionOfAgent(state, event.agentId) ?? event.sessionId;
 var mainTokenStage = (session, at) => {
-  const worked = session.branchWork.some((work) => time(work.at) <= time(at));
+  const edited = session.trunkEditAt !== void 0 && time(session.trunkEditAt) <= time(at);
+  const worked = edited || session.branchWork.some((work) => time(work.at) <= time(at));
   return worked ? "main" : "plan";
 };
 var noteMarker = (state, event, line) => {
@@ -4429,15 +4634,19 @@ var ensureSession = (state, event) => ownEntry(state.index.sessions, event.sessi
   const tokens = { points: [], byStage: {}, total: emptyCounts() };
   const cwd = normalizePath(event.cwd);
   const developerWait = { waits: 0, totalMs: 0, breaks: 0 };
-  return { startCwd: cwd, cwd, agentWorktrees: {}, runIds: [], startedAt: event.at, prompts: [], plans: [], branchWork: [], agentIds: [], messages: [], tokens, developerWait, resumes: [] };
+  return { startCwd: cwd, cwd, agentWorktrees: {}, runIds: [], startedAt: event.at, prompts: [], plans: [], branchWork: [], agentIds: [], messages: [], developerMessages: [], tokens, developerWait, resumes: [] };
 });
+var aliasRecord = (state, path) => {
+  const real = ownValue(state.index.worktreeAliases, path);
+  return real === void 0 ? void 0 : ownValue(state.index.worktrees, real);
+};
 var findWorktree = (state, path, live = false) => {
   let end = path.length;
   for (; ; ) {
     const candidate = path.slice(0, end);
-    const record = ownValue(state.index.worktrees, candidate);
+    const record = ownValue(state.index.worktrees, candidate) ?? aliasRecord(state, candidate);
     if (record !== void 0 && !(live && record.removedAt)) {
-      return candidate;
+      return record.path;
     }
     end = end === 0 ? -1 : path.lastIndexOf("/", end - 1);
     if (end < 0) {
@@ -4531,6 +4740,7 @@ var mergeRun = (target, run) => {
   target.startedAt = time(run.startedAt) < time(target.startedAt) ? run.startedAt : target.startedAt;
   target.key = target.key ?? run.key;
   target.title = target.title ?? run.title;
+  target.subject = target.subject ?? run.subject;
   target.plan = target.plan ?? run.plan;
   target.pr = target.pr ?? run.pr;
   if (run.join && (!target.join || time(run.join.at) > time(target.join.at))) {
@@ -4580,6 +4790,7 @@ var remapRunKeys = (entries, oldId, newId) => {
 var renameRun = (state, oldId, newId, config) => {
   const run = state.board.runs[oldId];
   const target = state.board.runs[newId];
+  const oldKey = branchWorkKey(run);
   delete state.board.runs[oldId];
   if (target) {
     mergeRun(target, run);
@@ -4612,7 +4823,61 @@ var renameRun = (state, oldId, newId, config) => {
   }
   remapRunKeys(state.index.fullRuns, oldId, newId);
   remapRunKeys(state.index.warned, oldId, newId);
-  moveBranchWork(state, oldId, newId);
+  moveBranchWork(state, oldId, newId, oldKey);
+  remapLanes(state, oldId, newId);
+};
+var remapLanes = (state, oldId, newId) => {
+  const branch = state.board.runs[newId].branch;
+  const emptied = /* @__PURE__ */ new Set();
+  for (const lane of state.board.branches.lanes.filter((item) => item.runIds.includes(oldId))) {
+    lane.runIds = lane.runIds.filter((id) => id !== oldId);
+    if (lane.branch === branch && !lane.runIds.includes(newId)) {
+      lane.runIds.push(newId);
+    }
+    if (lane.runIds.length === 0) {
+      emptied.add(lane);
+    }
+  }
+  state.board.branches.lanes = state.board.branches.lanes.filter((lane) => !emptied.has(lane));
+};
+var mergeAlias = (state, alias, record, config) => {
+  const path = record.path;
+  const aliased = ownValue(state.index.worktrees, alias);
+  const branchFits = aliased?.branch === void 0 || aliased.guessed === true || aliased.branch === record.branch;
+  const sameLane = aliased === void 0 || aliased.removedAt === void 0 && branchFits;
+  if (alias === path || !sameLane) {
+    return;
+  }
+  state.index.worktreeAliases[alias] = path;
+  if (aliased === void 0) {
+    return;
+  }
+  const oldId = runIdFor(state, alias);
+  if (aliased.forkAt !== void 0) {
+    record.base = aliased.base;
+    record.forkAt = aliased.forkAt;
+    record.forkSha = aliased.forkSha;
+  }
+  delete state.index.worktrees[alias];
+  for (const session of Object.values(state.index.sessions)) {
+    for (const [agentKey, worktree] of Object.entries(session.agentWorktrees)) {
+      if (worktree === alias) {
+        session.agentWorktrees[agentKey] = path;
+      }
+    }
+  }
+  const run = ownValue(state.board.runs, oldId);
+  const newId = runIdFor(state, path);
+  if (!run) {
+    return;
+  }
+  run.worktree = path;
+  if (oldId !== newId) {
+    const fork = run.fork;
+    renameRun(state, oldId, newId, config);
+    const merged = state.board.runs[newId];
+    merged.fork = merged.fork ?? fork;
+  }
 };
 var onWorktreeFact = (state, data, config) => {
   const path = normalizePath(data.worktree);
@@ -4624,9 +4889,15 @@ var onWorktreeFact = (state, data, config) => {
       delete state.index.worktrees[other];
     }
   }
-  const hadBranch = record.branch !== void 0;
+  const guessed = record.guessed === true && record.removedAt === void 0;
+  const hadBranch = record.branch !== void 0 && !guessed;
+  const guessedId = guessed && record.branch !== data.branch ? runIdFor(state, path) : void 0;
   record.branch = data.branch;
+  delete record.guessed;
   delete record.removedAt;
+  if (data.alias !== void 0) {
+    mergeAlias(state, normalizePath(data.alias), record, config);
+  }
   for (const session of Object.values(state.index.sessions)) {
     for (const [agentKey, worktree] of Object.entries(session.agentWorktrees)) {
       if (unknown.includes(worktree)) {
@@ -4638,6 +4909,9 @@ var onWorktreeFact = (state, data, config) => {
     return;
   }
   const newId = runIdFor(state, path);
+  if (guessedId !== void 0 && ownValue(state.board.runs, guessedId)) {
+    renameRun(state, guessedId, newId, config);
+  }
   for (const worktree of unknown) {
     const oldId = `${baseName(worktree)}:?`;
     if (state.board.runs[oldId]) {
@@ -4679,6 +4953,11 @@ var worktreeFromPaths = (state, paths, config) => {
     }
   }
   return best;
+};
+var pathRuns = (state, event) => {
+  const session = ensureSession(state, event);
+  const worktrees = new Set(eventPaths(session, event).flatMap((path) => findWorktree(state, path, true) ?? []));
+  return [...worktrees].flatMap((worktree) => ownValue(state.board.runs, runIdFor(state, worktree)) ?? []);
 };
 var resolveFrom = (base, path) => {
   if (path === "~") {
@@ -4878,18 +5157,41 @@ var worktreeAddIn = (steps) => {
 };
 var addBase = (word, branch) => {
   const base = word?.replace(/^origin\//, "");
-  const none = base === void 0 || base === "HEAD" || base === "@" || /^[0-9a-f]{7,40}$/i.test(base);
+  const none = base === void 0 || base === "HEAD" || base === "@" || isObjectName(base);
   return none || base === branch ? void 0 : base;
+};
+var isObjectName = (word) => /^[0-9a-f]{7,40}$/i.test(word);
+var checkedOutBranch = (commitIsh, path) => {
+  if (commitIsh === void 0) {
+    const name = baseName(path);
+    return isBranchName(name) ? name : void 0;
+  }
+  const revision = /^(?:[A-Z_]+_)?HEAD$/.test(commitIsh) || /^(?:origin|refs)\//.test(commitIsh) || isObjectName(commitIsh);
+  return revision || !isBranchName(commitIsh) ? void 0 : commitIsh;
 };
 var worktreeAddFrom = (args, directoryWord, cwd) => {
   const positional = [];
   let branch;
+  let detach = false;
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === "-b" || args[i] === "-B") {
-      branch = args[i + 1];
+    const word = args[i];
+    if (word === "--reason") {
       i += 1;
-    } else if (!args[i].startsWith("-")) {
-      positional.push(args[i]);
+    } else if (word === "--detach") {
+      detach = true;
+    } else if (/^-[^-]/.test(word)) {
+      const flags = word.slice(1);
+      const at = flags.search(/[bB]/);
+      const shorts = at < 0 ? flags : flags.slice(0, at);
+      detach = detach || shorts.includes("d");
+      if (at >= 0 && at === flags.length - 1) {
+        branch = args[i + 1];
+        i += 1;
+      } else if (at >= 0) {
+        branch = flags.slice(at + 1);
+      }
+    } else if (!word.startsWith("-")) {
+      positional.push(word);
     }
   }
   const target = literalWord(positional[0]);
@@ -4898,13 +5200,28 @@ var worktreeAddFrom = (args, directoryWord, cwd) => {
     return void 0;
   }
   const path = resolveFrom(resolveFrom(cwd, directory), target);
+  if (!path) {
+    return void 0;
+  }
+  if (branch === void 0) {
+    const commitIsh = positional.length > 1 ? literalWord(positional[1]) : void 0;
+    const expands = positional.length > 1 && commitIsh === void 0;
+    const checkedOut = detach || expands ? void 0 : checkedOutBranch(commitIsh, path);
+    return checkedOut === void 0 ? { path } : { path, branch: checkedOut, guessed: true };
+  }
   const named = literalWord(branch);
-  const base = branch === void 0 ? void 0 : addBase(literalWord(positional[1]), named);
-  return path ? { path, branch: named, base } : void 0;
+  return { path, branch: named, base: addBase(literalWord(positional[1]), named) };
 };
 var registerWorktreeAdd = (state, event, add, agentKey, config) => {
   const record = ownEntry(state.index.worktrees, add.path, () => ({ path: add.path }));
-  record.branch = record.removedAt !== void 0 && add.branch !== void 0 ? add.branch : record.branch ?? add.branch;
+  if (add.branch !== void 0 && (record.removedAt !== void 0 || record.branch === void 0)) {
+    record.branch = add.branch;
+    if (add.guessed) {
+      record.guessed = true;
+    } else {
+      delete record.guessed;
+    }
+  }
   delete record.removedAt;
   record.base = add.base;
   record.forkAt = event.at;
@@ -5021,11 +5338,33 @@ var endRun = (state, session, run, at) => {
   run.endedAt = ends.reduce((latest, end) => end !== void 0 && later(end, latest) ? end : latest, at);
   return true;
 };
-var endSession = (state, session, landed, at) => {
+var fixStageEnd = (state, run, at) => {
+  const ended = run.fixes.filter((fix) => fix.agentId === "main" && fix.state === "done" && !fix.reReview && fix.sessionId);
+  const ends = ended.map((fix) => recordOf(state, fix.sessionId ?? "")?.endedAt);
+  return ends.reduce((latest, end) => end !== void 0 && later(end, latest) ? end : latest, at);
+};
+var endMainFixes = (state, session, sessionId, at) => {
+  const changed = [];
+  const runs = session.runIds.map((id) => state.board.runs[id]).filter((run) => run !== void 0);
+  for (const run of runs) {
+    const running = run.fixes.filter((fix) => fix.agentId === "main" && fix.state === "running" && fix.sessionId === sessionId);
+    for (const fix of running) {
+      fix.state = "done";
+    }
+    if (running.length > 0) {
+      checkFix(run, fixStageEnd(state, run, at));
+      changed.push(run);
+    }
+  }
+  return changed;
+};
+var endSession = (state, session, sessionId, landed, at) => {
   const others = session.runIds.map((id) => state.board.runs[id]).filter((run) => run !== void 0 && run !== landed);
   const withMain = others.filter((run) => Object.hasOwn(run.agents, "main"));
   const ending = landed ? [landed, ...withMain] : withMain;
-  return ending.filter((run) => endRun(state, session, run, at));
+  const ended = ending.filter((run) => endRun(state, session, run, at));
+  const fixed = endMainFixes(state, session, sessionId, at).filter((run) => !ended.includes(run));
+  return [...ended, ...fixed];
 };
 var wakeAgent = (state, agentId) => {
   if (!state.index.staleAgents[agentId]) {
@@ -5080,7 +5419,7 @@ var endGoneSessions = (state, now) => {
     }
     session.endedAt = last;
     session.goneAt = now;
-    for (const run of endSession(state, session, sessionEndRun(state, session), last)) {
+    for (const run of endSession(state, session, sessionId, sessionEndRun(state, session), last)) {
       changed.add(run);
     }
     const line = { at: last, sessionId };
@@ -5187,21 +5526,56 @@ var phaseProgress = (kind, current) => {
   return { kind, total: 3, done: current, parts, current };
 };
 var LINE_SUFFIX = /(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L\d+)?)$/;
-var fixItemFile = (file, worktree) => {
+var fixItemFile = (file, worktree, aliases) => {
   const bare = file.trim().replace(LINE_SUFFIX, "").replace(/^(?:\.\/)+/, "");
   if (!isAbsolute2(bare)) {
     return bare;
   }
-  const path = normalizePath(bare);
+  const path = resolveAlias(normalizePath(bare), aliases);
   return path !== worktree && isInside2(path, worktree) ? path.slice(worktree.length + 1) : bare;
 };
-var itemPath = (worktree, item) => {
+var itemPath = (worktree, item, aliases) => {
   if (item.includes(REDACTED2)) {
     return void 0;
   }
-  return isAbsolute2(item) ? normalizePath(item) : normalizePath(`${worktree}/${item}`);
+  return resolveAlias(isAbsolute2(item) ? normalizePath(item) : normalizePath(`${worktree}/${item}`), aliases);
 };
 var runsGitPush = (command) => shellSegments(command).some((segment) => gitArgs(shellWords(segment))?.[0] === "push");
+var PUSH_VALUE_OPTIONS = /* @__PURE__ */ new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]);
+var PUSH_NOTHING = /* @__PURE__ */ new Set(["--dry-run", "-n", "--delete", "-d"]);
+var REDIRECT = /^\d*[<>&]/;
+var pushDestination = (refspec, current) => {
+  const spec = refspec.replace(/^\+/, "");
+  if (spec.startsWith(":")) {
+    return void 0;
+  }
+  const destination = spec.slice(spec.indexOf(":") + 1).replace(/^refs\/heads\//, "");
+  return destination === "HEAD" ? current : destination;
+};
+var gitPushTargets = (command, current) => shellSegments(command).flatMap((segment) => {
+  const args = gitArgs(shellWords(segment));
+  if (args?.[0] !== "push") {
+    return [];
+  }
+  const end = args.findIndex((word, at) => at > 0 && REDIRECT.test(word));
+  const words = end < 0 ? args.slice(1) : args.slice(1, end);
+  if (words.some((word) => PUSH_NOTHING.has(word))) {
+    return [];
+  }
+  const positional = [];
+  for (let at = 0; at < words.length; at += 1) {
+    if (!words[at].startsWith("-")) {
+      positional.push(words[at]);
+    } else if (PUSH_VALUE_OPTIONS.has(words[at])) {
+      at += 1;
+    }
+  }
+  const refspecs = positional.slice(1);
+  if (refspecs.length === 0) {
+    return words.includes("--tags") ? [] : [current];
+  }
+  return refspecs.flatMap((refspec) => pushDestination(refspec, current) ?? []);
+});
 var homeOf = (state, agentId) => {
   const runId = ownValue(state.index.agentRuns, agentId);
   const run = runId === void 0 ? void 0 : ownValue(state.board.runs, runId);
@@ -5228,14 +5602,14 @@ var clearItems = (entry) => {
   delete entry.items;
   delete entry.matched;
 };
-var markItems = (entry, path) => {
+var markItems = (entry, path, aliases) => {
   const { worktree, items, matched } = entry;
   if (worktree === void 0 || !items || !matched) {
     return false;
   }
   let changed = false;
   items.forEach((item, index) => {
-    if (!matched[index] && itemPath(worktree, item) === path) {
+    if (!matched[index] && itemPath(worktree, item, aliases) === path) {
       matched[index] = true;
       changed = true;
     }
@@ -5256,34 +5630,37 @@ var fixPackage = (run, fix, config) => {
   const pkg = config.packages.find((item) => item.id === id);
   return pkg && pkg.paths.length > 0 ? pkg.id : void 0;
 };
-var fixItems = (run, fix, config) => {
+var fixItems = (run, fix, config, aliases) => {
   const reviewers = run.reviewers.filter((reviewer) => reviewer.state === "changes");
   const followups = reviewers.flatMap((reviewer) => ownValue(run.agents, reviewer.agentId)?.report?.block?.followups ?? []);
-  const files = followups.flatMap((item) => item.type === "fix" && item.file ? [fixItemFile(item.file, run.worktree)] : []).filter((file) => file !== "");
+  const files = followups.flatMap((item) => item.type === "fix" && item.file ? [fixItemFile(item.file, run.worktree, aliases)] : []).filter((file) => file !== "");
   const pkg = fixPackage(run, fix, config);
   const inPackage = pkg === void 0 ? [] : files.filter((file) => packageOf(file, config) === pkg);
   return (inPackage.length > 0 ? inPackage : files).slice(0, PROGRESS_ITEMS_CAP);
 };
-var fixTarget = (run, home, agentId, config) => {
+var fixTarget = (run, home, agentId, config, aliases) => {
   const fixRun = agentFix(run, agentId) ? run : home;
   const fix = agentFix(fixRun, agentId);
-  const items = fix ? fixItems(fixRun, fix, config) : [];
+  const items = fix ? fixItems(fixRun, fix, config, aliases) : [];
   return items.length > 0 ? { worktree: fixRun.worktree, items } : void 0;
 };
-var matchedPaths = (entry) => {
+var matchedPaths = (entry, aliases) => {
   const paths = /* @__PURE__ */ new Set();
   const { worktree, items = [], matched = [] } = entry;
   items.forEach((item, index) => {
-    const path = worktree === void 0 ? void 0 : itemPath(worktree, item);
+    const path = worktree === void 0 ? void 0 : itemPath(worktree, item, aliases);
     if (matched[index] && path !== void 0) {
       paths.add(path);
     }
   });
   return paths;
 };
-var openedPaths = (entry) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry)]);
-var matchesOf = (worktree, items, paths) => items.map((item) => paths.has(itemPath(worktree, item) ?? ""));
-var setFixItems = (entry, agent, target) => {
+var openedPaths = (entry, aliases) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry, aliases)]);
+var matchesOf = (worktree, items, paths, aliases) => {
+  const real = new Set([...paths].map((path) => resolveAlias(path, aliases)));
+  return items.map((item) => real.has(itemPath(worktree, item, aliases) ?? ""));
+};
+var setFixItems = (entry, agent, target, aliases) => {
   if (!target) {
     clearItems(entry);
     if (agent.progress?.kind !== "build") {
@@ -5291,10 +5668,10 @@ var setFixItems = (entry, agent, target) => {
     }
     return;
   }
-  const before = matchedPaths(entry);
+  const before = matchedPaths(entry, aliases);
   entry.worktree = target.worktree;
   entry.items = target.items;
-  entry.matched = matchesOf(target.worktree, target.items, before);
+  entry.matched = matchesOf(target.worktree, target.items, before, aliases);
   agent.progress = itemsProgress("fixes", entry.matched);
 };
 var beginLeg = (state, run, agentId, at, config) => {
@@ -5315,7 +5692,8 @@ var beginLeg = (state, run, agentId, at, config) => {
   const entry = ownEntry(state.index.agentProgress, agentId, () => ({ legAt, at, atMs: time(at) }));
   delete agent.progress;
   if (agent.stage === "build") {
-    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config));
+    const aliases = state.index.worktreeAliases;
+    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config, aliases), aliases);
   } else if (agent.stage === "pr") {
     const known = Object.values(state.board.runs).some((item) => item.pr !== void 0 && knowsPr(item, agentId, config));
     agent.progress = phaseProgress("pr", known ? FINISHING : PUSH);
@@ -5326,7 +5704,8 @@ var refreshFixItems = (state, run, agentId, at, config) => {
   if (!found) {
     return;
   }
-  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config));
+  const aliases = state.index.worktreeAliases;
+  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config, aliases), aliases);
   touch(found.entry, at);
 };
 var noteRead = (state, agentId, filePath, at) => {
@@ -5335,10 +5714,11 @@ var noteRead = (state, agentId, filePath, at) => {
     return;
   }
   const { entry, agent } = found;
-  const path = normalizePath(filePath);
+  const aliases = state.index.worktreeAliases;
+  const path = resolveAlias(normalizePath(filePath), aliases);
   touch(entry, at);
   if (entry.items && entry.matched) {
-    if (markItems(entry, path)) {
+    if (markItems(entry, path, aliases)) {
       agent.progress = itemsProgress("files", entry.matched);
     }
     return;
@@ -5355,9 +5735,10 @@ var noteEdit = (state, agentId, filePath, at) => {
     return;
   }
   const { entry, agent } = found;
+  const aliases = state.index.worktreeAliases;
   touch(entry, at);
   if (entry.items && entry.matched) {
-    if (markItems(entry, normalizePath(filePath))) {
+    if (markItems(entry, resolveAlias(normalizePath(filePath), aliases), aliases)) {
       agent.progress = itemsProgress("fixes", entry.matched);
     }
     return;
@@ -5403,7 +5784,8 @@ var applyDiff = (state, data, at, truncated) => {
   const { entry, agent, run } = found;
   touch(entry, at);
   const counted = data.total >= 1 && data.total <= PROGRESS_ITEMS_CAP && data.files.length === data.total;
-  const opened = openedPaths(entry);
+  const aliases = state.index.worktreeAliases;
+  const opened = openedPaths(entry, aliases);
   if (!counted) {
     entry.seen = [...opened].slice(0, PROGRESS_SEEN_CAP);
     clearItems(entry);
@@ -5414,7 +5796,7 @@ var applyDiff = (state, data, at, truncated) => {
   const items = [...data.files];
   entry.worktree = worktree;
   entry.items = items;
-  entry.matched = matchesOf(worktree, items, opened);
+  entry.matched = matchesOf(worktree, items, opened, aliases);
   delete entry.seen;
   agent.progress = itemsProgress("files", entry.matched);
   return run;
@@ -5435,10 +5817,14 @@ var prFromUrl = (text) => {
   return match ? Number(match[1]) : void 0;
 };
 var mergeWaits = (config) => config.github.mergeBy !== "agent";
-var openPr = (run, pr, line, config) => {
+var ghPollingOff = (state, config) => {
+  const github = state.board.github;
+  return config.github.repo === "" || github.checkedAt !== void 0 && !github.polling;
+};
+var openPr = (run, pr, line, config, unpolled = false) => {
   const { at } = line;
   if (!run.pr) {
-    run.pr = { ...pr, state: "open", promotions: [] };
+    run.pr = { ...pr, state: "open", promotions: [], ...unpolled ? { unpolled: true } : {} };
     logRun(run, line, `PR #${pr.number} opened`, "normal");
   }
   if (pr.title) {
@@ -5450,7 +5836,7 @@ var openPr = (run, pr, line, config) => {
     setStage(run, "pr", "running", at);
   }
   setStage(run, "pr", "done", at);
-  if (run.pr.state === "open" && mergeWaits(config)) {
+  if (run.pr.state === "open" && mergeWaits(config) && !run.pr.unpolled) {
     setGate(run, "merge", "waiting", line, "derived");
   }
 };
@@ -5490,6 +5876,9 @@ var noteClosed = (current, pr, at) => {
 var onTrunkPr = (state, pr, at, config) => {
   const runs = Object.values(state.board.runs).filter((run) => run.branch === pr.headRefName);
   for (const run of runs) {
+    if (run.pr) {
+      delete run.pr.unpolled;
+    }
     openPr(run, { number: pr.number, url: pr.url, title: pr.title, createdAt: pr.createdAt }, factStamp(at), config);
     applyOpener(state, run);
     const current = run.pr;
@@ -5609,6 +5998,7 @@ var onGitFact = (state, data, config) => {
     }
   } else {
     for (const run of runs) {
+      run.subject = data.subject;
       if (!run.pr && !run.plan?.note) {
         run.title = data.subject;
       }
@@ -5823,7 +6213,8 @@ var onQuestion = (state, event, config, touched = []) => {
   const line = markerStamp(state, event, run);
   noteMarker(state, event, line);
   const source = { agentId: "main", role: "main" };
-  const node = questionNode(run, data.node);
+  const own = !data.node && toMainNode(isTrunkLike(run.branch, config), event.agentId);
+  const node = own ? mainNode(run, line.sessionId) : questionNode(run, data.node);
   const question = { id: data.id, text: data.text, blocking: data.blocking === true, options: data.options ?? [], origin: "marker", source, node, sessionId: line.sessionId, createdAt: event.at };
   const relayed = relayedQuestion(state, markerSession(state, event, run), data.text, data.relays, event.at);
   if (relayed) {
@@ -5835,9 +6226,11 @@ var onQuestion = (state, event, config, touched = []) => {
 };
 
 // src/model/messages.ts
+var QUESTION_TEXT = 300;
+var isMarkerOrAskTool = (question) => question.origin === "marker" || question.origin === "ask-tool";
 var isOpenMainAsk = (question) => {
-  const asked = question.origin === "marker" || question.origin === "ask-tool";
-  return asked && question.state === "open" && question.audience === "user" && question.source.agentId === "main";
+  const own = question.state === "open" && question.audience === "user" && question.source.agentId === "main";
+  return isMarkerOrAskTool(question) && own;
 };
 var within = (at, from, to) => at !== void 0 && time(at) >= from && time(at) <= to;
 var sessionRuns2 = (state, session) => session.runIds.map((id) => state.board.runs[id]).filter((run) => run !== void 0);
@@ -5854,7 +6247,13 @@ var addSessionMessage = (session, runs, message, from, to) => {
   const waits = runs.some((item) => Object.values(item.gates).some((gate) => own(gate.sessionId) && gate.state === "waiting" && within(gate.waitingSince, from, to)));
   const planned = session.plans.some((plan) => within(plan.at, from, to));
   const copy = { ...message, kind: kindOf(asks || waits, planned) };
-  session.messages = keepMessages([...session.messages.filter((item) => item.id !== copy.id), copy].sort(byTime));
+  const messages = [...session.messages.filter((item) => item.id !== copy.id), copy].sort(byTime);
+  session.messages = keepMessages(messages);
+  const dropped = messages.slice(0, messages.length - session.messages.length);
+  const newestDropped = dropped.at(-1);
+  if (newestDropped) {
+    session.developerMessages = (session.developerMessages ?? []).filter((item) => time(item.at) > time(newestDropped.at));
+  }
 };
 var addMainMessage = (state, event, run) => {
   const session = state.index.sessions[event.sessionId];
@@ -5873,18 +6272,50 @@ var addMainMessage = (state, event, run) => {
   const text = event.data.lastMessage;
   const truncated = event.data.lastMessageTruncated === true;
   const message = { id: event.id, sessionId: event.sessionId, turnStartedAt, at: event.at, text, truncated, kind };
+  if (session.turnStartedBy !== void 0) {
+    message.startedBy = session.turnStartedBy;
+  }
   home.messages = keepMessages([...home.messages, message]);
   addSessionMessage(session, runs, message, from, to);
   for (const question of asks) {
     question.messageId = message.id;
   }
 };
+var addDeveloperMessages = (session, added) => {
+  const ids = new Set(added.map((item) => item.id));
+  const kept = (session.developerMessages ?? []).filter((item) => !ids.has(item.id));
+  session.developerMessages = keepDeveloperMessages([...kept, ...added]);
+};
+var addDeveloperPrompt = (session, event, answered) => {
+  const data = event.data;
+  if (event.agentId || data.kind !== "user") {
+    return;
+  }
+  const asked = answered.filter(isMarkerOrAskTool).sort((a, b) => time(a.createdAt) - time(b.createdAt));
+  const message = { id: event.id, sessionId: event.sessionId, at: event.at, kind: "prompt", text: data.text, truncated: data.length > data.text.length };
+  if (asked.length > 0) {
+    message.questions = asked.map((question) => question.text.slice(0, QUESTION_TEXT));
+  }
+  addDeveloperMessages(session, [message]);
+};
+var addDeveloperAnswers = (session, event) => {
+  const answers = event.data.answers;
+  if (event.agentId || event.data.tool !== "AskUserQuestion" || !answers) {
+    return;
+  }
+  const added = answers.map((item, index) => {
+    const truncated = item.answer.length >= ANSWER_TEXT_CAP || (item.notes?.length ?? 0) >= ANSWER_TEXT_CAP;
+    const message = { id: `${event.id}-${index + 1}`, sessionId: event.sessionId, at: event.at, kind: "answer", text: item.answer, truncated, questions: [item.question] };
+    return item.notes ? { ...message, notes: item.notes } : message;
+  });
+  addDeveloperMessages(session, added);
+};
 
 // src/model/overhead.ts
 var OVERHEAD_CHARS_PER_TOKEN = 3;
 var LISTING_CHARS = 513;
 var TOOL_DEFINITION_CHARS = { plan: 1088, gate: 644, question: 1071 };
-var SKILL_BODY_CHARS = 7995;
+var SKILL_BODY_CHARS = 8278;
 var SKILL_NAMES = /* @__PURE__ */ new Set(["nurselog", "nurselog:nurselog"]);
 var MAIN = "main";
 var OVERHEAD_PART_KEYS = ["markers", "reportParagraph", "listing", "toolDefinitions", "markerCalls", "reportBlocks", "skill"];
@@ -6055,7 +6486,7 @@ var packageStream = (run, pkg) => {
   return { id: planned?.id ?? pkg, package: pkg };
 };
 var fixStreamFor = (run, target) => isFallbackStream(run, target?.id) ? void 0 : target?.id;
-var streamFor = (run, spawn2, config) => {
+var streamFor = (state, run, spawn2, config) => {
   if (!spawn2) {
     return void 0;
   }
@@ -6065,7 +6496,7 @@ var streamFor = (run, spawn2, config) => {
     }
   }
   const haystack = patternInput(`${spawn2.prompt}
-${spawn2.paths.map((path) => relativePath(run, path)).join("\n")}`);
+${spawn2.paths.map((path) => relativePath(run, path, state.index.worktreeAliases)).join("\n")}`);
   let best;
   for (const [pkg, pattern] of compile(config).packagePaths) {
     const match = pattern.exec(haystack);
@@ -6079,11 +6510,13 @@ ${spawn2.paths.map((path) => relativePath(run, path)).join("\n")}`);
   return packageStream(run, best.pkg);
 };
 var reviewerWithChanges = (run) => [...run.reviewers].reverse().find((reviewer) => reviewer.state === "changes");
-var startFix = (run, reviewer, streamId, agentId, line) => {
+var sessionReviewerWithChanges = (run, sessionId, sessions) => [...run.reviewers].reverse().find((reviewer) => reviewer.state === "changes" && ownValue(sessions, reviewer.agentId) === sessionId);
+var openFixOf = (fix, agentId, sessionId) => fix.state === "running" && fix.agentId === agentId && (sessionId === void 0 || fix.sessionId === sessionId);
+var startFix = (run, reviewer, streamId, agentId, line, sessionId) => {
   const base = `fix-${streamId ?? "main"}`;
   const numbered = new RegExp(`^${escapeRegExp2(base)}-\\d+$`);
   const existing = run.fixes.filter((fix2) => fix2.id === base || numbered.test(fix2.id));
-  const open = existing.find((fix2) => fix2.state === "running" && fix2.agentId === agentId);
+  const open = existing.find((fix2) => openFixOf(fix2, agentId, sessionId));
   if (open) {
     return open;
   }
@@ -6098,6 +6531,7 @@ var startFix = (run, reviewer, streamId, agentId, line) => {
   return fix;
 };
 var sameSession = (sessions, a, b) => !sessions[a] || !sessions[b] || sessions[a] === sessions[b];
+var atBudget = (agent) => agent.budget.toolCalls.level === "limit" || agent.budget.verifyRounds.level === "limit";
 var attachStream = (run, agent, target, line, sessions) => {
   const { at } = line;
   let stream = run.streams.find((item) => item.id === target.id);
@@ -6110,7 +6544,7 @@ var attachStream = (run, agent, target, line, sessions) => {
   const previousId = stream.agentIds[stream.agentIds.length - 1];
   const previous = previousId ? run.agents[previousId] : void 0;
   if (previous && previous.id !== agent.id && previous.state !== "failed" && sameSession(sessions, previous.id, agent.id)) {
-    previous.state = "handed";
+    previous.state = atBudget(previous) ? "handed" : previous.state;
     logRun(run, line, `continues in run ${stream.agentIds.length + 1}`, "normal", agent.id);
   }
   if (!stream.agentIds.includes(agent.id)) {
@@ -6129,10 +6563,11 @@ var reopenStream = (run, agent, at) => {
   stream.state = "running";
   checkBuild(run, at);
 };
-var linkReReviews = (run, reviewerId, agentId, at) => {
+var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
   let linked = false;
   for (const fix of run.fixes) {
-    if (fix.reviewerId === reviewerId && !fix.reReview) {
+    const ownSession = sessionId === void 0 || fix.sessionId === sessionId;
+    if (fix.reviewerId === reviewerId && !fix.reReview && ownSession) {
       fix.reReview = { agentId, state: "running" };
       linked = true;
       if (fix.state === "running" && fix.agentId === "main") {
@@ -6167,6 +6602,7 @@ var startImplementer = (run, agent, target, line, sessions) => {
     setStage(run, "build", "running", line.at);
   }
 };
+var reviewSession = (run, line, config) => isTrunkLike(run.branch, config) ? line.sessionId : void 0;
 var startReviewer = (run, agent, line, config) => {
   const { at } = line;
   const short = roleConfig(agent.role, config).short ?? agent.role;
@@ -6181,7 +6617,7 @@ var startReviewer = (run, agent, line, config) => {
     reviewer.agentId = agent.id;
     reviewer.state = "running";
     reviewer.model = agent.model ?? reviewer.model;
-    linkReReviews(run, short, agent.id, at);
+    linkReReviews(run, short, agent.id, at, reviewSession(run, line, config));
     logRun(run, line, `re-review (round ${reviewer.round})`, "normal", agent.id);
   } else {
     reviewer = { id: short, role: agent.role, agentId: agent.id, state: "running", round: 1, fixCount: 0 };
@@ -6192,7 +6628,7 @@ var startReviewer = (run, agent, line, config) => {
   }
   checkReview(run, at);
 };
-var resumeRoleStage = (run, agent, line) => {
+var resumeRoleStage = (run, agent, line, config) => {
   const { at } = line;
   const fix = agentFix(run, agent.id);
   const changes = reviewerWithChanges(run);
@@ -6208,7 +6644,7 @@ var resumeRoleStage = (run, agent, line) => {
     reopenStream(run, agent, at);
   } else if (reviewer && reviewer.agentId === agent.id) {
     reviewer.state = "running";
-    linkReReviews(run, reviewer.id, agent.id, at);
+    linkReReviews(run, reviewer.id, agent.id, at, reviewSession(run, line, config));
     checkReview(run, at);
   }
 };
@@ -6278,7 +6714,7 @@ var detachStream = (run, agent) => {
   }
 };
 var rederiveImplementer = (state, run, agent, spawn2, line, config) => {
-  const fromSpawn = streamFor(run, spawn2, config);
+  const fromSpawn = streamFor(state, run, spawn2, config);
   const fix = agentFix(run, agent.id);
   if (fix) {
     fix.streamId = fixStreamFor(run, fromSpawn);
@@ -6309,7 +6745,8 @@ var swapId = (id, a, b) => {
   return id === b ? a : id;
 };
 var swapBindings = (run, a, b, at) => {
-  for (const stream of run.streams) {
+  const streamsMove = !a.fromBehaviour && !b.fromBehaviour;
+  for (const stream of streamsMove ? run.streams : []) {
     stream.agentIds = stream.agentIds.map((id) => swapId(id, a.id, b.id));
     const newest2 = run.agents[stream.agentIds[stream.agentIds.length - 1]];
     if (newest2 && (newest2 === a || newest2 === b)) {
@@ -6331,7 +6768,9 @@ var swapBindings = (run, a, b, at) => {
       fix.state = run.agents[fix.agentId].state;
     }
   }
-  [a.streamId, b.streamId] = [b.streamId, a.streamId];
+  if (streamsMove) {
+    [a.streamId, b.streamId] = [b.streamId, a.streamId];
+  }
   [a.reviewerId, b.reviewerId] = [b.reviewerId, a.reviewerId];
   checkBuild(run, at);
   checkReview(run, at);
@@ -6396,10 +6835,8 @@ var finalizeWorker = (run, agent, at, config) => {
     return;
   }
   if (agent.stage === "build") {
-    const budget = agent.budget;
-    const atBudget = budget.toolCalls.level === "limit" || budget.verifyRounds.level === "limit";
     if (agent.state !== "handed") {
-      agent.state = hasReport ? atBudget ? "handed" : "done" : "failed";
+      agent.state = hasReport ? atBudget(agent) ? "handed" : "done" : "failed";
     }
     const stream = run.streams.find((item) => item.id === agent.streamId);
     if (stream && stream.agentIds[stream.agentIds.length - 1] === agent.id) {
@@ -6470,13 +6907,13 @@ var endCopies = (state, home, agent, line, config) => {
     settleNodes(run, copy, line, config);
   }
 };
-var resumeCopies = (state, home, agentId, line) => {
+var resumeCopies = (state, home, agentId, line, config) => {
   for (const run of copyRuns(state, home, agentId)) {
     const copy = run.agents[agentId];
     copy.state = "running";
     copy.resumedAt = line.at;
     delete copy.endedAt;
-    resumeRoleStage(run, copy, line);
+    resumeRoleStage(run, copy, line, config);
   }
 };
 var changedCopyRuns = (state, event, run) => {
@@ -6568,16 +7005,19 @@ var onPrompt = (state, event, config, answered) => {
   }
   answered.push(...handleHandbacks(state, session, event));
   const run = homeRun(state, event, config);
-  adoptPrompt(run, { at: event.at, text: data.text, keys: data.keys }, config);
+  adoptPrompt(run, { at: event.at, text: data.text.slice(0, PROMPT_LINE_CHARS), keys: data.keys }, config);
+  const closed = [];
   for (const other of session.runIds.map((id) => state.board.runs[id])) {
     const open = (other?.questions ?? []).filter((question) => answeredByPrompt(state, question, event));
     for (const question of open) {
       closeQuestion(other, question, "answered", event, "terminal");
     }
+    closed.push(...open);
     if (open.length > 0 && other !== run) {
       answered.push(other);
     }
   }
+  addDeveloperPrompt(session, event, closed);
   return run;
 };
 var reportBeforeResume = (agent, at) => {
@@ -6625,6 +7065,9 @@ var onAgentPre = (state, run, parentAgent, event, config) => {
   if (input.model) {
     spawn2.model = input.model;
   }
+  if (input.description) {
+    spawn2.description = input.description;
+  }
   state.index.spawns[spawn2.toolUseId] = spawn2;
   const compiled = compile(config);
   const promptKey = run.key ? void 0 : compiled.promptKey;
@@ -6637,9 +7080,16 @@ var onAgentPre = (state, run, parentAgent, event, config) => {
   }
 };
 var keepSpawnStream = (state, run, agentId, spawn2, config) => {
-  const target = roleConfig(spawn2.subagentType, config).stage === "build" ? streamFor(run, spawn2, config) : void 0;
+  const target = roleConfig(spawn2.subagentType, config).stage === "build" ? streamFor(state, run, spawn2, config) : void 0;
   if (target) {
     state.index.agentStreams[agentId] = { id: target.id, package: target.package, at: spawn2.at, atMs: spawn2.atMs };
+  }
+};
+var keepDescription = (agent, spawn2) => {
+  if (spawn2?.description === void 0) {
+    delete agent.description;
+  } else {
+    agent.description = spawn2.description;
   }
 };
 var retireSpawn = (state, toolUseId) => {
@@ -6687,14 +7137,16 @@ var rebindSpawn = (state, run, spawn2, data, line, config) => {
     swapBindings(run, previous, agent, at);
     previous.spawnToolUseId = other?.toolUseId;
     previous.background = other?.background ?? previous.background;
+    keepDescription(previous, other);
   } else {
-    if (previous && previous.stage === "build" && !run.fixes.some((fix) => fix.agentId === previous.id)) {
+    if (previous && previous.stage === "build" && !previous.fromBehaviour && !run.fixes.some((fix) => fix.agentId === previous.id)) {
       detachStream(run, previous);
     }
     if (previous) {
       delete previous.spawnToolUseId;
+      delete previous.description;
     }
-    if (agent && agent.stage === "build" && roleStageStarted(run, agent)) {
+    if (agent && agent.stage === "build" && !agent.fromBehaviour && roleStageStarted(run, agent)) {
       rederiveImplementer(state, run, agent, spawn2, line, config);
     }
   }
@@ -6704,6 +7156,7 @@ var rebindSpawn = (state, run, spawn2, data, line, config) => {
   if (agent) {
     agent.spawnToolUseId = spawn2.toolUseId;
     agent.background = spawn2.background;
+    keepDescription(agent, spawn2);
   }
   if (!previousId && !agent) {
     return;
@@ -6719,6 +7172,9 @@ var startWorkStage = (state, run, agent, line, config) => {
   if (home && home !== agent) {
     agent.role = home.role;
     agent.stage = home.stage;
+    if (home.fromBehaviour) {
+      agent.fromBehaviour = true;
+    }
     agent.model = agent.model ?? home.model;
     if (home.budget.toolCallsAtFirstStop !== void 0 && agent.budget.toolCallsAtFirstStop === void 0) {
       agent.budget.toolCallsAtFirstStop = 0;
@@ -6750,7 +7206,11 @@ var onAgentStart = (state, event, config) => {
   const stoppedAt = agent.endedAt;
   delete agent.endedAt;
   agent.role = event.agentType ?? agent.role;
-  agent.stage = roleConfig(agent.role, config).stage;
+  const copies = Object.values(state.board.runs).map((item) => ownValue(item.agents, agentId));
+  if (copies.some((copy) => copy?.fromBehaviour)) {
+    agent.fromBehaviour = true;
+  }
+  agent.stage = agent.fromBehaviour ? "build" : roleConfig(agent.role, config).stage;
   if (agent.budget.toolCalls.used === 0) {
     const firstStop = agent.budget.toolCallsAtFirstStop;
     agent.budget = newBudget(agent.role, config);
@@ -6769,6 +7229,9 @@ var onAgentStart = (state, event, config) => {
     agent.spawnToolUseId = spawn2.toolUseId;
     agent.background = spawn2.background;
     agent.model = agent.model ?? spawn2.model;
+    if (agent.description === void 0 && spawn2.description !== void 0) {
+      agent.description = spawn2.description;
+    }
   }
   if (spawn2) {
     keepSpawnStream(state, run, agentId, spawn2, config);
@@ -6781,8 +7244,8 @@ var onAgentStart = (state, event, config) => {
   }
   logRun(run, event, "started", "normal", agentId);
   if (resumed) {
-    resumeRoleStage(run, agent, event);
-    resumeCopies(state, run, agentId, event);
+    resumeRoleStage(run, agent, event, config);
+    resumeCopies(state, run, agentId, event, config);
     beginLeg(state, run, agentId, event.at, config);
   } else if (stoppedAt) {
     const stopped = { at: stoppedAt, sessionId: event.sessionId };
@@ -6878,9 +7341,29 @@ var pruneIndex = (state, at, config) => {
   pruneBranches(state.board.branches, now);
 };
 
+// src/model/branch-label.ts
+var ISOLATION_BRANCH = /^worktree-agent-([0-9a-z]+)$/;
+var DESCRIPTION_MAX = 80;
+var tidyDescription = (description) => {
+  const collapsed = description.replace(/\s+/g, " ").trim();
+  return collapsed.length <= DESCRIPTION_MAX ? collapsed : `${collapsed.slice(0, DESCRIPTION_MAX - 1).trimEnd()}\u2026`;
+};
+var isolationAgentId = (branch) => ISOLATION_BRANCH.exec(branch)?.[1];
+var branchLabel = (state, branch) => {
+  const agentId = isolationAgentId(branch);
+  if (agentId === void 0) {
+    return void 0;
+  }
+  const runId = ownValue(state.index.agentRuns, agentId);
+  const run = runId === void 0 ? void 0 : ownValue(state.board.runs, runId);
+  const agent = run === void 0 ? void 0 : ownValue(run.agents, agentId);
+  const description = agent?.description === void 0 ? "" : tidyDescription(agent.description);
+  return agent && description !== "" ? { role: agent.role, description } : void 0;
+};
+
 // src/model/display-state.ts
 var MAIN_AGENT = "main";
-var openPermission2 = (agent) => {
+var openPermission = (agent) => {
   if (agent.now?.permission === "waiting") {
     return agent.now;
   }
@@ -6898,13 +7381,13 @@ var mainState = (run, agent) => {
   if (runOver(run)) {
     return "done";
   }
-  if (openPermission2(agent) || mainWaits(run, agent)) {
+  if (openPermission(agent) || mainWaits(run, agent)) {
     return "waiting";
   }
   return agent.idleSince ? "idle" : "running";
 };
 var subagentState = (agent) => {
-  if (agent.state === "running" && openPermission2(agent)) {
+  if (agent.state === "running" && openPermission(agent)) {
     return "waiting";
   }
   return agent.state === "running" && agent.staleSince ? "stale" : agent.state;
@@ -7040,7 +7523,7 @@ var resumeMetrics = (resumes) => {
 };
 
 // src/model/tokens.ts
-var tokenStage = (state, run, agent, config) => {
+var tokenStage = (state, run, agent, sessionId, config) => {
   if (run.fixes.some((fix) => fix.agentId === agent.id && agent.id !== "main")) {
     return "fix";
   }
@@ -7060,6 +7543,9 @@ var tokenStage = (state, run, agent, config) => {
   }
   if (agent.stage === "pr") {
     return "pr";
+  }
+  if (toMainNode(isTrunkLike(run.branch, config), agent.id)) {
+    return mainStage(run, sessionId);
   }
   const stage = currentStage(run);
   if (stage === "plan" || stage === "fix" || stage === "docs") {
@@ -7141,7 +7627,7 @@ var onUsage = (state, event, config) => {
   if (previous && previous.tokens.output >= counts.output) {
     return run;
   }
-  const stage = previous?.stage ?? tokenStage(state, run, agent, config);
+  const stage = previous?.stage ?? tokenStage(state, run, agent, event.sessionId, config);
   const apply = (source, sign) => {
     addAgentTokens(agent, source, sign);
     run.costUsd += sign * source.usd;
@@ -7215,8 +7701,12 @@ var rankEntry = (key, runs) => {
   const finished = runs.every((run) => run.pr?.state === "merged");
   const title = runs.find((run) => run.title)?.title;
   const entry = { key, runIds: runs.map((run) => run.id), finished, byStage, tokens, usd };
+  if (runs.some((run) => run.key === key)) {
+    entry.ticket = true;
+  }
   return title ? { ...entry, title } : entry;
 };
+var labelled = (entry, label) => label === void 0 ? entry : { ...entry, branchLabel: label };
 var updateRanking = (state) => {
   const { rankKeys, rankDirty } = state.index;
   for (const runId of Object.keys(rankKeys)) {
@@ -7251,12 +7741,12 @@ var updateRanking = (state) => {
     }
   }
   const kept = state.board.tokenRanking.filter((entry) => !keys.has(entry.key));
-  const changed = [...groups.entries()].map(([key, runs]) => rankEntry(key, runs));
+  const changed = [...groups.entries()].map(([key, runs]) => labelled(rankEntry(key, runs), branchLabel(state, key)));
   state.board.tokenRanking = [...kept, ...changed].sort((a, b) => b.tokens - a.tokens);
 };
 
 // src/model/tool-calls.ts
-var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "NotebookEdit"]);
+var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 var findCall = (agent, toolUseId) => agent.recent.find((call) => call.toolUseId === toolUseId);
 var endCall = (call, event) => {
   call.endedAt = event.at;
@@ -7321,12 +7811,12 @@ var prHead = (command) => {
   }
   return void 0;
 };
-var callSummary = (tool, input, run) => {
+var callSummary = (state, tool, input, run) => {
   if (input.command !== void 0) {
     return input.command.slice(0, 160);
   }
   if (input.filePath) {
-    return relativePath(run, input.filePath);
+    return relativePath(run, input.filePath, state.index.worktreeAliases);
   }
   if (input.subagentType || input.description) {
     return [input.subagentType, input.description].filter(Boolean).join(": ");
@@ -7340,6 +7830,66 @@ var callSummary = (tool, input, run) => {
   }
   return input.name ?? input.pageId ?? input.issueIdOrKey ?? tool;
 };
+var rangeSide = (side) => side.replace(/^origin\//, "").replace(/(?:[~^]|@\{).*$/s, "");
+var rangeBranches = (command, config) => {
+  if (!command.includes("..")) {
+    return [];
+  }
+  const branches2 = [];
+  for (const segment of shellSegments(command.replace(/\\\n/g, " "))) {
+    const args = gitArgs(shellWords(segment)) ?? [];
+    for (const word of args.map((arg) => arg.replace(/^(['"])(.*)\1$/s, "$2"))) {
+      const at = word.indexOf("..");
+      if (at <= 0) {
+        continue;
+      }
+      const base = rangeSide(word.slice(0, at));
+      const branch = commandBranch(rangeSide(word.slice(at + 2).replace(/^\./, "")));
+      if (isTrunkLike(base, config) && branch !== void 0 && branch !== "HEAD" && !branches2.includes(branch)) {
+        branches2.push(branch);
+      }
+    }
+  }
+  return branches2;
+};
+var reviewReadBranches = (state, run, agent, event, config, touched) => {
+  if (agent.id === "main" || agent.stage !== "review") {
+    return;
+  }
+  const command = event.data.tool === "Bash" ? event.data.input.command ?? "" : "";
+  const named = rangeBranches(command, config).flatMap((branch) => branchRun(state, branch) ?? []);
+  for (const target of /* @__PURE__ */ new Set([...pathRuns(state, event), ...named])) {
+    if (target !== run && !isTrunkLike(target.branch, config)) {
+      startWorkStage(state, target, ensureAgent(target, agent.id, event, config), event, config);
+      touched.push(target);
+    }
+  }
+};
+var buildFromBehaviour = (state, run, agent, filePath, line, config, touched) => {
+  const aliases = state.index.worktreeAliases;
+  if (agent.id === "main" || agent.stage !== "other" || run.branch === "?" || isTrunkLike(run.branch, config) || !inWorktree(run, filePath, aliases)) {
+    return;
+  }
+  const docsCall = agent.recent.some((call) => config.docs.tools.includes(call.tool));
+  if (config.docs.roles.includes(agent.role) || docsCall || Object.hasOwn(state.index.docsAgents, agent.id)) {
+    return;
+  }
+  const pkg = packageOf(relativePath(run, filePath, aliases), config);
+  const target = pkg ? packageStream(run, pkg) : { ...FALLBACK_STREAM };
+  state.index.agentStreams[agent.id] = { id: target.id, package: target.package, at: line.at, atMs: time(line.at) };
+  for (const other of Object.values(state.board.runs)) {
+    const copy = ownValue(other.agents, agent.id);
+    if (copy) {
+      copy.stage = "build";
+      copy.fromBehaviour = true;
+    }
+    if (copy && other !== run) {
+      touched.push(other);
+    }
+  }
+  startRoleStageIn(state, run, agent, line, config);
+  beginLeg(state, run, agent.id, line.at, config);
+};
 var onToolPre2 = (state, event, config, touched) => {
   const run = hookRun(state, event, config);
   const agentKey = event.agentId ?? "main";
@@ -7347,6 +7897,7 @@ var onToolPre2 = (state, event, config, touched) => {
   const addsWorktree = event.data.tool === "Bash" && worktreeAddOf(ensureSession(state, event), event) !== void 0;
   if (!addsWorktree) {
     startWorkStage(state, run, agent, event, config);
+    reviewReadBranches(state, run, agent, event, config, touched);
   }
   const { tool, input, toolUseId } = event.data;
   noteCallWork(state, run, agentKey, event);
@@ -7355,7 +7906,7 @@ var onToolPre2 = (state, event, config, touched) => {
   }
   expireDroppedPermissions(run, agent, event, "denied", event.sessionId);
   closeElicitations(run, event);
-  const call = { toolUseId, tool, summary: callSummary(tool, input, run), startedAt: event.at };
+  const call = { toolUseId, tool, summary: callSummary(state, tool, input, run), startedAt: event.at };
   agent.now = call;
   agent.recent.push(call);
   if (agent.recent.length > RECENT_CAP) {
@@ -7373,6 +7924,7 @@ var onToolPre2 = (state, event, config, touched) => {
     onBashPre(state, run, agent, event, config, touched);
   }
   if (EDIT_TOOLS.has(tool) && input.filePath) {
+    buildFromBehaviour(state, run, agent, input.filePath, event, config, touched);
     onEditPre(state, run, agent, input.filePath, event, config);
     noteEdit(state, agentKey, input.filePath, event.at);
   }
@@ -7389,7 +7941,7 @@ var onToolPre2 = (state, event, config, touched) => {
     }
   }
   if (tool === "AskUserQuestion") {
-    onAskPre(state, run, agent, event, touched);
+    onAskPre(state, run, agent, event, config, touched);
   }
   if (config.docs.tools.includes(tool) && agentKey !== "main") {
     state.index.docsAgents[agentKey] = true;
@@ -7408,11 +7960,13 @@ var noteCallWork = (state, run, agentKey, event) => {
   if (agentKey !== "main" && (edits || tool === "Bash" && !readsOnly(input.command ?? ""))) {
     noteBranchWork(state, event.sessionId, run, "agent", event.at);
   }
-  if (agentKey === "main" && edits && input.filePath && isInside2(normalizePath(input.filePath), run.worktree)) {
+  if (agentKey === "main" && edits && input.filePath && inWorktree(run, input.filePath, state.index.worktreeAliases)) {
     noteBranchWork(state, event.sessionId, run, "edit", event.at);
+    noteTrunkEdit(state, event.sessionId, run, event.at);
   }
 };
-var onAskPre = (state, run, agent, event, touched) => {
+var askNode = (run, agent, sessionId, config) => toMainNode(isTrunkLike(run.branch, config), agent.id) ? mainNode(run, sessionId) : agentNode(run, agent);
+var onAskPre = (state, run, agent, event, config, touched) => {
   const { toolUseId, input } = event.data;
   const session = agent.id === "main" ? state.index.sessions[event.sessionId] : void 0;
   (input.questions ?? []).forEach((item, index) => {
@@ -7421,7 +7975,7 @@ var onAskPre = (state, run, agent, event, touched) => {
       return;
     }
     const source = { agentId: agent.id, role: agent.role };
-    const node = agentNode(run, agent);
+    const node = askNode(run, agent, event.sessionId, config);
     const question = { id, text: item.question, blocking: true, options: item.options ?? [], origin: "ask-tool", source, node, sessionId: event.sessionId, createdAt: event.at };
     const relayed = relayedQuestion(state, session, item.question, void 0, event.at);
     if (relayed) {
@@ -7477,6 +8031,10 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   if (agent.id !== "main" && agent.stage === "pr" && runsGitPush(command)) {
     callIndex.gitPush = true;
   }
+  const trunk = config.branches.trunk;
+  if (run.branch === trunk && gitPushTargets(command, run.branch).includes(trunk)) {
+    callIndex.trunkPush = true;
+  }
   if (/\bgh\s+pr\s+create\b/.test(command)) {
     const head = prHead(command);
     const target = head ? branchRun(state, head) : run;
@@ -7496,7 +8054,7 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   }
 };
 var onEditPre = (state, run, agent, filePath, line, config) => {
-  const relative = relativePath(run, filePath);
+  const relative = relativePath(run, filePath, state.index.worktreeAliases);
   if (!agent.filesChanged.includes(relative)) {
     agent.filesChanged.push(relative);
   }
@@ -7513,18 +8071,20 @@ var onEditPre = (state, run, agent, filePath, line, config) => {
       attachStream(run, agent, target, line, state.index.agentSessions);
     }
   }
-  if (agent.id !== "main" || !isInside2(normalizePath(filePath), run.worktree)) {
+  if (agent.id !== "main" || !inWorktree(run, filePath, state.index.worktreeAliases)) {
     return;
   }
   if (run.streams.length === 0 && run.fixes.length === 0) {
     endPlan(run, line);
   }
-  const reviewer = reviewerWithChanges(run);
+  const trunk = isTrunkLike(run.branch, config);
+  const reviewer = trunk ? sessionReviewerWithChanges(run, line.sessionId, state.index.agentSessions) : reviewerWithChanges(run);
   if (reviewer) {
     const streamId = run.streams.find((stream) => stream.package === pkg)?.id ?? pkg;
-    const open = run.fixes.find((fix) => fix.agentId === "main" && fix.state === "running" && fix.streamId === streamId);
+    const ownSession = trunk ? line.sessionId : void 0;
+    const open = run.fixes.find((fix) => openFixOf(fix, "main", ownSession) && fix.streamId === streamId);
     if (!open) {
-      startFix(run, reviewer, streamId, "main", line);
+      startFix(run, reviewer, streamId, "main", line, ownSession);
     }
   }
 };
@@ -7612,6 +8172,10 @@ var onToolEnd = (state, event, config, touched) => {
   if (index?.gitPush && succeeded) {
     notePush(state, agentKey, event.at);
   }
+  if (index?.trunkPush && succeeded) {
+    const session = ensureSession(state, event);
+    session.pushedToTrunk ??= config.branches.trunk;
+  }
   if (index?.rebase && succeeded && !isTrunkLike(run.branch, config)) {
     run.rebases.push({ at: event.at, sessionId: event.sessionId });
     run.rebases.splice(0, run.rebases.length - REBASES_CAP);
@@ -7623,6 +8187,7 @@ var onToolEnd = (state, event, config, touched) => {
     noteReport(ensureSession(state, event), reporter);
   }
   if (spawn2 && data.agentId) {
+    spawn2.background = data.isAsync ?? spawn2.background;
     rebindSpawn(state, run, spawn2, { ...data, agentId: data.agentId }, event, config);
     const spawned = run.agents[data.agentId];
     if (spawned) {
@@ -7668,7 +8233,7 @@ var onPrCreated = (state, run, index, event, call, succeeded, touched, config) =
   const url = /https:\/\/\S+\/pull\/\d+/.exec(output)?.[0] ?? "";
   const title = /--title\s+"([^"]*)"/.exec(call?.summary ?? "")?.[1] ?? "";
   if (target && number !== void 0) {
-    openPr(target, { number, url, title, createdAt: event.at }, event, config);
+    openPr(target, { number, url, title, createdAt: event.at }, event, config, ghPollingOff(state, config));
   }
   if (succeeded) {
     notePrCreated(state, index.agentKey, event.at);
@@ -7715,9 +8280,10 @@ var onPermission = (state, event, config) => {
   if (!asked) {
     return run;
   }
-  const text = `Allow ${asked.tool}: ${asked.summary}?`;
+  const text = asked.tool === "ExitPlanMode" ? "Approve the plan?" : `Allow ${asked.tool}: ${asked.summary}?`;
   const source = { agentId: agent.id, role: agent.role };
-  addQuestion(run, { id: `q-perm-${asked.toolUseId}`, text, blocking: true, options: [], origin: "permission", source, node: agentNode(run, agent), sessionId: event.sessionId, createdAt: event.at });
+  const node = askNode(run, agent, event.sessionId, config);
+  addQuestion(run, { id: `q-perm-${asked.toolUseId}`, text, blocking: true, options: [], origin: "permission", source, node, sessionId: event.sessionId, createdAt: event.at });
   logRun(run, event, `Waiting for permission: ${asked.tool} ${asked.summary}`, "you", agent.id);
   return run;
 };
@@ -7814,6 +8380,10 @@ var updateLane = (state, run, at, config) => {
   if (run.fork?.sha) {
     lane.forkSha = run.fork.sha;
   }
+  const label = branchLabel(state, run.branch);
+  if (label !== void 0) {
+    lane.branchLabel = label;
+  }
   lane.head = { stage, waiting };
   lane.deleted = isRemoved(run);
   const kind = waiting ? "wait" : stage;
@@ -7833,7 +8403,7 @@ var updateLane = (state, run, at, config) => {
   }
 };
 var refreshRun = (state, run, at, config) => {
-  syncWaits(run, at);
+  syncWaits(run, at, isTrunkLike(run.branch, config));
   updateChip(run);
   if (isVisible(run, config)) {
     updateLane(state, run, at, config);
@@ -7866,6 +8436,7 @@ var createState = (config) => ({
   index: {
     sessions: {},
     worktrees: {},
+    worktreeAliases: {},
     spawns: {},
     agentRuns: {},
     agentStreams: {},
@@ -7909,6 +8480,12 @@ var idleMainThread = (state, session, at) => {
     session.main.idleSince = at;
   }
 };
+var turnStarter = (state, data) => {
+  if (data.kind === "task-notification") {
+    return Object.hasOwn(state.index.agentRuns, data.taskId) ? data.taskId : void 0;
+  }
+  return data.kind === "handback" ? data.from || void 0 : void 0;
+};
 var onHookEvent = (state, event, config, touched) => {
   const mode = event.data.permissionMode;
   if (typeof mode === "string") {
@@ -7917,6 +8494,15 @@ var onHookEvent = (state, event, config, touched) => {
   const session = event.agentId ? void 0 : ensureSession(state, event);
   if (session && event.event === "prompt" && (session.turnStartedAt === void 0 || time(event.at) > time(session.turnStartedAt))) {
     session.turnStartedAt = event.at;
+    const startedBy = turnStarter(state, event.data);
+    if (startedBy === void 0) {
+      delete session.turnStartedBy;
+    } else {
+      session.turnStartedBy = startedBy;
+    }
+  }
+  if (session && event.event === "tool.post") {
+    addDeveloperAnswers(session, event);
   }
   const own = sessionMain(session, event, config);
   const run = hookEventRun(state, event, config, touched);
@@ -7960,7 +8546,7 @@ var hookEventRun = (state, event, config, touched) => {
       }
       break;
     case "session.end":
-      touched.push(...endSession(state, session, run, event.at).filter((other) => other !== run));
+      touched.push(...endSession(state, session, event.sessionId, run, event.at).filter((other) => other !== run));
       touched.push(...handleHandbacks(state, session, event));
       break;
     case "turn.stop":
@@ -7991,7 +8577,8 @@ var hookEventRun = (state, event, config, touched) => {
     case "elicitation": {
       const text = event.data.message ?? `Input requested by ${event.data.server ?? "an MCP server"}`;
       const source = { agentId: agent?.id ?? "main", role: agent?.role ?? "main" };
-      const node = { kind: "stage", id: currentStage(run) };
+      const own = toMainNode(isTrunkLike(run.branch, config), agent?.id);
+      const node = own ? mainNode(run, event.sessionId) : { kind: "stage", id: currentStage(run) };
       addQuestion(run, { id: `q-elicit-${event.id}`, text, blocking: true, options: [], origin: "elicitation", source, node, sessionId: event.sessionId, createdAt: event.at });
       break;
     }
@@ -8002,15 +8589,18 @@ var hookEventRun = (state, event, config, touched) => {
     case "compact.post":
       logRun(run, event, `Context ${event.event === "compact.pre" ? "compaction started" : "compacted"}${event.data.trigger ? ` (${event.data.trigger})` : ""}`, "normal", agent?.id);
       break;
-    case "model.switch":
-      if (agent && typeof event.data.model === "string") {
-        agent.model = event.data.model;
+    case "model.switch": {
+      const target = event.data.to_model ?? event.data.model;
+      const model = typeof target === "string" && target !== "" ? target : void 0;
+      if (agent && model !== void 0) {
+        agent.model = model;
       }
-      if (agent?.id === "main" && typeof event.data.model === "string") {
-        noteMainModel(state, event.sessionId, event.data.model);
+      if (agent?.id === "main" && model !== void 0) {
+        noteMainModel(state, event.sessionId, model);
       }
-      logRun(run, event, `Model switched${typeof event.data.model === "string" ? ` to ${event.data.model}` : ""}`, "normal", agent?.id);
+      logRun(run, event, `Model switched${model === void 0 ? "" : ` to ${model}`}`, "normal", agent?.id);
       break;
+    }
     case "task.created":
     case "task.completed":
       logRun(run, event, `Task ${event.event === "task.created" ? "created" : "completed"}: ${event.data.subject ?? event.data.taskId}`, "normal", agent?.id);
@@ -8250,6 +8840,16 @@ var ownAgent2 = (ctx, agentId) => {
   return Object.hasOwn(sessions, agentId) && sessions[agentId] === ctx.sessionId;
 };
 var ownFix = (ctx, fix) => fix.sessionId === void 0 ? ownAgent2(ctx, fix.agentId) : fix.sessionId === ctx.sessionId;
+var madeInPlace = (state, row) => {
+  if (row.firstWork === "worktree" || row.firstWork === "start") {
+    return false;
+  }
+  const run = row.firstRun;
+  const sameWorktree = (other) => other.worktree === run.worktree;
+  const otherBranch = (other) => other.branch !== run.branch && other.branch !== "?";
+  const earlierAndLive = (other) => other.removedAt === void 0 && time(other.startedAt) < time(run.startedAt);
+  return Object.values(state.board.runs).some((other) => sameWorktree(other) && otherBranch(other) && earlierAndLive(other));
+};
 var groupRows = (state, session) => {
   const groups = /* @__PURE__ */ new Map();
   for (const work of session.branchWork) {
@@ -8258,9 +8858,11 @@ var groupRows = (state, session) => {
       continue;
     }
     const key = branchWorkKey(run);
-    const group = groups.get(key) ?? { at: work.at, runs: /* @__PURE__ */ new Map() };
+    const group = groups.get(key) ?? { at: work.at, how: work.how, first: run, runs: /* @__PURE__ */ new Map() };
     if (time(work.at) < time(group.at)) {
       group.at = work.at;
+      group.how = work.how;
+      group.first = run;
     }
     const entry = group.runs.get(run.id);
     if (!entry || time(work.at) < time(entry.at)) {
@@ -8270,7 +8872,7 @@ var groupRows = (state, session) => {
   }
   const rows = [...groups].map(([branch, group]) => {
     const entries = [...group.runs.values()].sort((a, b) => time(a.at) - time(b.at) || compareText(a.run.id, b.run.id));
-    return { branch, runs: entries.map((entry) => entry.run), firstWorkAt: group.at };
+    return { branch, runs: entries.map((entry) => entry.run), firstWorkAt: group.at, firstWork: group.how, firstRun: group.first };
   });
   return rows.sort((a, b) => time(a.firstWorkAt) - time(b.firstWorkAt) || compareText(a.branch, b.branch));
 };
@@ -8374,7 +8976,7 @@ var rowPr = (ctx, branch, pr) => {
   }
   return node;
 };
-var handedOver = (gate) => gate.source === "marker" && (gate.state === "waiting" || gate.state === "done");
+var handedOver = (gate, unpolled) => gate.source === "marker" && (gate.state === "waiting" || gate.state === "done" && !unpolled);
 var rowMerge = (ctx, row, pr) => {
   const endedAt = ctx.session.endedAt;
   if (pr.state === "merged") {
@@ -8385,8 +8987,9 @@ var rowMerge = (ctx, row, pr) => {
   if (pr.state === "closed") {
     return { state: "closed", ...pr.closedAt === void 0 ? {} : { at: pr.closedAt }, afterEnd: false };
   }
-  const handed = row.runs.some((run) => handedOver(run.gates.merge));
-  return mergeWaits(ctx.config) || handed ? { state: "waiting", afterEnd: false } : void 0;
+  const unpolled = pr.unpolled === true;
+  const handed = row.runs.some((run) => handedOver(run.gates.merge, unpolled));
+  return mergeWaits(ctx.config) && !unpolled || handed ? { state: "waiting", afterEnd: false } : void 0;
 };
 var isRemovedRow = (row, pr) => settlesByRemoval(row.runs.every((run) => run.removedAt !== void 0), pr);
 var settleTime = (row, pr, continuedAt) => {
@@ -8450,11 +9053,11 @@ var settledStage = (row, removed) => {
   }
   return pr?.state === "closed" ? "closed" : void 0;
 };
-var stageText = (row, stage) => {
+var stageText = (row, stage, inPlace = false) => {
   const pr = row.pr?.pr;
   switch (stage) {
     case "worktree":
-      return "Worktree created";
+      return inPlace ? "Branch created" : "Worktree created";
     case "build":
       return "Build";
     case "built":
@@ -8564,8 +9167,10 @@ var buildRow = (ctx, row) => {
   const join4 = rowJoin(ctx, row.runs);
   const prNode = rowPr(ctx, row.branch, pr);
   const merge = owner && pr ? rowMerge(ctx, row, pr) : void 0;
+  const label = branchLabel(ctx.state, row.branch);
   const built = {
     branch: row.branch,
+    ...label === void 0 ? {} : { branchLabel: label },
     runIds: row.runs.map((run) => run.id),
     firstWorkAt: row.firstWorkAt,
     pipeline: 0,
@@ -8593,7 +9198,7 @@ var buildRow = (ctx, row) => {
     built.stageText = continued.text;
   } else {
     built.stage = settled ?? activeStage(built, row.runs.some(pastBuild)) ?? reachedStage(built);
-    built.stageText = stageText(built, built.stage);
+    built.stageText = stageText(built, built.stage, built.stage === "worktree" && madeInPlace(ctx.state, row));
   }
   built.live = isLiveRow(built);
   return built;
@@ -8720,7 +9325,10 @@ var placeOf = (ctx, question, runId, rows, nodes) => {
   const own = rows.find((row) => row.runIds.includes(runId));
   const node = question.node;
   const asker = question.source.agentId;
-  const byId = node.kind === "stream" || node.kind === "reviewer" || node.kind === "fix" ? idPlace(node, own, rows) : void 0;
+  const run = ctx.state.board.runs[runId];
+  const trunkRun = run !== void 0 && isTrunkBranch(ctx.state, run.branch);
+  const searched = trunkRun ? rows.filter((row) => row === own) : rows;
+  const byId = node.kind === "stream" || node.kind === "reviewer" || node.kind === "fix" ? idPlace(node, own, searched) : void 0;
   const byGate = node.kind === "gate" || node.kind === "stage" ? gateNode(node.id, own, nodes) : void 0;
   if (byId) {
     return byId;
@@ -8800,6 +9408,13 @@ var newestNote = (session) => {
   const notes = session.plans.filter((plan) => plan.note !== void 0 && plan.note.trim() !== "");
   return notes.sort(byLineTime).at(-1)?.note;
 };
+var branchSubject = (state, row) => {
+  const own = row.runs.find((run) => run.subject)?.subject;
+  if (own !== void 0 || row.runs.some((run) => run.branch === "?")) {
+    return own;
+  }
+  return Object.values(state.board.runs).find((run) => run.branch === row.branch && run.subject)?.subject;
+};
 var sessionTitle = (state, sessionId, config) => {
   const session = recordOf(state, sessionId);
   if (!session) {
@@ -8812,8 +9427,12 @@ var sessionTitle = (state, sessionId, config) => {
   }
   const rows = groupRows(state, session);
   const pr = rows.length === 1 ? branchPr(state, rows[0]) : void 0;
-  if (pr) {
+  if (pr?.title) {
     return pr.title;
+  }
+  const subject = pr ? branchSubject(state, rows[0]) : void 0;
+  if (subject !== void 0) {
+    return subject;
   }
   const prompt = session.prompts[0];
   return prompt ? promptTitle(prompt.line, key) : void 0;
@@ -8876,8 +9495,9 @@ var kindOf2 = (session, rows) => {
   const card = session.agentIds.length > 0 || mainEdits || rows.some((row) => row.pr?.pr !== void 0);
   return card ? "card" : "conversation";
 };
+var openUnpolled = (row) => row.pr?.pr?.state === "open" && row.pr.pr.unpolled === true && row.merge === void 0;
 var finishedAtOf = (endedAt, rows) => {
-  const owned = rows.filter((row) => row.owner && row.pr?.pr !== void 0);
+  const owned = rows.filter((row) => row.owner && row.pr?.pr !== void 0 && !openUnpolled(row));
   if (endedAt === void 0 || owned.some((row) => row.pr?.pr?.state === "open" || row.settledAt === void 0)) {
     return void 0;
   }
@@ -8970,7 +9590,7 @@ var blockingForYou = (question) => question.state === "open" && question.blockin
 var onPlanGate = (place) => place.kind === "plan" || place.kind === "gate" && place.gate === "plan";
 var planNodeOf = (session, questions, planGateWaits, prompts) => {
   const main = session.main;
-  const waits = questions.some(blockingForYou) || planGateWaits || main !== void 0 && openPermission2(main) !== void 0;
+  const waits = questions.some(blockingForYou) || planGateWaits || main !== void 0 && openPermission(main) !== void 0;
   let state = "running";
   if (session.endedAt !== void 0) {
     state = "done";
@@ -9001,10 +9621,10 @@ var drawnPrs = (rows) => {
   }
   return [...prs.values()].sort((a, b) => a.number - b.number);
 };
-var outcomeRowText = (rows) => {
+var outcomeRowText = (rows, pushedToTrunk) => {
   const prs = drawnPrs(rows);
   if (prs.length === 0) {
-    return "no PR";
+    return pushedToTrunk === void 0 ? "no PR" : `pushed to ${pushedToTrunk}`;
   }
   if (prs.length === 1) {
     const [pr] = prs;
@@ -9026,11 +9646,11 @@ var outcomeRowText = (rows) => {
   const closedText = closed > 0 ? ` \xB7 ${closed} closed` : "";
   return `${merged} of ${prs.length} PRs merged${openText}${closedText}`;
 };
-var outcomeOf = (kind, finishedAt, rows, promote) => {
+var outcomeOf = (session, kind, finishedAt, rows, promote) => {
   if (kind === "conversation" || finishedAt === void 0) {
     return void 0;
   }
-  const rowText = outcomeRowText(rows);
+  const rowText = outcomeRowText(rows, session.pushedToTrunk);
   const owned = rows.filter((row) => row.owner);
   const merged = owned.filter((row) => row.pr?.pr?.state === "merged").length;
   if (promote && promote.targets.length > 0) {
@@ -9204,7 +9824,7 @@ var projectSession = (state, sessionId, config) => {
   const pipelines = pipelinesOf(drafts, prompts, key, agents, planAgents);
   const gateWaits = (id) => sessionGates(ctx, rows, id).some((gate) => gate.state === "waiting");
   const plan = planNodeOf(session, questions, gateWaits("plan"), prompts);
-  const outcome = outcomeOf(kind, finishedAt, rows, promote);
+  const outcome = outcomeOf(session, kind, finishedAt, rows, promote);
   const exploring = planAgents.some((id) => isExplorer(agents[id]));
   const waitingGate = GATE_ORDER.find(gateWaits);
   const chipInput = { state, kind, rows, pipeline: current, questions, docs, finishedAt, outcome, exploring, main: { plan, agents } };
@@ -9239,6 +9859,7 @@ var projectSession = (state, sessionId, config) => {
     questions,
     followups: followupsOf(ctx),
     messages: structuredClone(session.messages),
+    developerMessages: structuredClone(session.developerMessages ?? []),
     log: logOf(ctx, rows),
     tokens: structuredClone(session.tokens),
     ...session.overhead === void 0 ? {} : { overhead: structuredClone(session.overhead) },
@@ -9264,7 +9885,7 @@ var namesOf = (entry) => {
 var createStore = (config, options = {}) => {
   const windowMs = options.windowMs ?? 1e3;
   const seenMarginMs = options.seenMarginMs ?? SEEN_MARGIN_MS;
-  const seen = /* @__PURE__ */ new Map();
+  let seen = /* @__PURE__ */ new Map();
   const listeners = /* @__PURE__ */ new Set();
   let committed = createState(config);
   let live = createState(config);
@@ -9662,6 +10283,33 @@ var createStore = (config, options = {}) => {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    image() {
+      return { committed, committedAt, pending: [...pending], seen, newestAt, rebuiltAt, prunedAt, dirty, affectedFailures: [...affectedFailures] };
+    },
+    restore(image) {
+      committed = image.committed;
+      committedAt = image.committedAt;
+      pending = [...image.pending];
+      seen = image.seen;
+      newestAt = image.newestAt;
+      prunedAt = image.prunedAt;
+      affectedFailures.clear();
+      for (const [message, failure] of image.affectedFailures) {
+        affectedFailures.set(message, failure);
+      }
+      cache.clear();
+      namedBy.clear();
+      marked.clear();
+      skewed.clear();
+      failures.clear();
+      unmarked.clear();
+      finishFailures.clear();
+      rebuild();
+      rebuiltAt = image.rebuiltAt;
+      dirty = image.dirty;
+      markAll(live);
+      notify();
     }
   };
 };
@@ -10010,36 +10658,76 @@ var createSpoolReader = (options) => {
       }, 20);
     }
   };
+  const readHistory = (first) => {
+    ensurePrivateDir(options.dir);
+    const from = first ?? localDay(readWindowStart(now(), options.readDays));
+    history = options.onHistory;
+    try {
+      for (const file of listSpoolFiles(options.dir)) {
+        readAtStart(file, from);
+      }
+    } finally {
+      history = void 0;
+    }
+    options.onHistory?.end();
+  };
+  const follow = () => {
+    if (watcher || timer) {
+      return;
+    }
+    if (options.watch !== false) {
+      try {
+        watcher = watch(options.dir, schedulePoll);
+        watcher.on("error", (error) => report(`spool watch failed, polling only: ${error.message}`));
+      } catch {
+      }
+      timer = setInterval(poll, options.pollMs ?? 500);
+    }
+  };
   return {
     start() {
       ensurePrivateDir(options.dir);
       runCleanUp();
-      const first = localDay(readWindowStart(now(), options.readDays));
-      history = options.onHistory;
-      try {
-        for (const file of listSpoolFiles(options.dir)) {
-          readAtStart(file, first);
-        }
-      } finally {
-        history = void 0;
-      }
-      options.onHistory?.end();
-      if (options.watch !== false) {
-        try {
-          watcher = watch(options.dir, schedulePoll);
-          watcher.on("error", (error) => report(`spool watch failed, polling only: ${error.message}`));
-        } catch {
-        }
-        timer = setInterval(poll, options.pollMs ?? 500);
-      }
+      readHistory();
+      follow();
     },
+    cleanUp() {
+      ensurePrivateDir(options.dir);
+      runCleanUp();
+    },
+    readHistory,
+    follow,
     poll,
     stop() {
       watcher?.close();
       clearInterval(timer);
       clearTimeout(scheduled);
+      watcher = void 0;
+      timer = void 0;
+      scheduled = void 0;
     },
-    lines: () => delivered
+    lines: () => delivered,
+    handover() {
+      const offsetsCopy = new Map(offsets);
+      const identitiesCopy = new Map(identities);
+      const partialCopy = new Map(partial);
+      const refusedCopy = new Set(refused);
+      const failuresCopy = new Map(lastFailure);
+      return { offsets: offsetsCopy, identities: identitiesCopy, partial: partialCopy, refused: refusedCopy, delivered, cleanedDay, failures: failuresCopy };
+    },
+    resume(handover) {
+      offsets.clear();
+      identities.clear();
+      partial.clear();
+      refused.clear();
+      handover.offsets.forEach((offset, path) => offsets.set(path, offset));
+      handover.identities.forEach((identity, path) => identities.set(path, identity));
+      handover.partial.forEach((bytes, path) => partial.set(path, Buffer.from(bytes)));
+      handover.refused.forEach((path) => refused.add(path));
+      delivered = handover.delivered;
+      cleanedDay = handover.cleanedDay > cleanedDay ? handover.cleanedDay : cleanedDay;
+      handover.failures.forEach((message, source) => lastFailure.set(source, message));
+    }
   };
 };
 
@@ -10047,6 +10735,10 @@ export {
   stripPrefix,
   HOOK_DEFAULTS,
   shellWord,
+  OWNER_LINE,
+  terminalCommandPath,
+  cacheDirOf,
+  terminalCommandLine,
   cliCommand,
   startCommand,
   notSetUpMessage,
@@ -10145,6 +10837,7 @@ export {
   isBlockError,
   time,
   compareText,
+  normalizePath,
   ownValue,
   ownEntry,
   literalWord,

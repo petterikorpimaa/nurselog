@@ -149,9 +149,10 @@
 /* the progress ring (progress-ring.ts, decisions 131 and 134): in place of the orbit on a running subagent's node whose
    estimate is known, at the orbit's radius; done parts solid in the node's colour, the rest at .2, butt caps so the
    gaps stay open. It fades in once as the orbit does; a part turning done or back moves its opacity in 300 ms, the one
-   arc's end eases to its new angle in 300 ms. The light, a dash of 34 of 100, travels its arc at one angular speed
-   (its duration and phase are inline); a full ring dims its parts to .45 under it. Held still (reduced motion) the
-   light is the current part drawn whole at .55, and none on one arc or a full ring. The typical ticks are still */
+   arc's end eases to its new angle in 300 ms. The light, a dash of 34 of 100 at .55, fainter than the done parts so it
+   does not read as progress, travels its arc at one angular speed (its duration and phase are inline); a full ring
+   dims its parts to .45 under it. Held still (reduced motion) the light is the current part drawn whole at the same
+   .55, and none on one arc or a full ring. The typical ticks are still */
 .session-graph .node-progress { animation: graph-orbit-in .55s ease-out; }
 .session-graph .node-progress path, .session-graph .node-progress circle { fill: none; stroke-linecap: butt; }
 .session-graph .progress-part, .session-graph .progress-track, .session-graph .progress-done, .session-graph .progress-light { stroke: var(--c); stroke-width: 1.8; }
@@ -160,8 +161,8 @@
 .session-graph .progress-part.done { stroke-opacity: 1; }
 .session-graph .progress-done { transition: stroke-dasharray .3s var(--ease), stroke-opacity .3s; }
 .session-graph .node-progress.full:not(.still) .progress-part.done, .session-graph .node-progress.full:not(.still) .progress-done { stroke-opacity: .45; }
-.session-graph .progress-light { stroke-dasharray: 34 100; animation: graph-progress-light 1.4s cubic-bezier(.4, 0, .2, 1) infinite; }
-.session-graph .node-progress.still .progress-light { stroke-dasharray: none; stroke-opacity: .55; animation: none; }
+.session-graph .progress-light { stroke-opacity: .55; stroke-dasharray: 34 100; animation: graph-progress-light 1.4s cubic-bezier(.4, 0, .2, 1) infinite; }
+.session-graph .node-progress.still .progress-light { stroke-dasharray: none; animation: none; }
 .session-graph .progress-tick { stroke: var(--fg-3); stroke-width: 1.2; }
 @keyframes graph-progress-light { from { stroke-dashoffset: 34; } to { stroke-dashoffset: -100; } }
 /* the done sheen (nodes.ts, scene.ts): a band of light in the foreground colour that crosses a finished subagent's node

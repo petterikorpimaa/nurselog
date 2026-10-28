@@ -265,6 +265,9 @@ var sessionHeading = (session) => {
   const fallback = session.rows?.[0]?.branch ?? `Session ${session.id.slice(0, 8)}`;
   return cardTitle({ title: session.title, key: session.key, branch: fallback });
 };
+var labelText = (label) => `${label.role} \xB7 ${label.description}`;
+var labelTitle = (label, branch) => label === void 0 ? branch : `${labelText(label)}
+${branch}`;
 
 // src/ui/order.ts
 var isDone = (run) => run.chip.tone === "done";
@@ -869,12 +872,12 @@ var dropFaded = (placements) => {
 };
 
 // hooks/verification.mjs
-var VERIFICATION_RUNNERS = Object.freeze(["pnpm", "npm", "npx", "yarn", "node", "turbo", "tsc", "eslint", "vitest"]);
-var VERIFICATION_KINDS = Object.freeze({ typecheck: "\\b(typecheck|tsc)\\b", lint: "\\b(lint|eslint)\\b", test: "\\b(vitest|test:run)\\b|\\bpnpm\\b.*\\btest\\b" });
+var VERIFICATION_RUNNERS = Object.freeze(["pnpm", "npm", "npx", "yarn", "bun", "node", "turbo", "make", "tsc", "eslint", "vitest"]);
+var VERIFICATION_KINDS = Object.freeze({ typecheck: "\\b(typecheck|tsc)\\b", lint: "\\b(lint|eslint)\\b", test: "\\b(vitest|test:run)\\b|\\b(pnpm|npm|yarn|bun|make)\\b[^&|;]*\\btest\\b" });
 var VERIFICATION_FAIL_PATTERNS = Object.freeze({
   typecheck: "error TS\\d+|Found [1-9]\\d* errors?\\b",
   lint: "\\([1-9]\\d* errors?, \\d+ warnings?\\)",
-  test: "\\b[1-9]\\d* failed\\b|\\bErrors +[1-9]\\d* errors?\\b"
+  test: "\\b[1-9]\\d* fail(?:ed)?\\b|\\bErrors +[1-9]\\d* errors?\\b"
 });
 
 // src/model/paths.ts
@@ -1643,7 +1646,9 @@ var prepareOverview = (branches) => {
     } else if (lane.deleted) {
       drainFrom = lastEnd;
     }
-    const prepared = { branch: lane.branch, name: shortBranch(lane.branch), fork, state, drainFrom, segments, head: lane.head, promotedTo: [] };
+    const label = lane.branchLabel === void 0 ? void 0 : labelText(lane.branchLabel);
+    const name = label ?? shortBranch(lane.branch);
+    const prepared = { branch: lane.branch, name, ...label === void 0 ? {} : { label }, fork, state, drainFrom, segments, head: lane.head, promotedTo: [] };
     const merge = merged ? mergeOf(lane, byBranch) : void 0;
     if (merge) {
       prepared.prNumber = merge.prNumber;
@@ -1655,10 +1660,10 @@ var prepareOverview = (branches) => {
     const at = parseTime2(dot.mergedAt);
     return at === void 0 ? [] : [{ prNumber: dot.prNumber, branch: dot.branch, at, promotedTo: promotedTo(dot.prNumber) }];
   });
-  const lineOf = new Map(lines.map((line) => [line.name, line]));
+  const lineOf2 = new Map(lines.map((line) => [line.name, line]));
   const promotions = branches.promotions.flatMap((promotion) => {
     const at = parseTime2(promotion.mergedAt);
-    const line = lineOf.get(promotion.target);
+    const line = lineOf2.get(promotion.target);
     if (at === void 0 || !line || line.tone === "trunk") {
       return [];
     }
@@ -1734,7 +1739,8 @@ var mergedLine = (prNumber, promotedTo) => {
   return `PR #${prNumber} merged${into}`;
 };
 var laneTooltip = (lane, overview, now, labels, clickable = false) => {
-  const lines = [lane.branch, `from ${overview.trunk} \xB7 forked ${ago(now - (lane.fork ?? now))}`];
+  const named = lane.label === void 0 ? [lane.branch] : [lane.label, lane.branch];
+  const lines = [...named, `from ${overview.trunk} \xB7 forked ${ago(now - (lane.fork ?? now))}`];
   if (lane.state === "merged" && lane.prNumber !== void 0) {
     lines.push(mergedLine(lane.prNumber, lane.promotedTo));
   } else {
@@ -2879,7 +2885,7 @@ var typicalText = (used, length) => {
     return `${calls}, longer than all ${length.runs} earlier runs (the longest ${length.p90})`;
   }
   if (used > length.p90) {
-    return `${calls}, longer than usual: at least 90 % of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
+    return `${calls}, longer than usual: at least 90\xA0% of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
   }
   const range = length.p25 === length.p75 ? `${length.p25}` : `${length.p25} to ${length.p75}`;
   return `${calls}, usually ${range} (${length.runs} earlier runs)`;
@@ -2901,6 +2907,12 @@ var progressRing = (agent, typical) => {
   }
   const own = agent.progress === void 0 ? void 0 : fromProgress(agent.progress);
   return own ?? fromTypical(agent, typical);
+};
+var agentRing = (agent, run, typical) => {
+  if (!run.running || run.stale || run.idle || agent.staleSince !== void 0) {
+    return void 0;
+  }
+  return progressRing(agent, typical);
 };
 var round2 = (value2) => String(Math.round(value2 * 100) / 100);
 var pointAt = (r, share2) => {
@@ -3233,6 +3245,10 @@ var flowOf = (node) => {
   return isActive3(node.state) ? "running" : "done";
 };
 var textWidth = (text2) => text2.length * CHAR2;
+var PILL_LABEL_MAX = 40;
+var pillText = (row2) => row2.branchLabel === void 0 ? shortBranch(row2.branch) : clip2(labelText(row2.branchLabel), PILL_LABEL_MAX);
+var pillTip = (row2) => row2.branchLabel === void 0 ? {} : { tip: `${labelText(row2.branchLabel)}
+${row2.branch}` };
 var clip2 = (text2, max) => text2.length <= max ? text2 : `${text2.slice(0, max - 1).trimEnd()}\u2026`;
 var LINK_FALLBACK = { continues: "an earlier session", continuedIn: "a later session" };
 var linkLabel = (session, link, fallback) => {
@@ -3336,11 +3352,12 @@ var sessionLayout = (session, options) => {
 };
 var withProgress = (layout, session, typical) => {
   const items = layout.items.map((item2) => {
-    const running = item2.kind === "node" && item2.state === "running" && item2.stale !== true && item2.idle !== true;
-    const agentId = running ? item2.agentId : void 0;
-    const agent = agentId !== void 0 && agentId !== "main" ? ownValue(session.agents, agentId) : void 0;
-    const ring = agent !== void 0 && agent.staleSince === void 0 ? progressRing(agent, typical) : void 0;
-    if (item2.kind !== "node" || agent === void 0 || ring === void 0) {
+    const agent = item2.kind === "node" && item2.agentId !== void 0 ? ownValue(session.agents, item2.agentId) : void 0;
+    if (item2.kind !== "node" || agent === void 0) {
+      return item2;
+    }
+    const ring = agentRing(agent, { running: item2.state === "running", stale: item2.stale === true, idle: item2.idle === true }, typical);
+    if (ring === void 0) {
       return item2;
     }
     return { ...item2, progress: ring, tip: `${agent.role}
@@ -3387,7 +3404,7 @@ var placeSession = (session, options, room) => {
   };
   const wrap = options.wrap && LINE_B.some((id) => shown[id]);
   const plans = rows.map((row2) => {
-    const pill = shortBranch(row2.branch);
+    const pill = pillText(row2);
     const { parents, depths } = streamParents(row2.streams);
     const lanes = laneOrder(row2.streams, parents);
     const lanePillW = Math.max(0, ...row2.streams.map((stream) => pillWidth(stream.package)));
@@ -3666,7 +3683,7 @@ ${FOLD_HINT}` : label };
     const pillFrom = unfolds ? { from: { key: sessionKeys.compactPill(branch) }, fromElse: sessionKeys.compactMore(row2.pipeline) } : { from: { key: origin.key } };
     const branchEdge = `edge:branch:${branch}`;
     const worktree = { edges: [branchEdge], when: "appear", color };
-    add({ kind: "pill", key: pillKey, at: { x: pl + pillW / 2, y }, text: pill, color, ...base, ...pillFrom, dot: worktree });
+    add({ kind: "pill", key: pillKey, at: { x: pl + pillW / 2, y }, text: pill, color, ...pillTip(row2), ...base, ...pillFrom, dot: worktree });
     edge(branchEdge, origin, { key: pillKey, dx: -pillW / 2 }, forked ? "fork" : "done", color, branchShape.shape, { ...base, ...branchShape.extra });
     placedY.set(pillKey, y);
     const pillExit = { key: pillKey, dx: pillW / 2 };
@@ -3975,7 +3992,7 @@ ${FOLD_HINT}` : label };
     const index = group.index;
     const cy = group.mid;
     const base = { pipeline: index };
-    const widths = group.rows.map((row2) => pillWidth(shortBranch(row2.branch)) - 4);
+    const widths = group.rows.map((row2) => pillWidth(pillText(row2)) - 4);
     const moreWidth = (count) => pillWidth(`+${count}`) - 4;
     const endOf = (count) => pillsLeft + widths.slice(0, count).reduce((sum, width2) => sum + width2 + COMPACT_GAP, 0) - COMPACT_GAP;
     const pillRoom = summaryMin - SUMMARY_GAP;
@@ -3993,7 +4010,7 @@ ${FOLD_HINT}` : label };
     group.rows.slice(0, shown2).forEach((row2, slot) => {
       const key = sessionKeys.compactPill(row2.branch);
       const pillAt = { x: x + widths[slot] / 2, y: cy };
-      add({ kind: "pill", key, at: pillAt, text: shortBranch(row2.branch), color: rowColor(row2), compact: true, branch: row2.branch, ...base, from: { key: sessionKeys.pill(row2.branch) } });
+      add({ kind: "pill", key, at: pillAt, text: pillText(row2), color: rowColor(row2), compact: true, branch: row2.branch, ...pillTip(row2), ...base, from: { key: sessionKeys.pill(row2.branch) } });
       x += widths[slot] + COMPACT_GAP;
     });
     const hidden = group.rows.slice(shown2);
@@ -5408,12 +5425,13 @@ var pillBranch = (branch, key) => {
 };
 var branchCell = (session, agent) => {
   if (!agent.branch) {
-    const text2 = agent.id === MAIN_AGENT ? "session" : "main checkout";
-    return { text: text2, color: { kind: "shared" }, title: "No worktree", muted: true };
+    const text3 = agent.id === MAIN_AGENT ? "session" : "main checkout";
+    return { text: text3, color: { kind: "shared" }, title: "No worktree", muted: true };
   }
   const row2 = session.rows.find((entry) => entry.branch === agent.branch);
   const color = row2?.package ? { kind: "package", id: row2.package } : { kind: "shared" };
-  return { text: pillBranch(agent.branch, session.key), color, title: agent.branch, muted: false };
+  const text2 = row2?.branchLabel?.description ?? pillBranch(agent.branch, session.key);
+  return { text: text2, color, title: labelTitle(row2?.branchLabel, agent.branch), muted: false };
 };
 var sessionRowState = (session, agent) => {
   if (agent.id !== MAIN_AGENT) {
@@ -5584,28 +5602,51 @@ var agentDetails = (run, agent) => {
 };
 var DETAILS_LOADING = "Loading the agent's calls\u2026";
 var DETAILS_FAILED = "The agent's calls could not be loaded. Close and open the row to retry.";
+var ownNode = (session, id) => {
+  const inRow = (row2) => {
+    const runs = row2.streams.flatMap((stream) => stream.runs);
+    return [...runs, ...row2.reviewers, ...row2.fixes].some((node) => node.agentId === id);
+  };
+  return session.planAgents.includes(id) || session.rows.some(inRow);
+};
+var nodeRuns = (session, agent) => {
+  const pr = session.rows.find((row2) => row2.pr?.agentId === agent.id)?.pr;
+  if (pr !== void 0) {
+    return pr.state === "running";
+  }
+  if (session.docs?.agentId === agent.id) {
+    return session.docs.state === "running";
+  }
+  return ownNode(session, agent.id);
+};
+var progressLine = (session, agent, state, typical) => {
+  const running = (state === "running" || state === "waiting") && nodeRuns(session, agent);
+  return agentRing(agent, { running, stale: state === "stale", idle: state === "idle" }, typical)?.text ?? "";
+};
 var fullCopy = (agent, full) => {
   if (!agent.trimmed) {
     return agent;
   }
   return agent.report !== void 0 && full?.report === void 0 ? void 0 : full;
 };
-var sessionAgentDetails = (session, agent, full, load2) => {
+var sessionAgentDetails = (session, agent, full, load2, typical) => {
   const source = fullCopy(agent, full);
-  const active = isActive4(sessionRowState(session, agent));
+  const state = sessionRowState(session, agent);
+  const active = isActive4(state);
   const budget = budgetLines(agent, session.costUsd, "the session's cost");
   const heading2 = active ? "Working on" : "Report";
+  const progress = progressLine(session, agent, state, typical);
   if (source === void 0) {
     const line = agent.report ? reportText(agent.report.text) : "";
     const body2 = active ? workingOn(agent) : { tool: "", text: line || "No report." };
     const note2 = load2 === "failed" ? DETAILS_FAILED : DETAILS_LOADING;
-    return { calls: [], budget, heading: heading2, ...body2, files: [], moreFiles: 0, note: note2 };
+    return { calls: [], budget, heading: heading2, ...body2, files: [], moreFiles: 0, note: note2, progress };
   }
   const { files, more } = changedFiles(source);
   const report = source.report ? reportText(source.report.text) : "";
   const body = active ? workingOn(agent) : { tool: "", text: report || "No report." };
   const note = load2 === "failed" ? DETAILS_FAILED : "";
-  return { calls: recentCalls(source), budget, heading: heading2, ...body, files, moreFiles: more, note };
+  return { calls: recentCalls(source), budget, heading: heading2, ...body, files, moreFiles: more, note, progress };
 };
 var detailKey = (agent) => {
   const last = agent.recent.at(-1);
@@ -5713,24 +5754,35 @@ var createAgentDetails = (id) => {
   const note = el("p", "details-note");
   note.setAttribute("role", "status");
   note.hidden = true;
+  const progress = el("div", "details-progress");
+  const progressText2 = el("p", "report-text");
+  progress.append(heading("Progress"), progressText2);
+  let calls;
   let signature = "";
   return {
     element,
     render(model) {
-      const next = JSON.stringify(model);
-      if (next === signature) {
-        return;
+      const line = "progress" in model ? model.progress : "";
+      setText(progressText2, line);
+      const next = JSON.stringify({ ...model, progress: void 0 });
+      if (next !== signature) {
+        signature = next;
+        const text2 = "note" in model ? model.note : "";
+        setText(note, text2);
+        note.hidden = text2 === "";
+        if (text2 === DETAILS_FAILED) {
+          note.dataset.tone = "failed";
+        } else {
+          delete note.dataset.tone;
+        }
+        calls = callsSection(model.calls, note);
+        inner.replaceChildren(calls, budgetSection(model.budget), reportSection(model));
       }
-      signature = next;
-      const text2 = "note" in model ? model.note : "";
-      setText(note, text2);
-      note.hidden = text2 === "";
-      if (text2 === DETAILS_FAILED) {
-        note.dataset.tone = "failed";
-      } else {
-        delete note.dataset.tone;
+      if (line === "") {
+        progress.remove();
+      } else if (calls !== void 0 && progress.parentElement !== calls) {
+        calls.prepend(progress);
       }
-      inner.replaceChildren(callsSection(model.calls, note), budgetSection(model.budget), reportSection(model));
     }
   };
 };
@@ -6227,7 +6279,7 @@ var createSessionTableView = (host, context) => {
         return void 0;
       }
       const load2 = loads.get(id);
-      return sessionAgentDetails(current, agent, load2?.state.full, agent.trimmed ? loadOf(load2) : "done");
+      return sessionAgentDetails(current, agent, load2?.state.full, agent.trimmed ? loadOf(load2) : "done", context.typical);
     },
     onToggle(id, open2) {
       const agent = agentOf(id);
@@ -6436,6 +6488,7 @@ var firstLine = (text2) => {
   }
   return "";
 };
+var replyCount = (count) => count === 1 ? "1 reply" : `${count} replies`;
 var stripModel = (messages, waits = () => false) => {
   const newest2 = messages.at(-1);
   if (!newest2) {
@@ -6444,7 +6497,7 @@ var stripModel = (messages, waits = () => false) => {
   const waiting = waits(newest2);
   const shown = newest2.kind === "plan" || newest2.kind === "ask" && waiting;
   const label = shown ? KIND_LABEL[newest2.kind] : "";
-  const count = plural(messages.length, "message");
+  const count = replyCount(messages.length);
   return { id: newest2.id, text: firstLine(newest2.text), kind: newest2.kind, label, at: parseTime(newest2.at), count, waiting };
 };
 var stillWaits = (message, card, home) => {
@@ -6520,18 +6573,105 @@ var toEntry = (message) => {
     dateTime: message.at
   };
 };
-var messagesModel = (messages) => {
-  const entries = messages.map(toEntry).reverse();
-  return { latest: entries[0], earlier: entries.slice(1), count: entries.length };
+var DEVELOPER_MESSAGE_CAP = 4e3;
+var ANSWER_CAP = 500;
+var developerCutNote = (message) => {
+  if (!message.truncated) {
+    return "";
+  }
+  return `cut at ${message.kind === "answer" ? ANSWER_CAP : DEVELOPER_MESSAGE_CAP} characters`;
+};
+var DEVELOPER_LABEL = { prompt: "prompt", answer: "answered" };
+var DEVELOPER_WHO = { prompt: "you", answer: "you answered" };
+var NO_MESSAGE_TEXT = "No message from you in this turn";
+var UNKNOWN_REPORTER = "a subagent";
+var PENDING_TEXT = {
+  working: "The main thread is working on your message.",
+  waiting: "The main thread is waiting for your answer.",
+  idle: "The main thread stopped without a reply.",
+  ended: "The session ended before the main thread replied."
+};
+var oneLine = (text2) => text2.replace(/\s+/g, " ").trim();
+var toDeveloperEntry = (message) => {
+  const at = parseTime(message.at);
+  const notes = message.notes ?? "";
+  const line = notes === "" ? oneLine(message.text) : `${oneLine(message.text)} \xB7 ${oneLine(notes)}`;
+  return {
+    id: message.id,
+    kind: message.kind,
+    label: DEVELOPER_LABEL[message.kind],
+    who: DEVELOPER_WHO[message.kind],
+    answers: (message.questions ?? []).map((question) => `Answer to: ${question}`),
+    text: message.text,
+    notes,
+    line,
+    truncated: message.truncated,
+    cut: developerCutNote(message),
+    at,
+    time: timeOfDay(at),
+    dateTime: message.at
+  };
+};
+var timeOf2 = (item2) => parseTime(item2.at) ?? Number.NEGATIVE_INFINITY;
+var byTime = (items) => {
+  return [...items].sort((a, b) => timeOf2(a) - timeOf2(b) || (a.id < b.id ? -1 : Number(a.id > b.id)));
+};
+var turnNote = (reply, source) => {
+  if (reply?.startedBy === void 0) {
+    return { kind: "none", text: NO_MESSAGE_TEXT };
+  }
+  const name = source.reporter?.(reply.startedBy) ?? UNKNOWN_REPORTER;
+  return { kind: "report", text: `after the report of ${name}` };
+};
+var toTurn = (developer, reply, source) => {
+  const entries = developer.map(toDeveloperEntry);
+  const replyEntry = reply ? toEntry(reply) : void 0;
+  const first = entries[0] ?? replyEntry;
+  const note = source.developerMessages !== void 0 && entries.length === 0 ? turnNote(reply, source) : void 0;
+  return { key: first?.id ?? "", developer: entries, reply: replyEntry, note, time: first?.time ?? "", dateTime: first?.dateTime ?? "", at: first?.at };
+};
+var pendingState = (source, newest2) => {
+  if (source.main === "ended") {
+    return "ended";
+  }
+  const newestAt = timeOf2(newest2);
+  const asked = (source.openQuestionsAt ?? []).some((at) => (parseTime(at) ?? Number.NEGATIVE_INFINITY) > newestAt);
+  if (asked) {
+    return "waiting";
+  }
+  const idle = source.main === "idle" && (parseTime(source.idleSince) ?? Number.NEGATIVE_INFINITY) >= newestAt;
+  return idle ? "idle" : "working";
+};
+var turnsModel = (source) => {
+  const replies = byTime(source.messages);
+  const developer = byTime(source.developerMessages ?? []);
+  const turns = [];
+  let next = 0;
+  for (const reply of replies) {
+    const start2 = next;
+    while (next < developer.length && timeOf2(developer[next]) <= timeOf2(reply)) {
+      next += 1;
+    }
+    turns.push(toTurn(developer.slice(start2, next), reply, source));
+  }
+  const rest = developer.slice(next);
+  const newest2 = rest.at(-1);
+  const pending = newest2 ? pendingState(source, newest2) : void 0;
+  if (rest.length > 0) {
+    turns.push(toTurn(rest, void 0, source));
+  }
+  const newestFirst2 = turns.reverse();
+  const count = source.developerMessages === void 0 ? void 0 : developer.length;
+  return { latest: newestFirst2[0], pending, earlier: newestFirst2.slice(1), replies: replies.length, developer: count };
 };
 var messagePlace = (model, messageId) => {
   if (messageId === void 0) {
     return void 0;
   }
-  if (model.latest?.id === messageId) {
+  if (model.latest?.reply?.id === messageId) {
     return "latest";
   }
-  return model.earlier.some((entry) => entry.id === messageId) ? "earlier" : void 0;
+  return model.earlier.some((turn) => turn.reply?.id === messageId) ? "earlier" : void 0;
 };
 var messageRun = (runs, messageId, first) => {
   const holds = (run) => run.messages.some((message) => message.id === messageId);
@@ -6543,20 +6683,35 @@ var messageRun = (runs, messageId, first) => {
   }
   return Object.values(runs).find(holds);
 };
-var memoSource = (toSource) => {
+var sessionMain = (session) => {
+  if (session.endedAt !== void 0) {
+    return { main: "ended" };
+  }
+  const idleSince = ownValue(session.agents, MAIN_AGENT)?.idleSince;
+  return idleSince === void 0 ? { main: "working" } : { main: "idle", idleSince };
+};
+var sessionSource = (session) => {
+  const heading2 = sessionHeading(session);
+  const reporter = (agentId) => {
+    const agent = ownValue(session.agents, agentId);
+    return agent ? agentName(session, agent) : UNKNOWN_REPORTER;
+  };
+  const title = modalTitle({ key: session.key, title: heading2, branch: heading2 });
+  const asked = session.questions.filter((question) => question.audience === "user" && question.state === "open");
+  const developer = { developerMessages: session.developerMessages, openQuestionsAt: asked.map((question) => question.createdAt) };
+  return { id: session.id, title, key: session.key, messages: session.messages, ...developer, ...sessionMain(session), reporter };
+};
+var createRunModalSource = () => {
   let memo;
-  return (state) => {
-    if (state === void 0) {
+  return (run) => {
+    if (run === void 0) {
       return void 0;
     }
-    if (memo?.state !== state) {
-      memo = { state, source: toSource(state) };
+    if (memo?.run !== run) {
+      memo = { run, source: { id: run.id, title: modalTitle(run), key: run.key, messages: run.messages } };
     }
     return memo.source;
   };
-};
-var createRunModalSource = () => {
-  return memoSource((run) => ({ id: run.id, title: modalTitle(run), key: run.key, messages: run.messages }));
 };
 var createModalSource = (runs, cardId, messageId) => {
   let memo;
@@ -6595,16 +6750,19 @@ var createModalSource = (runs, cardId, messageId) => {
   return () => toSource(read(runs()));
 };
 var createSessionModalSource = (sessions, sessionId, fallback = () => void 0) => {
-  const toSource = memoSource((session) => {
-    const heading2 = sessionHeading(session);
-    return { id: session.id, title: modalTitle({ key: session.key, title: heading2, branch: heading2 }), key: session.key, messages: session.messages };
-  });
+  let memo;
   return () => {
-    const all = sessions();
-    return toSource(Object.hasOwn(all, sessionId) ? all[sessionId] : fallback());
+    const session = ownValue(sessions(), sessionId) ?? fallback();
+    if (session === void 0) {
+      return void 0;
+    }
+    if (memo?.session !== session) {
+      memo = { session, source: sessionSource(session) };
+    }
+    return memo.source;
   };
 };
-var earlierLabel = (count) => `Earlier messages (${count})`;
+var earlierLabel = (count) => `Earlier turns (${count})`;
 var modalTitle = (run) => {
   const title = cardTitle(run);
   return run.key ? `${run.key}: ${title}` : title;
@@ -6613,9 +6771,173 @@ var modalTitleKey = (source) => {
   const { key, title } = source;
   return key !== void 0 && title.startsWith(`${key}: `) ? { key, after: title.slice(key.length) } : { after: "" };
 };
-var modalSubtitle = (repository, count) => {
-  const parts = [repository, "main thread", plural(count, "message")];
+var modalSubtitle = (repository, replies, developer) => {
+  const mine = developer === void 0 ? "" : `${plural(developer, "message")} from you`;
+  const parts = [repository, "main thread", replyCount(replies), mine];
   return parts.filter((part) => part !== "").join(" \xB7 ");
+};
+
+// src/ui/modal-motion.ts
+var OPEN_EASE = "cubic-bezier(.2,.8,.2,1)";
+var CLOSE_EASE = "cubic-bezier(.4,0,.2,1)";
+var OPEN_MS = 400;
+var CONTENT_AT_MS = 200;
+var CONTENT_MS = 180;
+var CONTENT_STAGGER_MS = 30;
+var CONTENT_GROUPS = 3;
+var BACKDROP_MS = 240;
+var OPENER_FADE_MS = 100;
+var CLOSE_CONTENT_MS = 120;
+var CLOSE_MOVE_AT_MS = 100;
+var CLOSE_MS = 320;
+var OPENER_RETURN_MS = 150;
+var FADE_CLOSE_MS = 200;
+var MIN_MOVE_MS = 120;
+var MIN_OPENER_PX = 4;
+var isTransparent = (color) => {
+  return color.trim() === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\)$/.test(color.trim());
+};
+var isUsable = (rect, viewport2) => {
+  if (rect === void 0 || rect.width < MIN_OPENER_PX || rect.height < MIN_OPENER_PX) {
+    return false;
+  }
+  const inside = rect.left < viewport2.width && rect.top < viewport2.height;
+  return inside && rect.left + rect.width > 0 && rect.top + rect.height > 0;
+};
+var fallbackRect = (box) => ({
+  left: box.left + box.width * 0.3,
+  top: box.top + box.height * 0.45,
+  width: box.width * 0.4,
+  height: box.height * 0.1
+});
+var rectDistance = (a, b) => {
+  const left = Math.abs(a.left - b.left);
+  const top = Math.abs(a.top - b.top);
+  const right = Math.abs(a.left + a.width - b.left - b.width);
+  const bottom = Math.abs(a.top + a.height - b.top - b.height);
+  return Math.max(left, top, right, bottom);
+};
+var moveMs = (from, to, start2, fullMs) => {
+  const full = rectDistance(start2, to);
+  if (full <= 0) {
+    return fullMs;
+  }
+  const fraction = Math.min(1, rectDistance(from, to) / full);
+  return Math.max(MIN_MOVE_MS, Math.round(fullMs * fraction));
+};
+var openPlan = (box, opener, inFlight, viewport2) => {
+  const start2 = isUsable(opener, viewport2) ? opener : fallbackRect(box);
+  const move = inFlight ? moveMs(inFlight, box, start2, OPEN_MS) : OPEN_MS;
+  const contentAt = Math.round(move * CONTENT_AT_MS / OPEN_MS);
+  const doneAt = contentAt + CONTENT_MS + (CONTENT_GROUPS - 1) * CONTENT_STAGGER_MS;
+  return { from: inFlight ?? start2, moveMs: move, contentAt, doneAt };
+};
+var closePlan = (box, opener, inFlight, viewport2) => {
+  if (!isUsable(opener, viewport2)) {
+    return { kind: "fade", doneAt: FADE_CLOSE_MS };
+  }
+  if (inFlight) {
+    const move = moveMs(inFlight, opener, box, CLOSE_MS);
+    return { kind: "shell", from: inFlight, to: opener, delay: 0, moveMs: move, doneAt: move };
+  }
+  return { kind: "shell", from: box, to: opener, delay: CLOSE_MOVE_AT_MS, moveMs: CLOSE_MS, doneAt: CLOSE_MOVE_AT_MS + CLOSE_MS };
+};
+var px = (value2) => `${Math.round(value2 * 100) / 100}px`;
+var lookFrame = (look) => ({
+  left: px(look.rect.left),
+  top: px(look.rect.top),
+  width: px(look.rect.width),
+  height: px(look.rect.height),
+  borderRadius: look.radius,
+  backgroundColor: look.background,
+  borderColor: look.border,
+  boxShadow: look.shadow
+});
+var shellFrames = (from, to) => [lookFrame(from), lookFrame(to)];
+var tagFrames = (from, to) => {
+  const dx = px(to.left - from.left);
+  const dy = px(to.top - from.top);
+  return [{ transform: "translate(0px, 0px)" }, { transform: `translate(${dx}, ${dy})` }];
+};
+var rideFrames = (from, box) => {
+  const dx = px(from.left - box.left);
+  const dy = px(from.top - box.top);
+  return [{ translate: `${dx} ${dy}` }, { translate: "0px 0px" }];
+};
+var contentDelays = (contentAt) => {
+  return Array.from({ length: CONTENT_GROUPS }, (_, group) => contentAt + group * CONTENT_STAGGER_MS);
+};
+var SWAP_MS = 550;
+var SLIDE_MS = 450;
+var TURN_HEIGHT_MS = 450;
+var FOLD_FADE_MS = 160;
+var BUBBLE_MS = 450;
+var BUBBLE_SHIFT_PX = 12;
+var WORKING_DELAY_MS = 120;
+var WORKING_FADE_MS = 300;
+var REPLY_FADE_MS = 300;
+var TURN_TOGGLE_MS = 400;
+var LINES_FADE_MS = 160;
+var FULL_FADE_MS = 280;
+var CLAMP_MS = 350;
+var HOLD_MS = Math.max(TURN_HEIGHT_MS, SLIDE_MS) + 20;
+var heightFrames = (from, to) => [{ height: px(from) }, { height: px(to) }];
+var dropFrames = () => [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
+var bubbleFrames = () => [{ opacity: 0, transform: `translateX(${BUBBLE_SHIFT_PX}px)` }, { opacity: 1, transform: "none" }];
+var riseFrames = () => [{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }];
+var latestChange = (before, after) => {
+  if (after === void 0) {
+    return before === void 0 ? "none" : "turn";
+  }
+  if (before === void 0 || before.key !== after.key) {
+    return "turn";
+  }
+  if (before.reply === void 0 && after.reply !== void 0) {
+    return "reply";
+  }
+  return before.reply === after.reply ? "same" : "turn";
+};
+var anchorIndex = (tops) => {
+  const below = tops.findIndex((top) => top >= 0);
+  return below >= 0 ? below : tops.length - 1;
+};
+var holdStep = (hold, offset, scrollTop, now) => {
+  const delta = offset - hold.offset;
+  const still = Math.abs(delta) < 0.5;
+  if (scrollTop !== hold.scrollTop || scrollTop <= 0 && still) {
+    return void 0;
+  }
+  return { scrollTop: still ? scrollTop : scrollTop + delta, done: now >= hold.until };
+};
+
+// src/ui/ticket-link.ts
+var drawnLinks = /* @__PURE__ */ new WeakMap();
+var ticketLinkTitle = (key) => `Open ${key} in the tracker`;
+var setTicketKey = (host, key, template, after = "", fallback = "") => {
+  const href = key === void 0 ? void 0 : ticketUrl(template, key);
+  if (key === void 0 || href === void 0) {
+    if (drawnLinks.delete(host)) {
+      host.replaceChildren();
+    }
+    setText(host, key === void 0 ? fallback : `${key}${after}`);
+    return;
+  }
+  const drawn = JSON.stringify([href, key, after]);
+  if (drawnLinks.get(host) === drawn) {
+    return;
+  }
+  drawnLinks.set(host, drawn);
+  const link = el("a", "ticket-link", key);
+  link.setAttribute("href", href);
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener noreferrer");
+  link.title = ticketLinkTitle(key);
+  link.addEventListener("click", (event) => event.stopPropagation());
+  host.textContent = "";
+  host.replaceChildren(link);
+  if (after !== "") {
+    host.append(after);
+  }
 };
 
 // src/ui/message-text.ts
@@ -6766,154 +7088,10 @@ var textBlocks = (text2) => {
   return blocks;
 };
 
-// src/ui/modal-motion.ts
-var OPEN_EASE = "cubic-bezier(.2,.8,.2,1)";
-var CLOSE_EASE = "cubic-bezier(.4,0,.2,1)";
-var OPEN_MS = 400;
-var CONTENT_AT_MS = 200;
-var CONTENT_MS = 180;
-var CONTENT_STAGGER_MS = 30;
-var CONTENT_GROUPS = 3;
-var BACKDROP_MS = 240;
-var OPENER_FADE_MS = 100;
-var CLOSE_CONTENT_MS = 120;
-var CLOSE_MOVE_AT_MS = 100;
-var CLOSE_MS = 320;
-var OPENER_RETURN_MS = 150;
-var FADE_CLOSE_MS = 200;
-var MIN_MOVE_MS = 120;
-var MIN_OPENER_PX = 4;
-var isTransparent = (color) => {
-  return color.trim() === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\)$/.test(color.trim());
-};
-var isUsable = (rect, viewport2) => {
-  if (rect === void 0 || rect.width < MIN_OPENER_PX || rect.height < MIN_OPENER_PX) {
-    return false;
-  }
-  const inside = rect.left < viewport2.width && rect.top < viewport2.height;
-  return inside && rect.left + rect.width > 0 && rect.top + rect.height > 0;
-};
-var fallbackRect = (box) => ({
-  left: box.left + box.width * 0.3,
-  top: box.top + box.height * 0.45,
-  width: box.width * 0.4,
-  height: box.height * 0.1
-});
-var rectDistance = (a, b) => {
-  const left = Math.abs(a.left - b.left);
-  const top = Math.abs(a.top - b.top);
-  const right = Math.abs(a.left + a.width - b.left - b.width);
-  const bottom = Math.abs(a.top + a.height - b.top - b.height);
-  return Math.max(left, top, right, bottom);
-};
-var moveMs = (from, to, start2, fullMs) => {
-  const full = rectDistance(start2, to);
-  if (full <= 0) {
-    return fullMs;
-  }
-  const fraction = Math.min(1, rectDistance(from, to) / full);
-  return Math.max(MIN_MOVE_MS, Math.round(fullMs * fraction));
-};
-var openPlan = (box, opener, inFlight, viewport2) => {
-  const start2 = isUsable(opener, viewport2) ? opener : fallbackRect(box);
-  const move = inFlight ? moveMs(inFlight, box, start2, OPEN_MS) : OPEN_MS;
-  const contentAt = Math.round(move * CONTENT_AT_MS / OPEN_MS);
-  const doneAt = contentAt + CONTENT_MS + (CONTENT_GROUPS - 1) * CONTENT_STAGGER_MS;
-  return { from: inFlight ?? start2, moveMs: move, contentAt, doneAt };
-};
-var closePlan = (box, opener, inFlight, viewport2) => {
-  if (!isUsable(opener, viewport2)) {
-    return { kind: "fade", doneAt: FADE_CLOSE_MS };
-  }
-  if (inFlight) {
-    const move = moveMs(inFlight, opener, box, CLOSE_MS);
-    return { kind: "shell", from: inFlight, to: opener, delay: 0, moveMs: move, doneAt: move };
-  }
-  return { kind: "shell", from: box, to: opener, delay: CLOSE_MOVE_AT_MS, moveMs: CLOSE_MS, doneAt: CLOSE_MOVE_AT_MS + CLOSE_MS };
-};
-var px = (value2) => `${Math.round(value2 * 100) / 100}px`;
-var lookFrame = (look) => ({
-  left: px(look.rect.left),
-  top: px(look.rect.top),
-  width: px(look.rect.width),
-  height: px(look.rect.height),
-  borderRadius: look.radius,
-  backgroundColor: look.background,
-  borderColor: look.border,
-  boxShadow: look.shadow
-});
-var shellFrames = (from, to) => [lookFrame(from), lookFrame(to)];
-var tagFrames = (from, to) => {
-  const dx = px(to.left - from.left);
-  const dy = px(to.top - from.top);
-  return [{ transform: "translate(0px, 0px)" }, { transform: `translate(${dx}, ${dy})` }];
-};
-var rideFrames = (from, box) => {
-  const dx = px(from.left - box.left);
-  const dy = px(from.top - box.top);
-  return [{ translate: `${dx} ${dy}` }, { translate: "0px 0px" }];
-};
-var contentDelays = (contentAt) => {
-  return Array.from({ length: CONTENT_GROUPS }, (_, group) => contentAt + group * CONTENT_STAGGER_MS);
-};
-
-// src/ui/ticket-link.ts
-var drawnLinks = /* @__PURE__ */ new WeakMap();
-var ticketLinkTitle = (key) => `Open ${key} in the tracker`;
-var setTicketKey = (host, key, template, after = "", fallback = "") => {
-  const href = key === void 0 ? void 0 : ticketUrl(template, key);
-  if (key === void 0 || href === void 0) {
-    if (drawnLinks.delete(host)) {
-      host.replaceChildren();
-    }
-    setText(host, key === void 0 ? fallback : `${key}${after}`);
-    return;
-  }
-  const drawn = JSON.stringify([href, key, after]);
-  if (drawnLinks.get(host) === drawn) {
-    return;
-  }
-  drawnLinks.set(host, drawn);
-  const link = el("a", "ticket-link", key);
-  link.setAttribute("href", href);
-  link.setAttribute("target", "_blank");
-  link.setAttribute("rel", "noopener noreferrer");
-  link.title = ticketLinkTitle(key);
-  link.addEventListener("click", (event) => event.stopPropagation());
-  host.textContent = "";
-  host.replaceChildren(link);
-  if (after !== "") {
-    host.append(after);
-  }
-};
-
-// src/ui/modal.ts
-var TITLE_ID = "main-modal-title";
-var EARLIER_ID = "main-modal-earlier";
-var EMPTY_TEXT = "No messages from the main thread yet.";
-var SWAP_MS = 550;
-var SLIDE_MS = 450;
-var FLASH_LATEST_MS = 1500;
-var FLASH_ITEM_MS = 1400;
-var FLASHED_MS = 1300;
-var FLASH_LATEST = [
-  { boxShadow: "0 0 0 0 rgba(255, 255, 255, 0)" },
-  { boxShadow: "0 0 0 3px rgba(255, 255, 255, .24)", offset: 0.22 },
-  { boxShadow: "0 0 0 3px rgba(255, 255, 255, 0)" }
-];
-var FLASH_ITEM = [
-  { backgroundColor: "rgba(255, 255, 255, .12)" },
-  { backgroundColor: "rgba(255, 255, 255, .12)", offset: 0.3 },
-  { backgroundColor: "rgba(255, 255, 255, 0)" }
-];
-var FADE_IN = [{ opacity: 0 }, { opacity: 1 }];
-var mainTag = () => {
-  const tag = el("span", "main-tag");
-  const dot = el("i");
-  dot.setAttribute("aria-hidden", "true");
-  tag.append(dot, "main");
-  return tag;
-};
+// src/ui/turn-view.ts
+var SHOW_ALL_TEXT = "Show all";
+var SHOW_LESS_TEXT = "Show less";
+var noop = () => void 0;
 var spanNodes = (spans) => spans.map((span) => {
   if (span.kind === "text") {
     return document.createTextNode(span.text);
@@ -6948,12 +7126,339 @@ var blockNode = (block) => {
 var drawMessageText = (target, text2) => {
   target.replaceChildren(...textBlocks(text2).map(blockNode));
 };
+var fullTime = (at) => at === void 0 ? "" : new Date(at).toLocaleString();
+var heights = /* @__PURE__ */ new WeakMap();
+var fades = /* @__PURE__ */ new WeakMap();
+var stopHeight = (element) => {
+  const height = element.getBoundingClientRect().height;
+  heights.get(element)?.cancel();
+  heights.delete(element);
+  element.classList.remove("sizing");
+  return height;
+};
+var growFrom = (element, from, duration2, done = noop) => {
+  const to = element.getBoundingClientRect().height;
+  if (Math.abs(to - from) < 0.5) {
+    done();
+    return;
+  }
+  element.classList.add("sizing");
+  const animation = element.animate(heightFrames(from, to), { duration: duration2, easing: OPEN_EASE });
+  heights.set(element, animation);
+  const end = () => {
+    if (heights.get(element) === animation) {
+      heights.delete(element);
+      element.classList.remove("sizing");
+      done();
+    }
+  };
+  animation.finished.then(end, noop);
+};
+var opacityNow = (element) => Number(getComputedStyle(element).opacity);
+var fadeFrom = (element, from, duration2, delay = 0) => {
+  fades.get(element)?.cancel();
+  const to = opacityNow(element);
+  if (Math.abs(to - from) < 0.01 && delay === 0) {
+    fades.delete(element);
+    return;
+  }
+  fades.set(element, element.animate([{ opacity: from }, { opacity: to }], { duration: duration2, delay, easing: OPEN_EASE, fill: "backwards" }));
+};
+var play = (element, frames, options) => {
+  fades.get(element)?.cancel();
+  fades.set(element, element.animate(frames, options));
+};
+var stopFade = (element) => {
+  fades.get(element)?.cancel();
+  fades.delete(element);
+};
+var bubbleCount = 0;
+var createBubble = (reducedMotion) => {
+  bubbleCount += 1;
+  const element = el("div", "main-you");
+  const head = el("div", "main-you-head");
+  const kind = el("span", "main-kind");
+  const time2 = el("time", "main-time");
+  const agoText = el("span", "main-ago");
+  head.append(el("span", "main-you-tag", "You"), kind, time2, agoText);
+  const answers = el("div", "main-you-answers");
+  const text2 = el("div", "main-you-text clamped");
+  text2.id = `main-you-text-${bubbleCount}`;
+  const more = el("button", "main-you-more", SHOW_ALL_TEXT);
+  more.type = "button";
+  more.hidden = true;
+  more.setAttribute("aria-controls", text2.id);
+  more.setAttribute("aria-expanded", "false");
+  const notes = el("p", "main-you-notes");
+  const cut = el("p", "main-cut");
+  element.append(head, answers, text2, more, notes, cut);
+  let textKey;
+  let answersKey;
+  let expanded = false;
+  const setExpanded = (open2) => {
+    expanded = open2;
+    text2.classList.toggle("clamped", !open2);
+    setText(more, open2 ? SHOW_LESS_TEXT : SHOW_ALL_TEXT);
+    more.setAttribute("aria-expanded", String(open2));
+  };
+  more.addEventListener("click", () => {
+    const animate = !reducedMotion();
+    const from = animate ? stopHeight(text2) : 0;
+    setExpanded(!expanded);
+    if (animate) {
+      growFrom(text2, from, CLAMP_MS);
+    }
+  });
+  const bubble = {
+    element,
+    at: void 0,
+    fill(entry, withAgo) {
+      element.dataset.kind = entry.kind;
+      setText(kind, entry.label);
+      setText(time2, entry.time);
+      time2.dateTime = entry.dateTime;
+      time2.title = fullTime(entry.at);
+      bubble.at = withAgo ? entry.at : void 0;
+      agoText.hidden = !withAgo;
+      const answerKey = entry.answers.join("\n");
+      if (answersKey !== answerKey) {
+        answersKey = answerKey;
+        answers.replaceChildren(...entry.answers.map((line) => el("p", "main-you-answer", line)));
+      }
+      answers.hidden = entry.answers.length === 0;
+      if (textKey !== entry.text) {
+        textKey = entry.text;
+        setText(text2, entry.text);
+        setExpanded(false);
+        more.hidden = true;
+      }
+      setText(notes, entry.notes);
+      notes.hidden = entry.notes === "";
+      setText(cut, entry.cut);
+      cut.hidden = entry.cut === "";
+    },
+    tick(clock, ago2) {
+      setText(agoText, bubble.at === void 0 ? "" : ago2(clock - bubble.at));
+    },
+    measure() {
+      if (!expanded) {
+        const overflows = text2.scrollHeight > text2.clientHeight + 1;
+        more.hidden = !overflows;
+        text2.classList.toggle("overflows", overflows);
+      }
+    },
+    collapse() {
+      stopHeight(text2);
+      if (expanded) {
+        setExpanded(false);
+      }
+    }
+  };
+  return bubble;
+};
+var fillBubbles = (group, bubbles, entries, agoId, reducedMotion) => {
+  const keep2 = new Set(entries.map((entry) => entry.id));
+  for (const [id, bubble] of bubbles) {
+    if (!keep2.has(id)) {
+      bubble.element.remove();
+      bubbles.delete(id);
+    }
+  }
+  const added = [];
+  let previous = null;
+  for (const entry of entries) {
+    let bubble = bubbles.get(entry.id);
+    if (bubble === void 0) {
+      bubble = createBubble(reducedMotion);
+      bubbles.set(entry.id, bubble);
+      added.push(bubble);
+    }
+    bubble.fill(entry, entry.id === agoId);
+    const expected = previous ? previous.nextElementSibling : group.firstElementChild;
+    if (bubble.element !== expected) {
+      group.insertBefore(bubble.element, expected);
+    }
+    previous = bubble.element;
+  }
+  group.hidden = entries.length === 0;
+  return added;
+};
+var fillReportNote = (element, turn) => {
+  const report = turn.note?.kind === "report" ? turn.note.text : "";
+  setText(element, report);
+  element.hidden = report === "";
+};
+var createReplyCard = () => {
+  const element = el("article", "main-message");
+  const head = el("div", "main-message-head");
+  const kind = el("span", "main-kind");
+  const time2 = el("time", "main-time");
+  const ago2 = el("span", "main-ago");
+  head.append(kind, time2, ago2);
+  const text2 = el("div", "main-text");
+  const cut = el("p", "main-cut");
+  element.append(head, text2, cut);
+  let drawnId;
+  return {
+    element,
+    parts: [head, text2, cut],
+    ago: ago2,
+    fill(entry) {
+      element.dataset.kind = entry.kind;
+      setText(kind, entry.label);
+      setText(time2, entry.time);
+      time2.dateTime = entry.dateTime;
+      time2.title = fullTime(entry.at);
+      if (drawnId === entry.id) {
+        return false;
+      }
+      drawnId = entry.id;
+      drawMessageText(text2, entry.text);
+      setText(cut, entry.cut);
+      cut.hidden = entry.cut === "";
+      return true;
+    }
+  };
+};
+var turnCount = 0;
+var lineOf = (className, who, text2) => {
+  const line = el("span", className);
+  line.append(el("span", "main-turn-who", who), el("span", "main-turn-first", text2));
+  return line;
+};
+var noteLine = (note) => {
+  return note.kind === "report" ? el("span", "main-turn-line report", note.text) : lineOf("main-turn-line you none", "you", note.text);
+};
+var createTurnCard = (reducedMotion) => {
+  turnCount += 1;
+  const item2 = el("li", "main-turn");
+  const card = el("div", "main-turn-card");
+  const head = el("button", "main-turn-head");
+  head.type = "button";
+  const time2 = el("time", "main-time");
+  const lines = el("span", "main-turn-lines");
+  head.append(time2, lines, chevronIcon());
+  const body = el("div", "main-turn-body");
+  body.id = `main-turn-body-${turnCount}`;
+  head.setAttribute("aria-controls", body.id);
+  const full = el("div", "main-turn-full");
+  const group = el("div", "main-you-group");
+  const reportNote = el("p", "main-report-note");
+  const reply = createReplyCard();
+  reply.ago.remove();
+  full.append(group, reportNote, reply.element);
+  body.append(full);
+  card.append(head, body);
+  item2.append(card);
+  const bubbles = /* @__PURE__ */ new Map();
+  let linesKey;
+  let open2 = false;
+  const setState = (next) => {
+    open2 = next;
+    item2.classList.toggle("open", open2);
+    head.setAttribute("aria-expanded", String(open2));
+    body.inert = !open2;
+  };
+  const setOpen2 = (next, animate) => {
+    if (next === open2) {
+      return;
+    }
+    if (!animate) {
+      stopHeight(card);
+      stopFade(lines);
+      stopFade(full);
+      item2.classList.remove("closing");
+      setState(next);
+      if (open2) {
+        bubbles.forEach((bubble) => bubble.measure());
+      }
+      return;
+    }
+    const from = stopHeight(card);
+    const linesFrom = opacityNow(lines);
+    const fullFrom = open2 || item2.classList.contains("closing") ? opacityNow(full) : 0;
+    if (open2) {
+      body.style.setProperty("--body-top", `${body.offsetTop}px`);
+    }
+    setState(next);
+    item2.classList.toggle("closing", !open2);
+    if (open2) {
+      bubbles.forEach((bubble) => bubble.measure());
+    }
+    growFrom(card, from, TURN_TOGGLE_MS, () => item2.classList.remove("closing"));
+    fadeFrom(lines, linesFrom, open2 ? LINES_FADE_MS : FULL_FADE_MS);
+    fadeFrom(full, fullFrom, open2 ? FULL_FADE_MS : LINES_FADE_MS);
+  };
+  head.addEventListener("click", () => setOpen2(!open2, !reducedMotion()));
+  setState(false);
+  return {
+    item: item2,
+    card,
+    head,
+    isOpen: () => open2,
+    setOpen: setOpen2,
+    fill(turn) {
+      const entry = turn.reply;
+      item2.dataset.messageId = entry?.id ?? "";
+      item2.dataset.kind = entry?.kind ?? "";
+      setText(time2, turn.time);
+      time2.dateTime = turn.dateTime;
+      time2.title = fullTime(turn.at);
+      const key = JSON.stringify([turn.developer.map((message) => [message.who, message.line]), turn.note, entry?.label, entry?.firstLine]);
+      if (linesKey !== key) {
+        linesKey = key;
+        const you = turn.developer.map((message) => lineOf("main-turn-line you", message.who, message.line));
+        const note = turn.note ? [noteLine(turn.note)] : [];
+        const main = entry ? [lineOf("main-turn-line main", `main \xB7 ${entry.label}`, entry.firstLine)] : [];
+        lines.replaceChildren(...you, ...note, ...main);
+      }
+      fillBubbles(group, bubbles, turn.developer, void 0, reducedMotion);
+      fillReportNote(reportNote, turn);
+      if (entry) {
+        reply.fill(entry);
+      }
+      if (open2) {
+        bubbles.forEach((bubble) => bubble.measure());
+      }
+    },
+    measure() {
+      if (open2) {
+        bubbles.forEach((bubble) => bubble.measure());
+      }
+    },
+    collapse() {
+      setOpen2(false, false);
+      bubbles.forEach((bubble) => bubble.collapse());
+    }
+  };
+};
+
+// src/ui/modal.ts
+var TITLE_ID = "main-modal-title";
+var EARLIER_ID = "main-modal-earlier";
+var EMPTY_TEXT = "No messages from the main thread yet.";
+var FLASH_LATEST_MS = 1500;
+var FLASH_ITEM_MS = 1400;
+var FLASHED_MS = 1300;
+var FLASH_LATEST = [
+  { boxShadow: "0 0 0 0 rgba(255, 255, 255, 0)" },
+  { boxShadow: "0 0 0 3px rgba(255, 255, 255, .24)", offset: 0.22 },
+  { boxShadow: "0 0 0 3px rgba(255, 255, 255, 0)" }
+];
+var FLASH_ITEM = [{ backgroundColor: "rgba(255, 255, 255, .12)" }, { backgroundColor: "rgba(255, 255, 255, .12)", offset: 0.3 }];
+var FADE_IN = [{ opacity: 0 }, { opacity: 1 }];
+var mainTag = () => {
+  const tag = el("span", "main-tag");
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  tag.append(dot, "main");
+  return tag;
+};
 var drawModalTitle = (title, source, keyUrl) => {
   const { key, after } = modalTitleKey(source);
   setTicketKey(title, key, keyUrl, after, source.title);
   title.title = source.title;
 };
-var fullTime = (at) => at === void 0 ? "" : new Date(at).toLocaleString();
 var modal;
 var openMainThreadModal = (request) => {
   modal ??= createModal();
@@ -6995,7 +7500,7 @@ var isShown = (element) => {
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 };
-var noop = () => void 0;
+var noop2 = () => void 0;
 var homeOf = (element) => {
   const owner = element.closest(".card, .run-row");
   const run = owner?.dataset.run;
@@ -7031,17 +7536,16 @@ var createModal = () => {
   scroll.setAttribute("role", "region");
   scroll.setAttribute("aria-label", "Messages");
   const empty = el("p", "main-empty", EMPTY_TEXT);
-  const latest = el("article", "main-message");
-  const latestHead = el("div", "main-message-head");
-  const latestKind = el("span", "main-kind");
-  const latestTime = el("time", "main-time");
-  const latestAgo = el("span", "main-ago");
-  latestHead.append(latestKind, latestTime, latestAgo);
-  const latestText = el("div", "main-text");
-  const latestCut = el("p", "main-cut");
-  latest.append(latestHead, latestText, latestCut);
+  const latestArea = el("div", "main-latest");
+  const latestGroup = el("div", "main-you-group");
+  const latestNote = el("p", "main-report-note");
+  const latestReply = createReplyCard();
+  const latest = latestReply.element;
+  const working = el("p", "main-working");
+  latest.append(working);
+  latestArea.append(latestGroup, latestNote, latest);
   const earlier = el("section", "main-earlier");
-  earlier.setAttribute("aria-label", "Earlier messages");
+  earlier.setAttribute("aria-label", "Earlier turns");
   const earlierToggle = el("button", "main-earlier-toggle");
   earlierToggle.type = "button";
   earlierToggle.setAttribute("aria-controls", EARLIER_ID);
@@ -7054,7 +7558,7 @@ var createModal = () => {
   earlierClip.append(earlierList);
   earlierWrap.append(earlierClip);
   earlier.append(earlierToggle, earlierWrap);
-  scroll.append(empty, latest, earlier);
+  scroll.append(empty, latestArea, earlier);
   box.append(header, rule, scroll);
   const riders = [header, rule, scroll];
   root.append(backdrop, box);
@@ -7064,11 +7568,16 @@ var createModal = () => {
   let request;
   let home;
   let drawn;
-  let latestId = "";
+  let drawnModel;
+  let latestShape;
+  let areaKey;
   let latestAt;
   let earlierOpen = false;
-  const items = /* @__PURE__ */ new Map();
-  let itemCount = 0;
+  const latestBubbles = /* @__PURE__ */ new Map();
+  const turns = /* @__PURE__ */ new Map();
+  let anchor;
+  let drawnPending;
+  let ghost;
   let motion = [];
   let lifted = [];
   let openerTag;
@@ -7164,135 +7673,232 @@ var createModal = () => {
     earlierToggle.setAttribute("aria-expanded", String(open3));
     earlierWrap.inert = !open3;
   };
-  const setItemOpen = (entry, open3) => {
-    entry.open = open3;
-    entry.item.classList.toggle("open", open3);
-    entry.head.setAttribute("aria-expanded", String(open3));
-    entry.body.inert = !open3;
-  };
-  const createItem = (id) => {
-    itemCount += 1;
-    const item2 = el("li", "main-earlier-item");
-    item2.dataset.messageId = id;
-    const head = el("button", "main-earlier-head");
-    head.type = "button";
-    const time2 = el("time", "main-time");
-    const kind = el("span", "main-kind");
-    const first = el("span", "main-earlier-first");
-    head.append(time2, kind, first, chevronIcon());
-    const body = el("div", "main-earlier-body");
-    body.id = `main-earlier-body-${itemCount}`;
-    head.setAttribute("aria-controls", body.id);
-    const clip3 = el("div");
-    const content = el("div", "main-earlier-content");
-    const text2 = el("div", "main-text");
-    const cut = el("p", "main-cut");
-    content.append(text2, cut);
-    clip3.append(content);
-    body.append(clip3);
-    item2.append(head, body);
-    const entry = { item: item2, head, time: time2, kind, first, body, text: text2, cut, textKey: "", open: false };
-    setItemOpen(entry, false);
-    head.addEventListener("click", () => setItemOpen(entry, !entry.open));
-    return entry;
-  };
-  const fillItem = (entry, message) => {
-    entry.item.dataset.kind = message.kind;
-    setText(entry.time, message.time);
-    entry.time.dateTime = message.dateTime;
-    entry.time.title = fullTime(message.at);
-    setText(entry.kind, message.label);
-    setText(entry.first, message.firstLine);
-    if (entry.textKey !== message.text) {
-      entry.textKey = message.text;
-      drawMessageText(entry.text, message.text);
+  const reducedMotion = () => request?.context.reducedMotion() ?? true;
+  const drawnHeight = (element) => element.hidden ? 0 : element.getBoundingClientRect().height;
+  const fadeOutPrevious = () => {
+    ghost?.remove();
+    const shown = [...latestArea.children].filter((child) => child instanceof HTMLElement && !child.hidden);
+    const copy = el("div", "main-latest-ghost");
+    copy.append(...shown.map((child) => child.cloneNode(true)));
+    for (const named of copy.querySelectorAll("[id]")) {
+      named.removeAttribute("id");
     }
-    setText(entry.cut, message.cut);
-    entry.cut.hidden = message.cut === "";
+    copy.setAttribute("aria-hidden", "true");
+    copy.inert = true;
+    latestArea.append(copy);
+    ghost = copy;
+    const gone = () => {
+      copy.remove();
+      if (ghost === copy) {
+        ghost = void 0;
+      }
+    };
+    copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FOLD_FADE_MS, easing: OPEN_EASE, fill: "forwards" }).finished.then(gone, gone);
+  };
+  const fillLatest = (model, animate) => {
+    const turn = model.latest;
+    const key = JSON.stringify([turn?.key, turn?.reply?.id, turn?.developer.map((entry) => entry.id), turn?.note, model.pending]);
+    const changed = key !== areaKey;
+    areaKey = key;
+    const shape = turn ? { key: turn.key, reply: turn.reply?.id } : void 0;
+    const change = latestChange(latestShape, shape);
+    const folds = animate && change === "turn" && latestShape !== void 0 && turn !== void 0 && !earlierOpen;
+    latestShape = shape;
+    const areaFrom = latestArea.hidden ? drawnHeight(empty) : drawnHeight(latestArea);
+    const cardTop = latest.getBoundingClientRect().top - latestArea.getBoundingClientRect().top;
+    const cardFrom = Math.max(0, Math.min(drawnHeight(latest), areaFrom - cardTop));
+    const pendingChanged = change === "same" && drawnPending !== void 0 && model.pending !== void 0 && drawnPending !== model.pending;
+    drawnPending = model.pending;
+    const latestOpacity = changed ? opacityNow(latest) : 1;
+    const noteOpacity = changed ? opacityNow(latestNote) : 1;
+    if (changed) {
+      stopHeight(latestArea);
+      stopHeight(latest);
+      stopFade(latest);
+      stopFade(latestNote);
+      stopFade(working);
+      latestReply.parts.forEach(stopFade);
+      if (!animate) {
+        ghost?.remove();
+        latestBubbles.forEach((bubble) => stopFade(bubble.element));
+      }
+    }
+    if (folds && changed) {
+      fadeOutPrevious();
+    }
+    latestArea.hidden = turn === void 0;
+    empty.hidden = turn !== void 0;
+    latestAt = turn?.reply?.at;
+    if (turn === void 0) {
+      fillBubbles(latestGroup, latestBubbles, [], void 0, reducedMotion);
+      return changed;
+    }
+    const added = fillBubbles(latestGroup, latestBubbles, turn.developer, turn.developer.at(-1)?.id, reducedMotion);
+    fillReportNote(latestNote, turn);
+    latest.classList.toggle("working", model.pending !== void 0);
+    latest.dataset.pending = model.pending ?? "";
+    setText(working, model.pending === void 0 ? "" : PENDING_TEXT[model.pending]);
+    if (turn.reply) {
+      latestReply.fill(turn.reply);
+    }
+    for (const bubble of latestBubbles.values()) {
+      bubble.measure();
+    }
+    if (!animate || !changed) {
+      return changed;
+    }
+    const delay = folds ? FOLD_FADE_MS : 0;
+    growFrom(latestArea, areaFrom, TURN_HEIGHT_MS);
+    if (change === "reply" && added.length === 0) {
+      growFrom(latest, cardFrom, TURN_HEIGHT_MS);
+    }
+    let entering = false;
+    if (change === "reply") {
+      latestReply.parts.forEach((part) => fadeFrom(part, 0, REPLY_FADE_MS));
+    } else if (change === "turn" && turn.reply === void 0) {
+      fadeFrom(latest, 0, WORKING_FADE_MS, delay + (added.length > 0 ? WORKING_DELAY_MS : 0));
+      entering = true;
+    } else if (change === "turn") {
+      const rise = { duration: SWAP_MS, delay, easing: OPEN_EASE, fill: "backwards" };
+      play(latest, riseFrames(), rise);
+      play(latestNote, riseFrames(), rise);
+      entering = true;
+    } else if (pendingChanged) {
+      fadeFrom(working, 0, REPLY_FADE_MS);
+    }
+    if (!entering) {
+      resumeFade(latest, latestOpacity);
+      resumeFade(latestNote, noteOpacity);
+    }
+    for (const bubble of added) {
+      play(bubble.element, bubbleFrames(), { duration: BUBBLE_MS, delay, easing: OPEN_EASE, fill: "backwards" });
+    }
+    return true;
+  };
+  const resumeFade = (element, from) => {
+    if (from < 0.99) {
+      fadeFrom(element, from, WORKING_FADE_MS);
+    }
   };
   const slideIn = (item2) => {
-    const height = item2.offsetHeight;
-    item2.classList.add("sliding");
-    const frames = [{ height: "0px", opacity: 0, transform: "translateY(-6px)" }, { height: `${height}px`, opacity: 1, transform: "none" }];
-    const done = () => item2.classList.remove("sliding");
-    item2.animate(frames, { duration: SLIDE_MS, easing: OPEN_EASE }).finished.then(done, done);
+    growFrom(item2, 0, SLIDE_MS);
+    play(item2, dropFrames(), { duration: SLIDE_MS, easing: OPEN_EASE });
   };
-  const fillLatest = (message, animate) => {
-    latest.hidden = message === void 0;
-    empty.hidden = message !== void 0;
-    if (message === void 0) {
-      latestId = "";
-      latestAt = void 0;
-      return;
-    }
-    latest.dataset.kind = message.kind;
-    setText(latestKind, message.label);
-    setText(latestTime, message.time);
-    latestTime.dateTime = message.dateTime;
-    latestTime.title = fullTime(message.at);
-    latestAt = message.at;
-    if (message.id === latestId) {
-      return;
-    }
-    latestId = message.id;
-    drawMessageText(latestText, message.text);
-    setText(latestCut, message.cut);
-    latestCut.hidden = message.cut === "";
-    if (animate) {
-      latest.animate([{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }], { duration: SWAP_MS, easing: OPEN_EASE });
-    }
-  };
-  const fillEarlier = (messages, animate) => {
-    const appears = earlier.hidden && messages.length > 0;
-    earlier.hidden = messages.length === 0;
+  const fillEarlier = (model, animate) => {
+    const list = model.earlier;
+    const appears = earlier.hidden && list.length > 0;
+    const goes = !earlier.hidden && list.length === 0;
+    earlier.hidden = list.length === 0;
     if (appears && animate) {
-      earlier.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: SLIDE_MS, easing: OPEN_EASE });
+      growFrom(earlier, 0, TURN_HEIGHT_MS);
+      fadeFrom(earlier, 0, TURN_HEIGHT_MS);
     }
-    setText(earlierText, earlierLabel(messages.length));
-    const keep2 = new Set(messages.map((message) => message.id));
-    for (const [id, entry] of items) {
+    setText(earlierText, earlierLabel(list.length));
+    const keep2 = new Set(list.map((turn) => turn.reply?.id ?? ""));
+    let moved = false;
+    for (const [id, entry] of turns) {
       if (!keep2.has(id)) {
         entry.item.remove();
-        items.delete(id);
+        turns.delete(id);
+        moved = true;
       }
     }
     let previous = null;
-    for (const message of messages) {
-      let entry = items.get(message.id);
+    for (const turn of list) {
+      const id = turn.reply?.id ?? "";
+      let entry = turns.get(id);
       const entered = entry === void 0;
-      entry ??= createItem(message.id);
-      items.set(message.id, entry);
-      fillItem(entry, message);
+      entry ??= createTurnCard(reducedMotion);
+      turns.set(id, entry);
+      entry.fill(turn);
       const expected = previous ? previous.nextElementSibling : earlierList.firstElementChild;
       if (entry.item !== expected) {
         earlierList.insertBefore(entry.item, expected);
       }
       previous = entry.item;
+      moved ||= entered;
       if (entered && animate && earlierOpen) {
         slideIn(entry.item);
       }
     }
+    return appears || goes || moved && earlierOpen;
   };
   const tick = (clock) => {
-    setText(latestAgo, latestAt === void 0 ? "" : ago(clock - latestAt));
+    setText(latestReply.ago, latestAt === void 0 ? "" : ago(clock - latestAt));
+    for (const bubble of latestBubbles.values()) {
+      bubble.tick(clock, ago);
+    }
+  };
+  const takeAnchor = () => {
+    if (scroll.scrollTop <= 0) {
+      return void 0;
+    }
+    const viewTop = scroll.getBoundingClientRect().top;
+    const items = earlierOpen ? [...earlierList.children] : [];
+    const candidates = [latestArea, earlierToggle, ...items];
+    const drawnBlocks = candidates.filter((block) => block instanceof HTMLElement);
+    const blocks = drawnBlocks.filter((block) => block.getClientRects().length > 0);
+    const tops = blocks.map((block) => block.getBoundingClientRect().top - viewTop);
+    const index = anchorIndex(tops);
+    return index < 0 ? void 0 : { element: blocks[index], offset: tops[index] };
+  };
+  const holdScroll = () => {
+    const current = anchor;
+    if (!current || !current.element.isConnected) {
+      anchor = void 0;
+      return;
+    }
+    const offset = current.element.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    const step = holdStep(current, offset, scroll.scrollTop, performance.now());
+    if (step === void 0) {
+      anchor = void 0;
+      return;
+    }
+    if (step.scrollTop !== scroll.scrollTop) {
+      scroll.scrollTop = step.scrollTop;
+    }
+    current.scrollTop = scroll.scrollTop;
+    if (step.done) {
+      anchor = void 0;
+    }
   };
   const render = (source, context, animate) => {
     drawn = source;
-    const model = messagesModel(source.messages);
-    const sub = modalSubtitle(context.config.repo, model.count);
+    const model = turnsModel(source);
+    drawnModel = model;
+    const sub = modalSubtitle(context.config.repo, model.replies, model.developer);
     drawModalTitle(title, source, context.config.keyUrl);
     setText(subtitle, sub);
     subtitle.title = sub;
-    fillLatest(model.latest, animate);
-    fillEarlier(model.earlier, animate);
+    const held = takeAnchor();
+    const latestMoved = fillLatest(model, animate);
+    const earlierMoved = fillEarlier(model, animate);
+    if (!held) {
+      anchor = void 0;
+    } else if (latestMoved || earlierMoved) {
+      anchor = { ...held, scrollTop: scroll.scrollTop, until: performance.now() + (animate ? HOLD_MS : 0) };
+      holdScroll();
+    }
     tick(context.now());
     updateScrollStop();
   };
   const reset = () => {
     setEarlierOpen(false);
-    for (const entry of items.values()) {
-      setItemOpen(entry, false);
+    for (const entry of turns.values()) {
+      entry.collapse();
     }
+    for (const bubble of latestBubbles.values()) {
+      bubble.collapse();
+    }
+    latestShape = void 0;
+    areaKey = void 0;
+    drawnPending = void 0;
+    anchor = void 0;
+    ghost?.remove();
+    ghost = void 0;
+    stopHeight(latestArea);
+    stopHeight(earlier);
+    stopFade(earlier);
     scroll.scrollTop = 0;
   };
   const scrollToShow = (element, smooth) => {
@@ -7313,8 +7919,7 @@ var createModal = () => {
     window.setTimeout(() => element.classList.remove("flashed"), FLASHED_MS);
   };
   const reveal = (messageId, animate) => {
-    const source = drawn;
-    const place2 = source ? messagePlace(messagesModel(source.messages), messageId) : void 0;
+    const place2 = drawnModel ? messagePlace(drawnModel, messageId) : void 0;
     if (place2 === "latest") {
       if (animate) {
         latest.animate(FLASH_LATEST, { duration: FLASH_LATEST_MS, easing: "ease" });
@@ -7323,20 +7928,20 @@ var createModal = () => {
       }
       return;
     }
-    const entry = place2 === "earlier" && messageId !== void 0 ? items.get(messageId) : void 0;
+    const entry = place2 === "earlier" && messageId !== void 0 ? turns.get(messageId) : void 0;
     if (!entry) {
       return;
     }
     scrollToShow(entry.item, animate);
     if (animate) {
-      entry.head.animate(FLASH_ITEM, { duration: FLASH_ITEM_MS, easing: "ease" });
+      entry.card.animate(FLASH_ITEM, { duration: FLASH_ITEM_MS, easing: "ease" });
     } else {
-      flashClass(entry.head);
+      flashClass(entry.card);
     }
   };
   const contentGroups = (withTag) => {
     const head = withTag ? [tag, headText, close, rule] : [headText, close, rule];
-    return [head, [latest.hidden ? empty : latest], earlier.hidden ? [] : [earlier]];
+    return [head, [latestArea.hidden ? empty : latestArea], earlier.hidden ? [] : [earlier]];
   };
   const focusTarget = (current) => {
     if (isShown(current.opener)) {
@@ -7365,6 +7970,8 @@ var createModal = () => {
     phase = "closed";
     request = void 0;
     drawn = void 0;
+    drawnModel = void 0;
+    anchor = void 0;
     cancelAnimationFrame(frameId);
     frameId = 0;
     setPageInert(false);
@@ -7405,6 +8012,8 @@ var createModal = () => {
     }
     if (source !== drawn && phase === "open") {
       render(source, current.context, !current.context.reducedMotion());
+    } else if (anchor) {
+      holdScroll();
     }
     const clock = current.context.now();
     const second = Math.floor(clock / 1e3);
@@ -7440,14 +8049,13 @@ var createModal = () => {
     root.classList.add("instant");
     if (!continuing) {
       reset();
-      latestId = "";
     }
     render(source, next.context, false);
-    const place2 = messagePlace(messagesModel(source.messages), next.messageId);
-    const target = place2 === "earlier" && next.messageId !== void 0 ? items.get(next.messageId) : void 0;
+    const place2 = drawnModel ? messagePlace(drawnModel, next.messageId) : void 0;
+    const target = place2 === "earlier" && next.messageId !== void 0 ? turns.get(next.messageId) : void 0;
     if (target) {
       setEarlierOpen(true);
-      setItemOpen(target, true);
+      target.setOpen(true, false);
     }
     const boxRect = rectOf(box);
     const boxLook = lookOf(box, boxRect);
@@ -7513,7 +8121,7 @@ var createModal = () => {
       shell = void 0;
       clone?.remove();
       clone = void 0;
-    }, noop);
+    }, noop2);
     window.setTimeout(() => {
       if (own !== token) {
         return;
@@ -7592,7 +8200,7 @@ var createModal = () => {
         track(clone.animate(tagFrames(tagStart, tagEnd), { duration: plan.moveMs, easing: CLOSE_EASE, fill: "forwards" }));
       }
       track(backdrop.animate([{ opacity: backdropFrom }, { opacity: 0 }], { duration: BACKDROP_MS, easing: "ease", fill: "forwards" }));
-      move.finished.then(() => finish(own, true, landing), noop);
+      move.finished.then(() => finish(own, true, landing), noop2);
     };
     if (plan.delay > 0) {
       window.setTimeout(startShell, plan.delay);
@@ -7626,6 +8234,12 @@ var createModal = () => {
   backdrop.addEventListener("click", () => closeModal());
   earlierToggle.addEventListener("click", () => setEarlierOpen(!earlierOpen));
   scroll.addEventListener("transitionend", () => updateScrollStop());
+  window.addEventListener("resize", () => {
+    if (phase === "open") {
+      latestBubbles.forEach((bubble) => bubble.measure());
+      turns.forEach((entry) => entry.measure());
+    }
+  });
   document.addEventListener("keydown", (event) => {
     if (phase !== "opening" && phase !== "open") {
       return;
@@ -7735,8 +8349,8 @@ var compare = (a, b) => {
   if (a.blocking !== b.blocking) {
     return a.blocking ? -1 : 1;
   }
-  const byTime = (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0);
-  return byTime !== 0 ? byTime : a.id.localeCompare(b.id);
+  const byTime2 = (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0);
+  return byTime2 !== 0 ? byTime2 : a.id.localeCompare(b.id);
 };
 var relayLine = (question, name) => {
   const relayed = question.relays;
@@ -8442,6 +9056,12 @@ var createCard = (context, onToggle) => {
 
 // src/ui/session-list.ts
 var NO_TICKET_TEXT = "no ticket";
+var ticketless = (view) => {
+  const ticketRanked = (view.tokenRanking ?? []).some((entry) => entry.ticket === true);
+  const keyedSession = Object.values(view.sessions ?? {}).some((session) => Boolean(session.key));
+  const keyedSummary = (view.summaries ?? []).some((summary) => Boolean(summary.key));
+  return !ticketRanked && !keyedSession && !keyedSummary;
+};
 var conversationDot = (session) => {
   if (session.endedAt !== void 0 || session.plan.state === "done") {
     return "ended";
@@ -8473,11 +9093,14 @@ var finishedDurationMs = (item2) => {
 var finishedFacts2 = (item2) => {
   return `${elapsed(finishedDurationMs(item2))} \xB7 ${tokens(sessionTokens(item2))} \xB7 ${cost(item2.costUsd)}`;
 };
-var finishedRowModel = (entry) => {
+var finishedRowModel = (entry, keyless = false) => {
   const outcome = entry.outcome ? { text: entry.outcome.rowText, tone: entry.outcome.tone } : { text: "Done", tone: "none" };
   const model = { id: entry.id, heading: sessionHeading(entry), outcome, facts: finishedFacts2(entry), activityAt: sessionActivityAt(entry) };
   if (entry.key) {
     model.key = entry.key;
+  }
+  if (keyless) {
+    model.ticketless = true;
   }
   return model;
 };
@@ -8541,7 +9164,9 @@ var createLine = (kind, attribute, button, template) => {
   const update = (item2) => {
     element.dataset[attribute] = item2.id;
     if (attribute === "session") {
-      setTicketKey(key, item2.key, keyTemplate, "", NO_TICKET_TEXT);
+      setTicketKey(key, item2.key, keyTemplate, "", item2.ticketless ? "" : NO_TICKET_TEXT);
+      key.hidden = item2.ticketless === true;
+      element.classList.toggle("keyless", item2.ticketless === true);
     } else {
       setTicketKey(key, item2.key, keyTemplate);
       key.hidden = !item2.key;
@@ -8659,7 +9284,7 @@ var createSessionConversationRow = (context, parts) => {
     element,
     update(session, previous = current) {
       current = session;
-      updateLine({ id: session.id, key: session.key, title: sessionHeading(session) });
+      updateLine({ id: session.id, key: session.key, title: sessionHeading(session), ...parts.ticketless?.() ? { ticketless: true } : {} });
       const state = conversationDot(session);
       dot.dataset.state = state;
       dot.title = state === "waiting" ? "Main thread: waiting for you" : `Main thread: ${state}`;
@@ -8787,7 +9412,7 @@ var createFinishedSessionRow = (context, actions) => {
     detail,
     update(model) {
       current = model;
-      parts.update({ id: model.id, key: model.key, title: model.heading });
+      parts.update({ id: model.id, key: model.key, title: model.heading, ...model.ticketless ? { ticketless: true } : {} });
       dot.dataset.tone = model.outcome.tone;
       const label = `Outcome: ${OUTCOME_TONE_TEXTS[model.outcome.tone]}`;
       dot.title = label;
@@ -9068,8 +9693,9 @@ var createConversationSection = (context) => {
   };
 };
 var createSessionConversationSection = (context, parts, onHover) => {
+  let keyless = false;
   const make = (id) => {
-    const row2 = createSessionConversationRow(context, parts);
+    const row2 = createSessionConversationRow(context, { ...parts, ticketless: () => keyless });
     row2.element.addEventListener("pointerenter", () => onHover?.(id, true, row2.element));
     row2.element.addEventListener("pointerleave", () => onHover?.(id, false, row2.element));
     return row2;
@@ -9086,9 +9712,11 @@ var createSessionConversationSection = (context, parts, onHover) => {
     ids: () => rows.ids(),
     row: (id) => rows.rows.get(id),
     sync(next, moved, motion, view) {
+      keyless = ticketless(view);
       sync(next, moved, motion, (row2, id) => draw2(view, id, row2));
     },
     update(view) {
+      keyless = ticketless(view);
       for (const [id, row2] of rows.rows) {
         draw2(view, id, row2);
       }
@@ -9127,6 +9755,9 @@ var branchChip = (session, row2) => {
   const open2 = row2.stage === "pr" && row2.pr?.pr?.state === "open";
   const tone = open2 ? "open" : TONES[row2.stage] ?? "normal";
   const chip = { kind: "branch", branch: row2.branch, pipeline: row2.pipeline, color: rowColor(row2), status: row2.stageText, tone };
+  if (row2.branchLabel !== void 0) {
+    chip.label = row2.branchLabel;
+  }
   if (row2.from?.kind === "branch") {
     chip.base = row2.from.branch;
   }
@@ -9171,13 +9802,15 @@ var chipTexts = (chip) => {
     return { lead: "continues", code: chip.branch, status: "", tone: "normal", note: `from ${chip.label}${suffixOf(chip)}` };
   }
   const link = chip.continuedIn;
+  const code = chip.label?.role ?? chip.branch;
+  const desc = chip.label === void 0 ? {} : { desc: chip.label.description };
   if (!link) {
-    return { lead: "", code: chip.branch, status: chip.status, tone: chip.tone, note: "" };
+    return { lead: "", code, status: chip.status, tone: chip.tone, note: "", ...desc };
   }
   if (chip.status === CONTINUED_STATUS) {
-    return { lead: "", code: chip.branch, status: "", tone: chip.tone, note: `continued in ${link.label}${suffixOf(link)}` };
+    return { lead: "", code, status: "", tone: chip.tone, note: `continued in ${link.label}${suffixOf(link)}`, ...desc };
   }
-  return { lead: "", code: chip.branch, status: chip.status, tone: chip.tone, note: `\xB7 continued in ${link.label}` };
+  return { lead: "", code, status: chip.status, tone: chip.tone, note: `\xB7 continued in ${link.label}`, ...desc };
 };
 var chipTitle = (chip) => {
   if (chip.kind === "fold") {
@@ -9187,7 +9820,9 @@ ${chip.open ? FOLD_HINT : OPEN_HINT}`;
   if (chip.kind === "link") {
     return "Open the session this one continues";
   }
-  const branch = chip.base ? `${chip.branch} \xB7 from ${chip.base}` : chip.branch;
+  const based = chip.base ? `${chip.branch} \xB7 from ${chip.base}` : chip.branch;
+  const branch = chip.label === void 0 ? based : `${labelText(chip.label)}
+${based}`;
   return chip.continuedIn ? `${branch}
 Open the session that continued this branch` : branch;
 };
@@ -9254,8 +9889,8 @@ var createChipsRow = (host, context, actions) => {
     const element = el("button", `session-chip ${chip.kind}`);
     element.type = "button";
     element.dataset.chip = chipKey(chip);
-    const entry = { element, lead: el("span", "chip-lead"), code: el("code"), status: el("span", "chip-status"), note: el("span", "chip-note"), chip };
-    element.append(el("i", "chip-dot"), entry.lead, " ", entry.code, " ", entry.status, " ", entry.note);
+    const entry = { element, lead: el("span", "chip-lead"), code: el("code"), desc: el("span", "chip-desc"), status: el("span", "chip-status"), note: el("span", "chip-note"), chip };
+    element.append(el("i", "chip-dot"), entry.lead, " ", entry.code, " ", entry.desc, " ", entry.status, " ", entry.note);
     if (chip.kind === "fold") {
       element.append(chevronIcon());
     }
@@ -9287,6 +9922,7 @@ var createChipsRow = (host, context, actions) => {
     entry.element.style.setProperty("--c", colorValue(color, context));
     show(entry.lead, texts.lead);
     show(entry.code, texts.code);
+    show(entry.desc, texts.desc ?? "");
     show(entry.note, texts.note);
     const changed = entry.status.textContent !== texts.status;
     show(entry.status, texts.status);
@@ -9787,6 +10423,7 @@ var createFinishedSessionsPanel = (context, options) => {
   const toastOwner = {};
   let latest;
   let summaryIndex = /* @__PURE__ */ new Map();
+  let keyless = false;
   const states = /* @__PURE__ */ new Map();
   const known = /* @__PURE__ */ new Map();
   const reveals = /* @__PURE__ */ new Set();
@@ -9913,12 +10550,13 @@ var createFinishedSessionsPanel = (context, options) => {
   const drawRow = (id, row2) => {
     const entry = entryOf2(id);
     if (entry) {
-      shell.guard(id, row2.element, () => row2.update(finishedRowModel(entry)));
+      shell.guard(id, row2.element, () => row2.update(finishedRowModel(entry, keyless)));
     }
   };
   const view = (next) => {
     latest = next;
     summaryIndex = summaryMap(next);
+    keyless = ticketless(next);
   };
   return {
     element: shell.element,
@@ -10308,7 +10946,7 @@ var createCardStack = (host, context, repositoryId, options) => {
     }
     return { retiring, flights };
   };
-  const play = ({ before, stackChange, rowRects, flights, emptyWasHidden }) => {
+  const play2 = ({ before, stackChange, rowRects, flights, emptyWasHidden }) => {
     const morphing = /* @__PURE__ */ new Set();
     for (const card of stackChange.entered) {
       const from = rowRects.get(card.element.dataset.run ?? "");
@@ -10366,7 +11004,7 @@ var createCardStack = (host, context, repositoryId, options) => {
     panel.update(board);
     updateFootnote();
     if (motion) {
-      play({ before, stackChange, rowRects, flights, emptyWasHidden });
+      play2({ before, stackChange, rowRects, flights, emptyWasHidden });
     }
     firstUpdate = false;
   };
@@ -10495,7 +11133,7 @@ var stageKeyTitle = (stage, packages) => {
   }
   return stage === "main" ? "main thread" : stage;
 };
-var rankRow = (entry, max, packages, runs) => {
+var rankRow = (entry, max, packages) => {
   const order = stageOrder(Object.keys(entry.byStage), packages);
   const segments = [];
   for (const stage of order) {
@@ -10505,22 +11143,26 @@ var rankRow = (entry, max, packages, runs) => {
     }
   }
   const value2 = `${tokens(entry.tokens)} \xB7 ${cost(entry.usd)}`;
-  const ticket = entry.runIds.some((id) => Object.hasOwn(runs, id) && runs[id].key === entry.key);
-  return { key: entry.key, title: entry.title ?? "", ticket, finished: entry.finished, value: value2, segments };
+  const label = entry.branchLabel?.description ?? entry.key;
+  const keyTitle = labelTitle(entry.branchLabel, entry.key);
+  return { key: entry.key, label, keyTitle, title: entry.title ?? "", ticket: entry.ticket === true, finished: entry.finished, value: value2, segments };
 };
-var rankingModel = (entries, packages, runs = {}) => {
+var rankingModel = (entries, packages) => {
   const sorted = entries.filter((entry) => entry.tokens > 0).sort((a, b) => b.tokens - a.tokens || a.key.localeCompare(b.key));
   const max = Math.max(1, sorted[0]?.tokens ?? 0);
-  const rows = sorted.map((entry) => rankRow(entry, max, packages, runs));
+  const rows = sorted.map((entry) => rankRow(entry, max, packages));
   return { top: rows.slice(0, RANK_TOP), rest: rows.slice(RANK_TOP) };
 };
-var toggleText = (ranking, open2) => {
+var TICKET_COPY = { title: "Token use by ticket", column: "Ticket", noun: "tickets", more: "More tickets" };
+var BRANCH_COPY = { title: "Token use by branch", column: "Branch", noun: "branches", more: "More branches" };
+var rankingCopy = (ticketless2) => ticketless2 ? BRANCH_COPY : TICKET_COPY;
+var toggleText = (ranking, open2, copy = TICKET_COPY) => {
   const extra = ranking.rest.length;
   if (extra === 0) {
     return "";
   }
   const total = ranking.top.length + extra;
-  return open2 ? `Show top ${RANK_TOP}` : `Show all ${total} tickets (${extra} more)`;
+  return open2 ? `Show top ${RANK_TOP}` : `Show all ${total} ${copy.noun} (${extra} more)`;
 };
 
 // src/ui/legend.ts
@@ -10851,20 +11493,22 @@ var createRanking = (context, link, reveal) => {
   const element = el("div", link ? "overview-panel overview-ranking linkable" : "overview-panel overview-ranking");
   const head = el("div", "overview-head");
   const sub = el("span", "overview-sub");
-  head.append(el("h2", void 0, "Token use by ticket"), sub);
+  const heading2 = el("h2", void 0, TICKET_COPY.title);
+  head.append(heading2, sub);
   const columns = el("div", "rank-head");
   columns.setAttribute("aria-hidden", "true");
-  columns.append(el("span", void 0, "Ticket"), el("span", void 0, "Tokens \xB7 cost"));
+  const keyHead = el("span", void 0, TICKET_COPY.column);
+  columns.append(keyHead, el("span", void 0, "Tokens \xB7 cost"));
   const listRole = link ? "group" : "list";
   const top = el("div", "rank-list");
   top.setAttribute("role", listRole);
-  top.setAttribute("aria-label", "Token use by ticket");
+  top.setAttribute("aria-label", TICKET_COPY.title);
   const more = el("div", "rank-more");
   more.id = `rank-more-${overviewCount}`;
   const moreInner = el("div", "rank-more-inner");
   const rest = el("div", "rank-list");
   rest.setAttribute("role", listRole);
-  rest.setAttribute("aria-label", "More tickets");
+  rest.setAttribute("aria-label", TICKET_COPY.more);
   moreInner.append(rest);
   more.append(moreInner);
   const toggle = el("button", "show-all rank-toggle");
@@ -10878,10 +11522,11 @@ var createRanking = (context, link, reveal) => {
   let drawn = false;
   let lit;
   let latest = rankingModel([], []);
+  let copy = TICKET_COPY;
   let arrangement = "";
   const keyTemplate = link ? "" : context.config.keyUrl;
   const drawToggle = () => {
-    const label = toggleText(latest, open2);
+    const label = toggleText(latest, open2, copy);
     toggle.hidden = label === "";
     setText(toggleLabel, label);
     toggle.setAttribute("aria-expanded", String(open2));
@@ -10894,8 +11539,8 @@ var createRanking = (context, link, reveal) => {
   });
   const drawRow = (row2, model, grow) => {
     row2.dot.classList.toggle("finished", model.finished);
-    setTicketKey(row2.key, model.key, model.ticket ? keyTemplate : "");
-    row2.key.title = model.key;
+    setTicketKey(row2.key, model.label, model.ticket ? keyTemplate : "");
+    row2.key.title = model.keyTitle;
     setText(row2.title, model.title);
     row2.title.title = model.title;
     setText(row2.value, model.value);
@@ -10959,9 +11604,14 @@ var createRanking = (context, link, reveal) => {
       }
     },
     update(input) {
-      const ranking = rankingModel(input.tokenRanking, context.config.packages, context.runs);
+      const ranking = rankingModel(input.tokenRanking, context.config.packages);
       latest = ranking;
       reveal(ranking.top.length > 0);
+      copy = rankingCopy(input.ticketless);
+      setText(heading2, copy.title);
+      setText(keyHead, copy.column);
+      top.setAttribute("aria-label", copy.title);
+      rest.setAttribute("aria-label", copy.more);
       setText(sub, input.repository ? `${input.repository} \xB7 split by stage, live` : "Split by stage, live");
       const motion = !context.reducedMotion();
       const keep2 = new Set([...ranking.top, ...ranking.rest].map((row2) => row2.key));
@@ -11205,8 +11855,8 @@ var WORDS = {
 var flyText = (type) => WORDS[type].fly;
 var flyColor = (type) => WORDS[type].color;
 var compareFollowups = (a, b) => {
-  const byTime = (parseTime(a.at) ?? 0) - (parseTime(b.at) ?? 0);
-  return byTime !== 0 ? byTime : compareText(a.id, b.id);
+  const byTime2 = (parseTime(a.at) ?? 0) - (parseTime(b.at) ?? 0);
+  return byTime2 !== 0 ? byTime2 : compareText(a.id, b.id);
 };
 var followupColumns = (followups, expanded = /* @__PURE__ */ new Set()) => {
   const ordered = [...followups].sort(compareFollowups);
@@ -12051,7 +12701,8 @@ var branchBars = (metrics, rows) => {
     const row2 = rows.find((candidate) => candidate.branch === entry.branch);
     const color = row2 ? rowColor(row2) : "shared";
     const width = share(entry.usd, metrics.total.usd);
-    return { key: entry.branch, name: shortBranch(entry.branch), title: entry.branch, text: plural(entry.agents, "agent"), width, color };
+    const name = row2?.branchLabel?.description ?? shortBranch(entry.branch);
+    return { key: entry.branch, name, title: labelTitle(row2?.branchLabel, entry.branch), text: plural(entry.agents, "agent"), width, color };
   });
 };
 var toolBars = (tools) => {
@@ -13156,7 +13807,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     }
     return flights;
   };
-  const play = ({ before, change, rowRects, flights, emptyWasHidden }) => {
+  const play2 = ({ before, change, rowRects, flights, emptyWasHidden }) => {
     const morphing = /* @__PURE__ */ new Set();
     for (const card of change.entered) {
       const from = rowRects.get(card.element.dataset.session ?? "");
@@ -13216,7 +13867,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     updateFootnote();
     lightRows();
     if (motion) {
-      play({ before, change, rowRects, flights, emptyWasHidden });
+      play2({ before, change, rowRects, flights, emptyWasHidden });
     }
     firstUpdate = false;
     prune();
@@ -14326,7 +14977,7 @@ var start = async () => {
   };
   const drawOverview = (current, board) => {
     const repository = board.repositories.find((item2) => item2.id === current.id)?.name ?? "";
-    const input = { branches: board.branches, tokenRanking: board.tokenRanking, repository };
+    const input = { branches: board.branches, tokenRanking: board.tokenRanking, repository, ticketless: ticketless(board) };
     current.branchLabels = branchLabels(board, canOpenOf(current));
     guardOverview(() => current.overview?.update(input));
   };

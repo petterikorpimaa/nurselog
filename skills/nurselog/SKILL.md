@@ -21,13 +21,15 @@ otherwise the absolute commands the CLI prints.
    - `Server: running on http://127.0.0.1:<port> ...`: the board is up; give the user the URL of the last line,
      `Tab: <name> on http://127.0.0.1:<port>/?repo=<name>`, which opens this repository's tab. `Tab: none` means the
      board has no lines of this repository within its read days yet; the tab comes with the first ones.
-   - `Server: not running; start it with: node <plugin root>/bin/nurselog start`. One board serves every repository,
+   - `Server: not running; start it with: nurselog start` when the terminal command runs this plugin, else
+     `Server: not running; start it with: node <plugin root>/bin/nurselog start`. One board serves every repository,
      so the command needs no `--repo`.
    - `Nurselog is not set up for this repository; run: ...`: no config yet; follow "Onboarding" below.
-2. When it is not running, hand the user `node <plugin root>/bin/nurselog open` (the same path as the printed start
-   command) to run in a terminal of their own: it starts the board in the background, waits for it and opens it in
-   the browser; `open --app` opens a Chromium app window instead. `start` runs the board in the foreground of that
-   terminal. Never start or open the board with the Bash tool: the user decides when a window opens.
+2. When it is not running, hand the user `nurselog open` when `status` printed the short form, else
+   `node <plugin root>/bin/nurselog open` (the same path as the printed start command), to run in a terminal of their
+   own: it starts the board in the background, waits for it and opens it in the browser; `open --app` opens a Chromium
+   app window instead. `start` runs the board in the foreground of that terminal. Never start or open the board with
+   the Bash tool: the user decides when a window opens.
 
 The first session in a set-up repository normally starts the board itself: the session then shows
 `Nurselog board started: <url>` once, `Nurselog board is starting; log: ~/.local/share/nurselog/board.log`, or
@@ -45,20 +47,21 @@ session start runs the new one; after a pull of a clone, the user restarts the b
 
 ## Markers
 
-The main thread adds the workflow markers the hooks cannot see, with the marker tools:
+The main thread adds the workflow markers the hooks cannot see, with the marker tools, each only when its case comes
+up (working alone, it may need none):
 
-- `plan` once the brief decides the streams, again when they change: `streams` (items `{ id, package?, after?,
-  model? }`, `package` defaults to `id`) and an optional `note`.
-- `gate` with `plan` or `docs` and the state `waiting` or `done` when a decision or a publication is handed to the
+- `plan` when you hand the work to subagents in streams, again when they change: `streams` (items `{ id, package?,
+  after?, model? }`, `package` defaults to `id`) and an optional `note`.
+- `gate` with `plan` or `docs` and the state `waiting` or `done` when you hand a decision or a publication to the
   user. Merge and promote gates are derived from GitHub.
-- `question` for a question asked in prose: `text`, `blocking` when you stop on it, `options` for fixed choices,
-  `relays` with the id of a subagent question you pass on (`q-<agent id>-<n>`, n its position in that agent's report
-  block, from 1; the CLI flag is `--relays`). It returns the question id; `answer: <id>` closes it.
+- `question` for a question you ask in prose: `text`, `blocking` when you stop on it, `options` for fixed choices,
+  and `relays` only for a subagent question you pass on, with its id (`q-<agent id>-<n>`, n its position in that
+  agent's report block, from 1; the CLI flag is `--relays`). It returns the question id; `answer: <id>` closes it.
 
-`run` defaults to the run the session started in; pass `run` (the worktree name) for a worktree you created or
-work in. Joins, reviewers, merges and promotions are derived and need no marker; with `github.mergeBy: agent` an open
-PR does not wait for the developer, so hand a merge over with `gate` `merge` and the state `waiting`. Claude Code asks
-for permission on the first use of each tool; a plugin cannot pre-approve it. The CLI
+`run` defaults to the run the session started in; pass `run` (the worktree name) only for work in another worktree,
+such as one you created. Joins, reviewers, merges and promotions are derived and need no marker; with
+`github.mergeBy: agent` an open PR does not wait for the developer, so hand a merge over with `gate` `merge` and the
+state `waiting`. Claude Code asks for permission on the first use of each tool; a plugin cannot pre-approve it. The CLI
 `nurselog emit plan|gate|question ...` adds the same markers and is the fallback (`nurselog help` prints its flags).
 
 ## Config

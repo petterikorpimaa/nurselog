@@ -2,8 +2,6 @@ import {
   BoardRunningError,
   DEFAULT_PORT,
   OrphanedCopyError,
-  SAFE_GIT,
-  SAFE_GIT_ENV,
   USAGE,
   alreadyRunningMessage,
   boardTab,
@@ -14,22 +12,27 @@ import {
   purgeableAggregates,
   readAggregates,
   resolveRepository,
-  runCommand,
   runEmit,
   runLink,
   runStatus,
   startNurselog
-} from "./chunk-O5JZARZ5.js";
+} from "./chunk-IKZLAETW.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-XA4ETTRT.js";
+} from "./chunk-B2LPHKGH.js";
+import {
+  SAFE_GIT,
+  SAFE_GIT_ENV,
+  runCommand
+} from "./chunk-OMBC2G6E.js";
 import {
   BRANCH_KEY_PATTERN,
   DEFAULT_CONFIG,
   LINUX_APP_BROWSERS,
   MAC_APP_BROWSERS,
   MAX_CONFIG_BYTES,
+  OWNER_LINE,
   PACKAGE_ROOT,
   RUNNING_CHECK_MS,
   STREAM_ID,
@@ -38,6 +41,7 @@ import {
   boardLogPath,
   branchKey,
   branchKeyRegExp,
+  cacheDirOf,
   checkBoard,
   cliCommand,
   compareText,
@@ -75,13 +79,15 @@ import {
   spoolDirFor,
   startBoardDetached,
   stripControl,
+  terminalCommandLine,
+  terminalCommandPath,
   tildeHome,
   time,
   userConfigPath,
   validateConfig,
   waitForBoard,
   writeSignInFile
-} from "./chunk-MMMTGD7O.js";
+} from "./chunk-OHFJPS3R.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
@@ -185,7 +191,9 @@ var GLOB_CHARS = /[*?{}[\]]/;
 var COMMENT = /\s+#.*$/;
 var ARGUMENTS = /\([^)]*\)?/g;
 var BUILD_NAMES = ["implementer", "builder", "developer", "coder", "engineer"];
-var REVIEW_SUFFIXES = ["-reviewer", "-checker", "-analyzer", "-hunter"];
+var BUILD_SUFFIXES = ["-dev"];
+var REVIEW_NAMES = ["reviewer", "qa", "tester"];
+var REVIEW_SUFFIXES = ["-reviewer", "-checker", "-analyzer", "-hunter", "-qa", "-tester"];
 var FILE_WRITING_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 var BUILD_TOOLS = /* @__PURE__ */ new Set([...FILE_WRITING_TOOLS, "Bash"]);
 var QUOTED = /^(["'])((?:(?!\1).)*)\1$/;
@@ -339,11 +347,16 @@ var readAgent = (file) => {
   const name = unquote(/^name:\s*(.+?)\s*$/m.exec(frontmatter)?.[1] ?? "");
   return { name: AGENT_NAME.test(name) ? name : fallback, tools: toolNamesOf(frontmatter) };
 };
+var endsAfter = (name, suffix) => name.endsWith(suffix) && name.length > suffix.length;
 var roleOf = (name) => {
-  if (BUILD_NAMES.some((build) => name === build || name.endsWith(`-${build}`) && name.length > build.length + 1)) {
+  const buildName = BUILD_NAMES.some((build) => name === build || endsAfter(name, `-${build}`));
+  if (buildName || BUILD_SUFFIXES.some((suffix2) => endsAfter(name, suffix2))) {
     return { stage: "build" };
   }
-  const suffix = REVIEW_SUFFIXES.find((candidate) => name.endsWith(candidate) && name.length > candidate.length);
+  if (REVIEW_NAMES.includes(name)) {
+    return { stage: "review" };
+  }
+  const suffix = REVIEW_SUFFIXES.find((candidate) => endsAfter(name, candidate));
   if (suffix) {
     return { stage: "review", short: name.slice(0, -suffix.length) };
   }
@@ -586,10 +599,10 @@ var AREAS = ["implementers", "review", "verification", "tokens", "questions"];
 var AREA_NAMES = { implementers: "Implementers", review: "Review", verification: "Verification", tokens: "Token economy", questions: "Questions and waits" };
 var SIGNAL_NAMES = {
   "budget-first-stop": "budget at the first stop",
-  "second-implementer": "second implementers",
+  "second-implementer": "second build runs",
   "second-round": "second review rounds",
   "fix-followups": "fix follow-ups",
-  "quiet-reviewer": "quiet reviewers",
+  "quiet-reviewer": "quiet review roles",
   "verify-commands": "verification commands",
   "failed-runs": "failed runs",
   "cache-per-output": "cache read per output token",
@@ -611,19 +624,19 @@ var MAIN_ROLE = "main";
 var OVERHEAD_STANDING = 0.01;
 var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 var plainText = (text) => text.replace(CONTROL, "");
-var NO_BUILDS = "no implementer runs, no subagent of a build-stage role ran";
-var NO_BUDGET = "no tool-call budget is set for the build-stage roles (budgets.roles.<role>.toolCalls)";
-var NO_FIRST_STOP = "no implementer run with a tool-call budget stopped";
-var NO_STREAM = "no implementer ran on a stream";
-var NO_REVIEWS = "no reviewer runs, no subagent of a review-stage role ran";
+var NO_BUILDS = "no subagent of a build-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
+var NO_BUDGET = "no tool-call budget is set for the roles of the build runs (budgets.roles.<role>.toolCalls)";
+var NO_FIRST_STOP = "no build run with a tool-call budget stopped";
+var NO_STREAM = "no build run was on a stream";
+var NO_REVIEWS = "no subagent of a review-stage role ran (roles.<role>.stage)";
 var NO_ROUND = "no review-stage role reviewed a branch";
-var NO_BLOCK = "no reviewer wrote a report block (design section 10)";
+var NO_BLOCK = "no review-stage agent wrote a report block";
 var NO_COMMAND = "no command matched verification.kinds";
 var NO_REQUESTS = "no requests were recorded (usage facts come from the transcripts)";
 var NO_LIMIT = "no context limit is known for the main thread's model (budgets.contextLimits)";
 var NO_OVERHEAD = "no session recorded the Nurselog overhead (its hook or board predates the count)";
 var NOT_STORED = "the session aggregates lack it (an older board wrote them)";
-var IMPLEMENTER_RUN = ["implementer run", "implementer runs"];
+var BUILD_RUN = ["build run", "build runs"];
 var STREAM = ["stream", "streams"];
 var BRANCH = ["branch", "branches"];
 var RUN = ["run", "runs"];
@@ -785,9 +798,9 @@ var budgetFirstStop = (sides) => {
   const standing = ruled && k * 100 >= STANDING_PERCENT * window.n;
   const flag = standing ? "standing" : comparison(rateFlag(window, baseline));
   const rule = ruled ? `; the rule flags ${STANDING_PERCENT} % or more` : "";
-  const comparedTo = before(sides, baseline, IMPLEMENTER_RUN, kOfNText);
+  const comparedTo = before(sides, baseline, BUILD_RUN, kOfNText);
   const share = `${Math.floor(k * 100 / window.n)} %${rule}; ${comparedTo}`;
-  const body = `${k} of the last ${count(window.n, IMPLEMENTER_RUN)} reached their tool-call budget by their first stop (${share})`;
+  const body = `${k} of the last ${count(window.n, BUILD_RUN)} reached their tool-call budget by their first stop (${share})`;
   return { lines: [{ flag, window, baseline, body }] };
 };
 var ownedRows = (sessions) => sessions.flatMap((session) => (session.rows ?? []).filter((row) => row.owned));
@@ -803,7 +816,7 @@ var secondImplementer = (sides) => {
     }
     return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_STREAM };
   }
-  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second implementer run")] };
+  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second build run")] };
 };
 var reviewsOf = (sessions) => sessions.flatMap((session) => session.reviews ?? []);
 var blockRuns = (sessions) => reviewsOf(sessions).filter((run) => run.fixItems !== null);
@@ -877,8 +890,8 @@ var verifyCommands = (sides) => {
   const window = medianOf(commandCounts(sides.window));
   const baseline = onBaseline(sides, (sessions) => medianOf(commandCounts(sessions)));
   const commands = count(window.value ?? 0, ["verification command", "verification commands"]);
-  const comparedTo = before(sides, baseline, IMPLEMENTER_RUN, (evidence) => String(evidence.value ?? 0));
-  const body = `implementer runs ran a median of ${commands} over ${count(window.n, RUN)} (${comparedTo})`;
+  const comparedTo = before(sides, baseline, BUILD_RUN, (evidence) => String(evidence.value ?? 0));
+  const body = `build runs ran a median of ${commands} over ${count(window.n, RUN)} (${comparedTo})`;
   return { lines: [{ window, baseline, body }] };
 };
 var failedUnits = (sessions) => verifiedRuns(sessions).filter((run) => run.failed !== null);
@@ -890,7 +903,7 @@ var failedRuns = (sides) => {
   if (failedUnits(sides.window).length === 0) {
     return { lacks: NOT_STORED };
   }
-  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENTER_RUN, "had a failed full-package command")] };
+  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, BUILD_RUN, "had a failed full-package command")] };
 };
 var outputRoles = (sessions, role) => {
   const entries = sessions.flatMap((session) => session.roles ?? []);
@@ -1194,29 +1207,19 @@ Usage: ${SYNOPSIS2}`);
 // src/cli/install-cli.ts
 import { randomBytes } from "crypto";
 import { chmodSync, lstatSync as lstatSync2, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
-import { homedir } from "os";
-import { basename as basename2, delimiter, dirname as dirname2, isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "path";
+import { delimiter, dirname as dirname2, isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "path";
 import { parseArgs as parseArgs4 } from "util";
-var OWNER_LINE = "# Written by nurselog install-cli; remove it with: nurselog install-cli --remove";
 var PATH_LINE = 'export PATH="$HOME/.local/bin:$PATH"';
-var CACHE_PARENT = "/plugins/cache/nurselog/nurselog";
-var VERSION_DIR = /^\d+\.\d+\.\d+$/;
 var HEAD_BYTES = 4096;
-var terminalCommandPath = () => join2(homedir(), ".local", "bin", "nurselog");
-var cacheDirOf = (root) => {
-  const parent = dirname2(root);
-  return VERSION_DIR.test(basename2(root)) && parent.endsWith(CACHE_PARENT) ? parent : void 0;
-};
-var singleQuoted = (text) => `'${text.replaceAll("'", "'\\''")}'`;
 var terminalCommandScript = (root) => {
   const cache = cacheDirOf(root);
   const lines = ["#!/bin/sh", OWNER_LINE];
   if (cache === void 0) {
-    lines.push(`exec node ${singleQuoted(join2(root, "bin", "nurselog"))} "$@"`);
+    lines.push(terminalCommandLine(root));
   } else {
     lines.push(
       "# Runs bin/nurselog of the newest plugin copy in this directory that no update or uninstall has orphaned.",
-      `cache=${singleQuoted(cache)}`,
+      terminalCommandLine(root),
       "newest_copy() {",
       '  command ls -d "$cache"/[0-9]*.[0-9]*.[0-9]*/ 2>/dev/null | sort -V | while IFS= read -r dir; do',
       "    name=${dir%/}",
@@ -1430,7 +1433,7 @@ var runOpen = async (args, io, deps = DEFAULT_DEPS) => {
 };
 
 // src/cli/purge.ts
-import { basename as basename3, dirname as dirname3 } from "path";
+import { basename as basename2, dirname as dirname3 } from "path";
 import { createInterface } from "readline";
 import { parseArgs as parseArgs6 } from "util";
 var DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -1484,7 +1487,7 @@ var targetsOf = (all, repo, cwd, onError) => {
   const root = resolveRepository(repo, cwd);
   const hash = repoHash(root);
   const listed2 = listRepositories().find((repository) => repository.hash === hash);
-  return [{ name: listed2?.name ?? basename3(root), root }];
+  return [{ name: listed2?.name ?? basename2(root), root }];
 };
 var repositorySpoolDir = (root, name, io) => {
   const config = readHookConfig(root);
@@ -1623,7 +1626,7 @@ var runPurge = async (args, io, deps = {}) => {
 // src/cli/uninstall.ts
 import { spawnSync } from "child_process";
 import { lstatSync as lstatSync3, readFileSync as readFileSync2, rmdirSync, rmSync as rmSync2, statSync, unlinkSync as unlinkSync2 } from "fs";
-import { homedir as homedir2 } from "os";
+import { homedir } from "os";
 import { dirname as dirname4, join as join3, resolve as resolve3, sep as sep2 } from "path";
 import { setTimeout as delay } from "timers/promises";
 import { parseArgs as parseArgs7 } from "util";
@@ -1693,7 +1696,7 @@ var baseLines = (base) => {
 };
 var settingsPath = (env) => {
   const configDir = env.CLAUDE_CONFIG_DIR;
-  return configDir ? join3(resolve3(configDir), "settings.json") : join3(homedir2(), ".claude", "settings.json");
+  return configDir ? join3(resolve3(configDir), "settings.json") : join3(homedir(), ".claude", "settings.json");
 };
 var handListing = (roots, bases, env, io) => {
   const listed2 = [];
@@ -1705,7 +1708,7 @@ var handListing = (roots, bases, env, io) => {
     }
   };
   for (const profile of PROFILES) {
-    collect(join3(homedir2(), profile), profileLines);
+    collect(join3(homedir(), profile), profileLines);
   }
   collect(settingsPath(env), settingsLines);
   for (const root of roots) {
@@ -2055,7 +2058,7 @@ var runUninstall = async (args, io, deps = {}) => {
   }
   results.push(removeFromClaudeCode(plan.claude, deps, io));
   if (planFailed || results.includes(false)) {
-    const retry = cliCommand(void 0, "uninstall", join3(deps.packageRoot ?? PACKAGE_ROOT, "bin", "nurselog"));
+    const retry = cliCommand(void 0, "uninstall", join3(deps.packageRoot ?? PACKAGE_ROOT, "bin", "nurselog"), false);
     io.err(`nurselog uninstall: not every step succeeded; see the messages above, then run it again with: ${retry}`);
     return 1;
   }

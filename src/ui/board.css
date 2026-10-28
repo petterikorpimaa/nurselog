@@ -187,7 +187,8 @@ p { margin: 0; }
 
 /* run and session rows (session-row.ts), the demo's finished rows: one line on a grid with hairlines between rows, starting with a
    dot (8 px in a 10 px column), the key and the title; a run's empty key is hidden and the title takes its place
-   (.keyless), a session's reads "no ticket" in the key's style. A conversation row
+   (.keyless), a session's reads "no ticket" in the key's style, or is hidden as a run's in a repository without
+   ticket keys (ticketless). A conversation row
    adds its meta (branch, chip, elapsed, cost; one flex group of its own below 760 px) and keeps its questions under
    it; a finished row adds outcome, facts, ago and its Show and Clear buttons, with the run's card in a detail that
    opens under it */
@@ -380,6 +381,8 @@ p { margin: 0; }
 }
 .chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
 .session-chip code { font-size: 11px; color: var(--fg); min-width: 0; overflow-wrap: anywhere; }
+/* a branch label's description beside the role in code, in the UI font as the demo's .bch text */
+.chip-desc { font-size: 11.5px; color: var(--fg-2); min-width: 0; overflow-wrap: anywhere; }
 .chip-status, .chip-note { font: 500 10.5px var(--f-mono); color: var(--fg-3); min-width: 0; overflow-wrap: anywhere; }
 .chip-status[data-tone="open"] { color: var(--fg-2); }
 .chip-status[data-tone="merged"] { color: var(--rev); }

@@ -36,37 +36,99 @@ export const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', '
 const UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\\]/;
 const HIDDEN_PATH = 'path hidden: it holds a control character or a backslash';
 
+/** A shell word in single quotes, a `'` inside written as `'\''`. */
+const singleQuoted = (text) => `'${text.replaceAll("'", "'\\''")}'`;
+
 /** One POSIX shell word: bare when it holds only `[\w@%+=:,./-]`, else single-quoted with `'` as `'\''`. */
-export const shellWord = (text) => (/^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
+export const shellWord = (text) => (/^[\w@%+=:,./-]+$/.test(text) ? text : singleQuoted(text));
+
+/** Line 2 of the terminal command: `nurselog install-cli` replaces or removes only a file that carries it. */
+export const OWNER_LINE = '# Written by nurselog install-cli; remove it with: nurselog install-cli --remove';
+
+/** The parent of a cache copy: a marketplace install runs from `<dir>/plugins/cache/nurselog/nurselog/<x.y.z>/`. */
+const CACHE_PARENT = '/plugins/cache/nurselog/nurselog';
+const VERSION_DIR = /^\d+\.\d+\.\d+$/;
+/** Enough of the terminal command to hold every line of the script `install-cli` writes, its paths included. */
+const TERMINAL_COMMAND_BYTES = 16 * 1024;
+
+/** The terminal command, `~/.local/bin/nurselog` under the home directory `home` (design section 13). */
+export const terminalCommandPath = (home = homedir()) => join(home, '.local', 'bin', 'nurselog');
+
+/** The directory of the cache copies when `root` is one (`.../plugins/cache/nurselog/nurselog/<x.y.z>`), else undefined. */
+export const cacheDirOf = (root) => {
+  const parent = dirname(root);
+  return VERSION_DIR.test(basename(root)) && parent.endsWith(CACHE_PARENT) ? parent : undefined;
+};
+
+/**
+ * The line of the terminal command that names the package at `root`: from a clone `exec node '<root>/bin/nurselog' "$@"`,
+ * from a cache copy `cache='<cache dir>'`, which every version directory of that cache directory shares. The script of
+ * `install-cli` and `shortCommandWorks` both build it here, so they cannot drift.
+ */
+export const terminalCommandLine = (root) => {
+  const cache = cacheDirOf(root);
+  return cache === undefined ? `exec node ${singleQuoted(join(root, 'bin', 'nurselog'))} "$@"` : `cache=${singleQuoted(cache)}`;
+};
+
+/**
+ * Whether a message may print the short command `nurselog <subcommand>` for the CLI at `cli` (`<root>/bin/nurselog`;
+ * design section 13, "Short command"): the terminal command under `deps.home` (default the home directory) is a
+ * regular file, no symbolic link, whose line 2 is the owner line and which holds the line of `root`
+ * (`terminalCommandLine`) as a whole line, and it is the first `nurselog` that `deps.path` (default `PATH`) finds,
+ * leaving out the package's own `bin/`, which is on the Bash tool's PATH only. A home that is no absolute path (an
+ * empty or relative HOME) and any failure of the look-up give false, the long form; it never throws.
+ */
+export const shortCommandWorks = (cli, deps = {}) => {
+  try {
+    const home = deps.home ?? homedir();
+    if (!isAbsolute(home)) {
+      return false;
+    }
+    const target = resolve(terminalCommandPath(home));
+    const lines = readSmallFile(target, TERMINAL_COMMAND_BYTES, { head: true }).split('\n');
+    if (lines[1] !== OWNER_LINE || !lines.includes(terminalCommandLine(dirname(dirname(cli))))) {
+      return false;
+    }
+    const ownBin = resolve(dirname(cli));
+    const entries = (deps.path ?? process.env.PATH ?? '').split(delimiter).filter((entry) => isAbsolute(entry) && resolve(entry) !== ownBin);
+    const found = resolveCommand('nurselog', entries.join(delimiter));
+    return found !== undefined && resolve(found) === target;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * `node <cli> <subcommand> --repo <root>`, or without `--repo` when `root` is undefined, as shell words that run from
- * any directory (design section 9). When a path holds a control character or a backslash it never echoes that path:
- * it says, as a sentence, to run the subcommand (in the repository directory, when there is a root) instead.
+ * any directory (design section 9); when `short` (by default `shortCommandWorks(cli)`) the short command
+ * `nurselog <subcommand>`, which holds no plugin path. When a printed path holds a control character or a backslash it
+ * never echoes that path: it says, as a sentence, to run the subcommand (in the repository directory, when there is a
+ * root) instead.
  */
-export const cliCommand = (root, subcommand, cli = CLI_PATH) => {
+export const cliCommand = (root, subcommand, cli = CLI_PATH, short = shortCommandWorks(cli)) => {
   const where = root === undefined ? '' : ' in the repository directory';
-  if (UNSAFE_PATH.test(cli)) {
+  if (!short && UNSAFE_PATH.test(cli)) {
     return `run node with bin/nurselog of the Nurselog plugin: ${subcommand}${where} (${HIDDEN_PATH})`;
   }
+  const program = short ? 'nurselog' : `node ${shellWord(cli)}`;
   if (root === undefined) {
-    return `node ${shellWord(cli)} ${subcommand}`;
+    return `${program} ${subcommand}`;
   }
   if (UNSAFE_PATH.test(root)) {
-    return `run node ${shellWord(cli)} ${subcommand}${where} (${HIDDEN_PATH})`;
+    return `run ${program} ${subcommand}${where} (${HIDDEN_PATH})`;
   }
-  return `node ${shellWord(cli)} ${subcommand} --repo ${shellWord(root)}`;
+  return `${program} ${subcommand} --repo ${shellWord(root)}`;
 };
 
-/** The absolute command that starts the one board from any directory; it needs no `--repo` (design section 9). */
-export const startCommand = (cli = CLI_PATH) => cliCommand(undefined, 'start', cli);
+/** The command that starts the one board from any directory; it needs no `--repo` (design section 9). */
+export const startCommand = (cli = CLI_PATH, short = shortCommandWorks(cli)) => cliCommand(undefined, 'start', cli, short);
 
 /** The line `emit`, a live `start` and `status` print in a repository without a config (design section 8). */
-export const notSetUpMessage = (cli = CLI_PATH) => {
-  if (UNSAFE_PATH.test(cli)) {
+export const notSetUpMessage = (cli = CLI_PATH, short = shortCommandWorks(cli)) => {
+  if (!short && UNSAFE_PATH.test(cli)) {
     return `Nurselog is not set up for this repository; run init of bin/nurselog in the Nurselog plugin with node (${HIDDEN_PATH})`;
   }
-  return `Nurselog is not set up for this repository; run: node ${shellWord(cli)} init`;
+  return `Nurselog is not set up for this repository; run: ${cliCommand(undefined, 'init', cli, short)}`;
 };
 
 /** Removes control characters from a text built from config or repository values before it is printed. */
@@ -801,6 +863,10 @@ const BODY_FIELDS = ['content', 'new_string', 'old_string', 'new_source'];
 const RESPONSE_SCALARS = ['is_error', 'exitCode', 'exit_code', 'interrupted', 'isAsync', 'agentId', 'status', 'resolvedModel'];
 const ERROR_LINE = 300;
 const MARKER_TEXT = 300;
+/** The characters an AskUserQuestion answer keeps of its question, its answer and its notes, each (design section 2.3). */
+const ANSWER_TEXT = 500;
+/** The answers of one AskUserQuestion call the hook keeps. */
+const ANSWERS_CAP = 10;
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -873,12 +939,71 @@ const textOf = (value) => {
 /** The first non-blank line of the redacted text, cut after redaction so a cut never leaves part of a token. */
 const firstLine = (value) => redactString(textOf(value)).split('\n').find((line) => line.trim())?.trim().slice(0, ERROR_LINE);
 
+/** A text of an AskUserQuestion answer, redacted, then cut, so a cut never leaves part of a token. */
+const answerText = (text) => redactString(text).slice(0, ANSWER_TEXT);
+
+/**
+ * A question that asks for a secret: a password or passphrase, a secret, an API key or token, an access or auth token,
+ * a private key or a credential, also inside an identifier (`DB_PASSWORD`, `MY_API_KEY`): only a letter or a digit
+ * next to the name keeps it from counting. A token alone does not count: a token budget is a common question here.
+ */
+const SECRET_QUESTION = /(?<![A-Za-z0-9])(?:pass(?:word|phrase|wd)s?|secrets?|api[\s_-]?(?:keys?|tokens?)|(?:access|auth)[\s_-]?tokens?|private[\s_-]?keys?|credentials?)(?![A-Za-z0-9])/i;
+
+/** The label of an option: a string, or the `label` of an `{ label, description }` object. */
+const optionLabel = (option) => {
+  if (typeof option === 'string') {
+    return option;
+  }
+  return isObject(option) && typeof option.label === 'string' ? option.label : undefined;
+};
+
+/** The option labels of every question of the call, from its `tool_input.questions` and its response's `questions`. */
+const optionLabels = (input, response) => {
+  const questions = [input.questions, response.questions].filter(Array.isArray).flat().filter(isObject);
+  const options = questions.flatMap((question) => (Array.isArray(question.options) ? question.options : []));
+  return new Set(options.map(optionLabel).filter((label) => label !== undefined));
+};
+
+/** The answer is one of the call's option labels, or a multi-select of them joined by ", ": text the model wrote, not the developer. */
+const isOptionAnswer = (answer, labels) => labels.has(answer) || answer.split(', ').every((part) => labels.has(part));
+
+/**
+ * The developer's answers of an AskUserQuestion call (design section 2.3): its `answers` object (question text to the
+ * answer string) as a list of `{ question, answer, notes? }` in the object's order, the notes from `annotations` when
+ * they are a non-empty string, at most `ANSWERS_CAP`. A list, not the object, so no question text becomes a key that
+ * the key rule of `redactValue` reads as a secret name. A question that asks for a secret (`SECRET_QUESTION`) keeps
+ * its answer only when the answer is one of the call's option labels, else it becomes `[redacted]`, since redaction by
+ * shape would keep a typed password; its notes always become `[redacted]`, since notes are always typed. Undefined when
+ * the call has none.
+ */
+const keptAnswers = (input, response) => {
+  if (!isObject(response.answers)) {
+    return undefined;
+  }
+  const annotations = isObject(response.annotations) ? response.annotations : {};
+  const labels = optionLabels(input, response);
+  const answered = Object.entries(response.answers).filter(([, answer]) => typeof answer === 'string').slice(0, ANSWERS_CAP);
+  const kept = answered.map(([question, answer]) => {
+    const annotation = Object.hasOwn(annotations, question) ? annotations[question] : undefined;
+    const notes = isObject(annotation) ? annotation.notes : undefined;
+    const secret = SECRET_QUESTION.test(question);
+    const typed = secret && !isOptionAnswer(answer, labels);
+    const item = { question: answerText(question), answer: typed ? REDACTED : answerText(answer) };
+    if (typeof notes !== 'string' || notes === '') {
+      return item;
+    }
+    return { ...item, notes: secret ? REDACTED : answerText(notes) };
+  });
+  return kept.length > 0 ? kept : undefined;
+};
+
 /**
  * Keeps `responseChars`, the scalars the mapping reads, the first error line, what `keptStdout` (`hooks/verification.mjs`)
- * keeps of a Bash stdout after redaction (a verification tail or a PR URL) and the short text of a marker tool (a
- * string, a content list or an object with `content`).
+ * keeps of a Bash stdout after redaction (a verification tail or a PR URL), the short text of a marker tool (a
+ * string, a content list or an object with `content`) and the answers of an AskUserQuestion call (`keptAnswers`).
  */
-const slimResponse = (response, tool, command, sensitive) => {
+const slimResponse = (response, tool, input, sensitive) => {
+  const command = typeof input.command === 'string' ? input.command : '';
   const slim = { responseChars: JSON.stringify(response ?? null).length };
   if (MARKER_TOOL.test(tool)) {
     slim.text = redactString(textOf(isObject(response) ? response.content : response)).slice(0, MARKER_TEXT);
@@ -910,6 +1035,10 @@ const slimResponse = (response, tool, command, sensitive) => {
       slim.stdout = stdout;
     }
   }
+  const answers = tool === 'AskUserQuestion' ? keptAnswers(input, response) : undefined;
+  if (answers) {
+    slim.answers = answers;
+  }
   return slim;
 };
 
@@ -932,7 +1061,6 @@ export const minimizePayload = (payload) => {
     return payload;
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
-  const command = typeof input.command === 'string' ? input.command : '';
   const sensitive = touchesSecret(input);
   const slim = { ...payload };
   if (payload.error !== undefined) {
@@ -947,7 +1075,7 @@ export const minimizePayload = (payload) => {
     slim.tool_input = slimInput(input, sensitive);
   }
   if (payload.tool_response !== undefined) {
-    slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === 'string' ? payload.tool_name : '', command, sensitive);
+    slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === 'string' ? payload.tool_name : '', input, sensitive);
   }
   return slim;
 };
@@ -2071,27 +2199,26 @@ export const AUTO_OPEN_WAIT_MS = 1000;
 const defaultSignIn = async (url) => (await signInBoard()).signIn ?? url;
 
 /** The command that opens the board by hand: `open` starts the board when it is down, waits for it and opens the window. */
-const openByHand = (cli) => cliCommand(undefined, 'open --app', cli);
+const openByHand = (cli, short) => cliCommand(undefined, 'open --app', cli, short);
 
 /**
  * The line a SessionStart that has started the board adds to its message when `env.NURSELOG_AUTO_OPEN` is `app`
  * (design section 9), after it opened `url` in an app window: undefined when the variable is anything else, or when
- * the window launched; else why none did and the command that opens it by hand. The window opens the sign-in URL
- * `signIn(url)` gives (by default a ticket URL of `signInBoard`, else `url`), so it signs in, through the sign-in file
- * of `openAppWindow`; when that file cannot be written no window opens and the line says so. The lines name `url`
- * without a ticket. The browser runs with `launchOptions`,
- * by default the board's environment (`boardEnv`, without the session's variables) in the home directory, because it
- * outlives the session. It waits at most `waitMs` for the launch, so a slow browser never holds the hook past its
- * budget, and it never throws.
+ * the window launched; else why none did and the command that opens it by hand (`cliCommand` of `cli` and `short`).
+ * The window opens the sign-in URL `signIn(url)` gives (by default a ticket URL of `signInBoard`, else `url`), so it
+ * signs in, through the sign-in file of `openAppWindow`; when that file cannot be written no window opens and the line
+ * says so. The lines name `url` without a ticket. The browser runs with `launchOptions`, by default the board's
+ * environment (`boardEnv`, without the session's variables) in the home directory, because it outlives the session. It
+ * waits at most `waitMs` for the launch, so a slow browser never holds the hook past its budget, and it never throws.
  */
 export const autoOpenLine = async (url, options = {}) => {
-  const { env = process.env, cli = CLI_PATH, waitMs = AUTO_OPEN_WAIT_MS, signIn = defaultSignIn, ...deps } = options;
+  const { env = process.env, cli = CLI_PATH, short, waitMs = AUTO_OPEN_WAIT_MS, signIn = defaultSignIn, ...deps } = options;
   const launchOptions = options.launchOptions ?? { env: boardEnv(env), cwd: homedir() };
   if (env.NURSELOG_AUTO_OPEN !== 'app') {
     return undefined;
   }
   const platform = deps.platform ?? process.platform;
-  const byHand = openByHand(cli);
+  const byHand = openByHand(cli, short);
   if (platform !== 'darwin' && platform !== 'linux') {
     return `No app window: NURSELOG_AUTO_OPEN=app works on macOS and Linux only; open the board at ${url}`;
   }
@@ -2124,4 +2251,9 @@ export const autoOpenLine = async (url, options = {}) => {
  * The line a SessionStart adds to its "board is starting" message when `env.NURSELOG_AUTO_OPEN` is `app`: no window
  * opened, because a board that has not answered has no address yet; undefined for any other value.
  */
-export const autoOpenStartingLine = ({ env = process.env, cli = CLI_PATH } = {}) => (env.NURSELOG_AUTO_OPEN === 'app' ? `No app window yet: the board is still starting; open it with: ${openByHand(cli)}` : undefined);
+export const autoOpenStartingLine = ({ env = process.env, cli = CLI_PATH, short } = {}) => {
+  if (env.NURSELOG_AUTO_OPEN !== 'app') {
+    return undefined;
+  }
+  return `No app window yet: the board is still starting; open it with: ${openByHand(cli, short)}`;
+};

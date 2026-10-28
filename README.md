@@ -288,23 +288,28 @@ When a repository's loop differs, the board draws what it can derive and leaves 
 - No pull requests, or no `github.repo`: no Merge gate, because Merge and Promote come from `gh`.
 - A subagent that works in its own worktree (a `pr-shepherd` that checks out an existing branch) begins a run there
   that starts at its stage, PR or Build, and has no Plan.
-- A role that `roles` maps to `other` (the `*` fallback) gets no Build stream and no reviewer node.
+- A role that `roles` maps to `other` (the `*` fallback, the built-in `general-purpose` among them) gets no reviewer
+  node. It becomes a Build stream of the branch at its first file edit in a feature worktree, or in the main checkout on
+  a feature branch, but without the report block below; one that only reads stays under the Plan node.
+- A reviewer that reads several branches (their files by path, or `git diff main...<branch>`) is a reviewer node on
+  each of their rows.
 - The stages above are fixed: a workflow with other stages cannot be drawn.
 
 <details>
 <summary>Roles and the report block</summary>
 
 - The config `roles` maps an agent type to `{ "stage": "build" | "review" | "pr" | "other", "short"?: "<label>" }`;
-  the fallback `*` is required and is `other` by default. An `other` agent appears in the agent table only.
+  the fallback `*` is required and is `other` by default. An `other` agent appears in the agent table and under the
+  Plan node, until its first file edit on a branch makes it a Build stream there.
 - Default roles: `implementer` builds; `conventions-checker`, `code-reviewer`, `spec-reviewer`, `typescript-reviewer`,
   `security-reviewer`, `design-reviewer`, `database-reviewer`, `silent-failure-hunter` and `pr-test-analyzer` review;
   `pr-shepherd` opens the PR. Any other agent type needs its own entry in `roles`; `nurselog init` writes one for each
   agent in `.claude/agents` whose name is `implementer`, `builder`, `developer`, `coder` or `engineer` or ends in `-`
-  plus one of them (build), ends in `-reviewer`, `-checker`, `-analyzer` or `-hunter` (review) or ends in `shepherd`
-  (pr). A build name whose `tools` list has none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` is
-  read-only and gets none. Any other agent gets a build role when its `tools` key lists `Edit`, `Write`, `MultiEdit`
-  or `NotebookEdit`, except the names in `docs.roles` (default `doc-updater`); an agent without a `tools` key inherits
-  every tool and gets no role from them.
+  plus one of them or in `-dev` (build), is `reviewer`, `qa` or `tester` or ends in `-reviewer`, `-checker`,
+  `-analyzer`, `-hunter`, `-qa` or `-tester` (review) or ends in `shepherd` (pr). A build name whose `tools` list has
+  none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` is read-only and gets none. Any other agent gets a
+  build role when its `tools` key lists `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, except the names in
+  `docs.roles` (default `doc-updater`); an agent without a `tools` key inherits every tool and gets no role from them.
 - Agents with a build, review or pr role get an injected instruction to end their report with a fenced `nurselog`
   YAML block: `decisions`, `followups` (`issue`, `improve` or `fix`, with text and an optional file), `questions` and
   `files`. It feeds the follow-ups, the reviewer verdicts and the questions with the main thread.
@@ -430,16 +435,18 @@ printf '%s %s\n' "$model" "$link"
 
 ## Markers
 
-The main thread adds what hooks cannot see. The injected instructions tell it to use the plugin's tools:
+The main thread adds what hooks cannot see. The injected instructions tell it to use the plugin's tools, each only
+when its case comes up (working alone, it may need none):
 
 | Tool | Records |
 | --- | --- |
-| `plan` | The run's streams (`id`, `package?`, `after?`, `model?`) and a note, once the brief decides them. A new plan starts a new pipeline. |
+| `plan` | The run's streams (`id`, `package?`, `after?`, `model?`) and a note, when the work goes to subagents in streams. A new plan starts a new pipeline. |
 | `gate` | A hand-over to you: gate `plan`, `merge`, `promote` or `docs`, state `waiting`, `done` or `skipped`. |
-| `question` | A question asked in prose: `text`, `blocking`, `options`, `relays` (a subagent question it passes on). Returns an id; `answer: <id>` closes it. |
+| `question` | A question asked in prose: `text`, `blocking`, `options`, and `relays` only for a subagent question it passes on. Returns an id; `answer: <id>` closes it. |
 
-`run` defaults to the run the session started in. Claude Code asks for permission on each tool's first use; a plugin
-cannot pre-approve it. Joins, reviews, merges and promotions are derived and need no marker.
+`run` defaults to the run the session started in; pass it only for work in another worktree. Claude Code asks for
+permission on each tool's first use; a plugin cannot pre-approve it. Joins, reviews, merges and promotions are derived
+and need no marker.
 
 <details>
 <summary>Markers from a terminal: <code>nurselog emit</code></summary>
@@ -480,7 +487,7 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | `nurselog init [--write] [--repo-file] [--from -]` | Proposes a config, or writes it. Never overwrites a file. |
 | `nurselog emit plan\|gate\|question ...` | Adds a marker. |
 | `nurselog insights [--json]` | Workflow health report. |
-| `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, commands and reports included, so check it before you share it). |
+| `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, answers, commands and reports included, so check it before you share it). |
 | `nurselog purge [--before <day>] [--all] [--yes]` | Deletes recorded data. |
 | `nurselog install-cli [--remove]` | Writes the [terminal command](#terminal-command) `~/.local/bin/nurselog`, or deletes it. |
 | `nurselog uninstall [--yes] [--keep-data]` | Removes Nurselog from this machine and lists what you added by hand ("Remove the plugin" under [Load the plugin](#load-the-plugin)). |
@@ -526,11 +533,12 @@ repository off the board with a warning; a bad value of a known key falls back t
   a committed login would turn polling off for every other contributor.
 - `packages` from `pnpm-workspace.yaml` or the `workspaces` of `package.json` (`dir/*` expands one level to the
   directories with a `package.json`; the id is the directory name; colours from a fixed palette).
-- `roles` from `.claude/agents/*.md`: `implementer`, `builder`, `developer`, `coder`, `engineer` and `*-` plus one of
-  them build, unless an explicit `tools` list has no file-writing tool and no `Bash` (read-only); `*-reviewer`,
-  `*-checker`, `*-analyzer` and `*-hunter` review; `*shepherd` opens the PR. Any other agent whose `tools` list `Edit`,
-  `Write`, `MultiEdit` or `NotebookEdit` builds too, except the exact names in `docs.roles` (default `doc-updater`); an
-  agent without a `tools` key is left to its name.
+- `roles` from `.claude/agents/*.md`: `implementer`, `builder`, `developer`, `coder`, `engineer`, `*-` plus one of
+  them and `*-dev` build, unless an explicit `tools` list has no file-writing tool and no `Bash` (read-only);
+  `reviewer`, `qa`, `tester`, `*-reviewer`, `*-checker`, `*-analyzer`, `*-hunter`, `*-qa` and `*-tester` review;
+  `*shepherd` opens the PR. Any other agent whose `tools` list `Edit`, `Write`, `MultiEdit` or `NotebookEdit` builds
+  too, except the exact names in `docs.roles` (default `doc-updater`); an agent without a `tools` key is left to its
+  name.
 - `keyPattern` as `<PREFIX>-\d+` when at least 3 of the 50 most recent branches carry a ticket key with one shared
   prefix. With a `keyPattern` the key also comes from prompts, as a whole word that is never part of a path or URL.
   When no upper-case prefix qualifies but one does in any case (`eng-123`), it proposes the prefix in upper case with
@@ -573,9 +581,9 @@ Arrays such as `packages` replace the default list whole.
 | `budgets.default` | no limits | `{ toolCalls, verifyRounds }` for every role. |
 | `budgets.roles` | implementer 80 calls, 3 rounds | Per role budgets. |
 | `budgets.contextLimits` | 200k, 1M for current models | Context window per model prefix. |
-| `verification.runners` | pnpm, npm, npx, yarn, node, turbo, tsc, eslint, vitest | Commands that can be verification runs. |
-| `verification.kinds` | typecheck, lint, test | Regex per kind. |
-| `verification.failPatterns` | per kind | Matched against the kept stdout tail. Only the default runners and kinds keep a tail. |
+| `verification.runners` | pnpm, npm, npx, yarn, bun, node, turbo, make, tsc, eslint, vitest | Commands that can be verification runs. |
+| `verification.kinds` | typecheck, lint, test | Regex per kind; the test default takes `npm test`, `yarn test`, `bun test` and `make test`. |
+| `verification.failPatterns` | per kind | Matched against the kept stdout tail; the test default reads vitest's, Jest's and bun's failed counts. Only the default runners and kinds keep a tail. |
 | `verification.fullRunOnly` | `true` | A run with a path argument is not a full run. |
 | `join.pattern` | from the trunk | Regex of the main-thread command that writes the reviewers' diff. |
 | `pricesFrom` `*` | `prices.json` of the plugin | Token prices in USD per million tokens per model prefix. |
@@ -608,13 +616,14 @@ board.
 <details>
 <summary>What the hook keeps, drops and redacts</summary>
 
-Kept: prompts, commands, file paths, tool names, agent types and reports, timings, token counts.
+Kept: prompts, commands, file paths, tool names, agent types and reports, timings, token counts, and your answers and
+notes to the main thread's AskUserQuestion calls (up to 10 per call, 500 characters each, redacted by shape).
 
 Dropped:
 
 - Edit and Write bodies (kept as character counts only).
-- Tool output, except its length, a few scalars, the first error line (300 characters) and a failed call's error cut
-  to 500 characters.
+- Tool output, except its length, a few scalars, the first error line (300 characters), a failed call's error cut
+  to 500 characters and an AskUserQuestion call's answers and notes (above).
 - Everything but the path and the command for calls that touch a secret (`.env*`, `.npmrc`, `.netrc`, `*.pem`,
   `*.key`, `id_*`, `credentials*`, `hosts.yml`, paths with `secret`, `printenv`, `env`, `gh auth token` ...); such calls
   are marked `sensitive` and keep no error.
@@ -623,10 +632,20 @@ Redacted, before any cut: values of secret-named keys, PEM, SSH and age keys, ab
 `github_pat_`, `AKIA`, JWTs, Slack tokens ...), long base64 runs, URL passwords, auth headers, `--password`-style flag
 values and `NAME=value` pairs with a secret name. The home directory becomes `~`.
 
-The stdout tail: a command made only of verification runs (default runners and kinds) keeps its last 300 characters,
-and `gh pr create` its PR URL. The rule is an allowlist (no option between the runner and its tool word, only
-allowlisted environment names such as `CI` and `NODE_ENV`, no long `grep` option). The tail is redacted by shape only,
-so a value a test prints can survive in it, and a script that loads `.env` itself is not seen as touching a secret.
+The stdout tail: a command made only of verification runs (default runners and kinds, such as `pnpm test:run`,
+`npm test` or `make test`) keeps its last 300 characters, and `gh pr create` its PR URL. The rule is an allowlist (no
+option between the runner and its tool word, only allowlisted environment names such as `CI` and `NODE_ENV`, no long
+`grep` option). The tail is redacted by shape only, so a value a test prints can survive in it, and a script that loads
+`.env` itself is not seen as touching a secret. A `make` tail holds make's echo of the recipe lines with their variables
+expanded, so prefix a recipe line that carries a secret with `@`. `make` keeps no tail when an option or a `NAME=value`
+follows it (`make -j4 test`, `make test V=1`), and keeps none unless every target is a kind target (`test`, `lint`,
+`test:unit`, `lint-ci`); the verification round still counts.
+
+AskUserQuestion answers and notes are redacted by shape as well, so a secret you type that has no known shape can
+survive. One guard covers the plain case: when a question asks for a password, passphrase, secret, API key or token,
+access or auth token, private key or credential, also by a name such as `DB_PASSWORD` (a token budget does not count),
+its answer is kept only when it is one of the call's offered options, and its notes always become `[redacted]`;
+anything you typed there becomes `[redacted]`.
 
 </details>
 
@@ -699,7 +718,7 @@ Questions and waits): the last 5 work sessions against the up to 20 before them.
 so it needs no running board.
 
 ```markdown
-- ! Implementers: 6 of the last 9 implementer runs reached their tool-call budget by their first stop (67 %; the rule flags 30 % or more; before: 9 of 31).
+- ! Implementers: 6 of the last 9 build runs reached their tool-call budget by their first stop (67 %; the rule flags 30 % or more; before: 9 of 31).
 - Review: 2 of the last 5 branches ran a second review round (before: 6 of 20).
 - Verification: not measured: no command matched verification.kinds in the last 5 work sessions.
 ```
@@ -707,13 +726,15 @@ so it needs no running board.
 <details>
 <summary>How the report is counted</summary>
 
-- A flagged line (`!`) is a standing rule (such as 30 % or more implementer runs at their budget) or a comparison
+- A flagged line (`!`) is a standing rule (such as 30 % or more build runs at their budget) or a comparison
   worse than before by a fixed rule (a rate 1.5 times the earlier one, a median above the earlier 75th percentile).
   Every line carries its numbers and the earlier ones; there is no score.
 - A work session is a session card with at least 5 main-thread tool calls. The board writes one aggregate per session
   it has seen finish; its first start backfills `spool.readDays` days.
 - The first comparison comes after 10 earlier work sessions; until then a line reads `(before: fewer than 10 work
   sessions)`.
+- A build run is a subagent of a build-stage role (`roles`), or any other subagent from its first file edit on a branch;
+  the main thread's own verification commands are not one.
 - A signal whose input your workflow lacks (no build budget, no review roles or report blocks, no command matching
   `verification.kinds`) reads "not measured" with the reason and never flags.
 - Failed runs are a non-zero exit or a fail pattern matching the stdout tail; with other runners than the defaults

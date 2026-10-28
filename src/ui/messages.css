@@ -1,6 +1,6 @@
 /* The main thread's messages (design sections 5 and 15): the main-thread strip on a card (strip.ts), the main-thread
-   modal (modal.ts) with its shell and tag clone, and a question's link to the message of its turn. The tokens are
-   board.css's. Nothing here blinks: only waiting things pulse. */
+   modal (modal.ts) with its shell and tag clone and its turns (turn-view.ts), and a question's link to the message of
+   its turn. The tokens are board.css's. Nothing here blinks: only waiting things pulse. */
 
 /* the "main" tag of the strip and the modal header: outlined, a dot in the shared colour */
 .main-tag {
@@ -47,7 +47,8 @@ button.run-row-line:focus-visible { outline-offset: -2px; }
 }
 .question-link:hover { color: var(--fg); }
 
-/* the modal: a centred box over a backdrop; no blur and no scroll lock, the list scrolls inside */
+/* the modal: a centred box over a backdrop; no blur and no scroll lock, the list scrolls inside, which holds itself
+   still while something above the visible part changes height (modal.ts), so the browser's own anchoring is off */
 .main-modal {
   position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
@@ -75,7 +76,7 @@ button.run-row-line:focus-visible { outline-offset: -2px; }
 .main-sub { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .main-rule { height: 1px; flex: none; background: var(--border); }
 .main-scroll {
-  overflow-y: auto; overscroll-behavior: contain; padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 16px 18px 20px; display: flex; flex-direction: column;
   scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
 }
 /* a Tab stop only while it scrolls (modal.ts); its ring stays inside the box's rounded corners */
@@ -85,9 +86,44 @@ body:has(.board[data-connection="reconnecting"]) .main-head-text, body:has(.boar
 body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.board[data-connection="disconnected"]) .main-scroll {
   opacity: .6;
 }
-.main-empty { font-size: 13px; color: var(--fg-3); }
+.main-empty { flex: none; font-size: 13px; color: var(--fg-3); }
+/* a block whose height changes is clipped while it does (turn-view.ts); the latest turn only top to bottom, so a
+   bubble entering from the right is not cut */
+.main-modal .sizing { overflow: hidden; }
+.main-modal .main-latest.sizing { overflow: visible clip; }
 
-/* the newest message in full; a "needs you" one dashed in the you colour */
+/* the latest turn: the developer's bubbles over the reply card; the scroll's blocks are spaced by margins inside
+   them, not gap, so a block that grows from height 0 brings its spacing with it */
+.main-latest { position: relative; flex: none; display: flex; flex-direction: column; }
+.main-you-group { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.main-latest > .main-you-group, .main-latest-ghost > .main-you-group { margin-bottom: 8px; }
+/* the previous latest turn fading out over the new one while Earlier is closed (modal.ts) */
+.main-latest-ghost { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-direction: column; pointer-events: none; }
+/* the quiet note of a turn a subagent's report began, above its reply */
+.main-report-note { margin-bottom: 8px; font-size: 12px; font-style: italic; color: var(--fg-3); }
+.main-turn-full > .main-report-note { margin-bottom: 0; }
+
+/* a developer message: right-aligned, the "You" tag in the you colour, the text as written (no markdown) */
+.main-you {
+  max-width: min(560px, 86%); padding: 8px 12px 10px; background: var(--card-3); border: 1px solid var(--border-2);
+  border-radius: 12px 12px 4px 12px;
+}
+.main-you-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font: 500 11px var(--f-mono); color: var(--fg-3); }
+.main-you-tag { font: 600 10px var(--f-ui); line-height: 16px; color: var(--ink); background: var(--you); border-radius: 999px; padding: 0 7px; }
+.main-you-head .main-ago { padding-left: 12px; }
+.main-you-answer { margin-bottom: 2px; font-size: 12px; color: var(--fg-2); overflow-wrap: anywhere; }
+.main-you-text { font-size: 13.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* over 8 lines it is clamped with "Show all", which shows only when the text overflows */
+.main-you-text.clamped { max-height: 12em; overflow: hidden; }
+.main-you-text.clamped.overflows { mask-image: linear-gradient(#000 72%, transparent); }
+.main-you-text.sizing { max-height: none; }
+.main-you-more { border: 0; background: transparent; padding: 6px 0 0; cursor: pointer; font-size: 12px; color: var(--fg-2); }
+.main-you-more:hover { color: var(--fg); }
+/* an answer's notes: a quieter line under the answer */
+.main-you-notes { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.main-you .main-cut { margin-top: 6px; }
+
+/* the latest reply in full; a "needs you" one dashed in the you colour */
 .main-message { flex: none; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2); padding: 14px 16px 16px; }
 .main-message[data-kind="ask"] { border: 1.5px dashed var(--you); }
 .main-message.flashed { box-shadow: 0 0 0 3px rgba(255, 255, 255, .24); }
@@ -96,6 +132,14 @@ body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.boar
 .main-ago { margin-left: auto; }
 .main-time { font: 500 11px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .main-cut { margin-top: 10px; font: 500 11px var(--f-mono); color: var(--fg-3); }
+/* the working card: dashed and quiet while the latest turn has no reply, in the ask look while the main thread waits
+   for the developer's answer; its background and border turn into the reply's */
+.main-latest > .main-message { transition: background-color .3s var(--ease), border-color .3s var(--ease); }
+.main-message.working { border: 1px dashed var(--border); background: transparent; }
+.main-message.working[data-pending="waiting"] { border: 1.5px dashed var(--you); }
+.main-message.working > :not(.main-working), .main-message:not(.working) > .main-working { display: none; }
+.main-working { font: 500 12px var(--f-mono); color: var(--fg-3); transition: color .3s var(--ease); }
+.main-message[data-pending="waiting"] .main-working { color: var(--you); }
 
 /* the message text: paragraphs, leads, lists, inline code and code blocks, built from text nodes */
 .main-text { font-size: 14px; line-height: 1.6; color: var(--fg); overflow-wrap: anywhere; }
@@ -113,9 +157,12 @@ body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.boar
 }
 .main-text pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; overflow-wrap: normal; }
 
-/* the earlier messages, newest first on a timeline, collapsed behind "Earlier messages (N)" and each expandable */
+/* the earlier turns, newest first behind "Earlier turns (N)": one card per turn, a line per side, opening to both in
+   full; a card's spacing is its own margin inside its item, so an item sliding in from height 0 brings it along, and
+   Earlier's own is its toggle's margin, so Earlier grows from height 0 */
+.main-earlier { flex: none; }
 .main-earlier-toggle {
-  display: flex; align-items: center; gap: 8px; padding: 4px 2px; border: 0; background: transparent; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 4px 2px; border: 0; background: transparent; cursor: pointer;
   font: 600 10.5px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
 }
 .main-earlier-toggle:hover { color: var(--fg-2); }
@@ -123,35 +170,51 @@ body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.boar
 .main-earlier.open .main-earlier-toggle svg { transform: none; }
 .main-earlier-wrap { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s var(--ease), opacity .35s; }
 .main-earlier.open .main-earlier-wrap { grid-template-rows: 1fr; opacity: 1; }
-.main-earlier-wrap > div, .main-earlier-body > div { overflow: hidden; min-height: 0; }
-.main-earlier-list { list-style: none; margin: 6px 0 0 5px; padding: 0; border-left: 1px solid var(--border-2); }
-.main-earlier-item { position: relative; padding-left: 12px; }
-.main-earlier-item.sliding { overflow: hidden; }
-.main-earlier-item::before {
-  content: ""; position: absolute; left: -4px; top: 14px; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3);
+.main-earlier-wrap > div { overflow: hidden; min-height: 0; }
+.main-earlier-list { list-style: none; margin: -2px 0 0; padding: 0; }
+.main-turn { display: flow-root; }
+.main-turn-card {
+  position: relative; margin-top: 8px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--card-2);
+  transition: border-color .2s;
 }
-.main-earlier-item[data-kind="plan"]::before { background: var(--shared); }
-.main-earlier-item[data-kind="ask"]::before { background: var(--card); border: 1.5px dashed var(--you); }
-.main-earlier-head {
-  display: grid; grid-template-columns: 44px auto minmax(0, 1fr) 12px; gap: 8px; align-items: baseline; width: 100%;
-  padding: 7px 6px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-2); text-align: left; cursor: pointer;
-  font-size: 12.5px; transition: background-color .2s;
+.main-turn-card:hover, .main-turn.open .main-turn-card { border-color: var(--border-2); }
+.main-turn-card.flashed { box-shadow: inset 0 0 0 999px rgba(255, 255, 255, .12); }
+.main-turn-head {
+  position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr) 12px; gap: 8px; align-items: start; width: 100%;
+  padding: 9px 10px; border: 0; border-radius: 9px; background: transparent; color: var(--fg-2); text-align: left; cursor: pointer;
+  font-size: 12.5px;
 }
-.main-earlier-head:hover { background: var(--card-2); }
-.main-earlier-head.flashed { background: rgba(255, 255, 255, .12); }
-.main-earlier-head .main-kind { font-size: 9.5px; color: var(--fg-3); }
-.main-earlier-item[data-kind="ask"] .main-earlier-head .main-kind { color: var(--you); }
-.main-earlier-first { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: opacity .2s; }
-.main-earlier-item.open .main-earlier-first { opacity: 0; }
-.main-earlier-head svg { align-self: center; width: 11px; height: 11px; color: var(--fg-3); transform: rotate(90deg); transition: transform .3s var(--ease); }
-.main-earlier-item.open .main-earlier-head svg { transform: rotate(180deg); }
-.main-earlier-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--ease); }
-.main-earlier-item.open .main-earlier-body { grid-template-rows: 1fr; }
-.main-earlier-content { padding: 2px 6px 12px; }
-.main-earlier-content .main-text { font-size: 13px; color: var(--fg-2); }
+.main-turn-head:focus-visible { outline-offset: -2px; }
+.main-turn-head > time { grid-column: 1; padding-top: 1px; }
+.main-turn-head > svg {
+  grid-column: 3; margin-top: 3px; width: 11px; height: 11px; color: var(--fg-3); transform: rotate(90deg); transition: transform .3s var(--ease);
+}
+.main-turn.open .main-turn-head > svg { transform: rotate(180deg); }
+.main-turn-lines { grid-column: 2; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* open, the lines leave the flow where they were (the head's padding, the time's column and the gap) and fade out */
+.main-turn.open .main-turn-lines { position: absolute; left: 62px; right: 30px; top: 9px; opacity: 0; pointer-events: none; }
+.main-turn-line { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 8px; align-items: baseline; min-width: 0; }
+.main-turn-who { font: 600 10px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--fg-3); white-space: nowrap; }
+.main-turn-first { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.main-turn-line.you .main-turn-who { color: var(--you); }
+.main-turn-line.you .main-turn-first { color: var(--fg); }
+.main-turn-line.none .main-turn-first { color: var(--fg-3); font-style: italic; }
+.main-turn-line.main .main-turn-first { color: var(--fg-2); }
+/* a turn a subagent's report began: a quiet note across the row, no "who" */
+.main-turn-line.report { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-style: italic; color: var(--fg-3); }
+.main-turn[data-kind="ask"] .main-turn-line.main .main-turn-who { color: var(--fg-2); }
+/* the full turn: drawn while open, and while it closes over the card's clip where it was, fading out */
+.main-turn-body { display: none; }
+.main-turn.open .main-turn-body { display: block; }
+.main-turn.closing .main-turn-body { display: block; position: absolute; left: 0; right: 0; top: var(--body-top, 0px); }
+.main-turn.closing .main-turn-full { opacity: 0; }
+.main-turn-full { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 12px; }
+.main-turn-full .main-message { background: var(--card); padding: 10px 14px 12px; }
+.main-turn-full .main-text { font-size: 13.5px; }
 
 @media (max-width: 760px) {
   .main-strip { width: calc(100% - 24px); margin-inline: 12px; }
   .main-strip-count { display: none; }
   .main-scroll { padding: 14px 14px 18px; }
+  .main-turn-line { grid-template-columns: 1fr; gap: 1px; }
 }

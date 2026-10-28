@@ -5,18 +5,18 @@
 // re-exports `stripPrefix`); `verification.d.mts` types it for TypeScript.
 
 /** The default runners: the first word of a verification command once `stripPrefix` removed its prefixes. */
-export const VERIFICATION_RUNNERS = Object.freeze(['pnpm', 'npm', 'npx', 'yarn', 'node', 'turbo', 'tsc', 'eslint', 'vitest']);
+export const VERIFICATION_RUNNERS = Object.freeze(['pnpm', 'npm', 'npx', 'yarn', 'bun', 'node', 'turbo', 'make', 'tsc', 'eslint', 'vitest']);
 /** The default command pattern of each verification kind, tried on the stripped command. */
-export const VERIFICATION_KINDS = Object.freeze({ typecheck: '\\b(typecheck|tsc)\\b', lint: '\\b(lint|eslint)\\b', test: '\\b(vitest|test:run)\\b|\\bpnpm\\b.*\\btest\\b' });
+export const VERIFICATION_KINDS = Object.freeze({ typecheck: '\\b(typecheck|tsc)\\b', lint: '\\b(lint|eslint)\\b', test: '\\b(vitest|test:run)\\b|\\b(pnpm|npm|yarn|bun|make)\\b[^&|;]*\\btest\\b' });
 /**
  * The default fail pattern of each kind, tried on a verification command's stdout tail: tsc's `error TS2322` lines and
- * its `Found 2 errors` summary, ESLint's `(2 errors, 1 warning)` summary, and vitest's and Jest's failed counts and
- * vitest's unhandled `Errors  1 error`.
+ * its `Found 2 errors` summary, ESLint's `(2 errors, 1 warning)` summary, vitest's and Jest's failed counts, bun's
+ * `1 fail` and vitest's unhandled `Errors  1 error`.
  */
 export const VERIFICATION_FAIL_PATTERNS = Object.freeze({
   typecheck: 'error TS\\d+|Found [1-9]\\d* errors?\\b',
   lint: '\\([1-9]\\d* errors?, \\d+ warnings?\\)',
-  test: '\\b[1-9]\\d* failed\\b|\\bErrors +[1-9]\\d* errors?\\b',
+  test: '\\b[1-9]\\d* fail(?:ed)?\\b|\\bErrors +[1-9]\\d* errors?\\b',
 });
 /** The characters of stdout a verification command's `tool.post` keeps, from its end. */
 export const STDOUT_TAIL = 300;
@@ -36,6 +36,16 @@ const SCRIPT_RUNNERS = new Set(['pnpm', 'npm', 'yarn', 'bun', 'turbo']);
 const SCRIPT_VERBS = new Set(['run', 'exec']);
 /** The runners of a package binary: their tool word is their next word. */
 const BINARY_RUNNERS = new Set(['npx', 'bunx']);
+/** The runners of a target: their tool word is their first target, when every word after them is a `KIND_TARGET`. */
+const TARGET_RUNNERS = new Set(['make']);
+/** A target that runs a kind: a kind word itself or one followed by `:`, `.`, `-` or `_` (`test:unit`, `lint.ci`; not `deploy-test`). */
+const KIND_TARGET = /^(?:typecheck|tsc|lint|eslint|vitest|test)(?:[:._-]|$)/;
+/** The tool words a script runner may run after `exec` or `dlx`: the kind words of a binary, so `npm exec test` is none. */
+const EXEC_TOOLS = new Set(['tsc', 'eslint', 'vitest', 'typecheck', 'lint']);
+/** The script runner options that run other code or read another config; npm takes a long option by a prefix. */
+const UNSAFE_OPTIONS = ['script-shell', 'userconfig', 'preload'];
+/** bun's short `-r` (`--preload`), alone or in a group of short options. */
+const BUN_PRELOAD = /^-[A-Za-z]*r/;
 /**
  * A tool word: a bare name or one `@scope/name`, so no path (a `/` elsewhere, a leading `.` or `..` would reach any
  * binary through a directory named like a kind, `node_modules/vitest/../../bin/cat`; `owner/repo` is a GitHub
@@ -187,27 +197,52 @@ const isSilentPrefix = (stages) => {
   return assignments.length > 0 && assignments.every((text) => SAFE_ASSIGNMENT.test(text));
 };
 
+/** A word that names an `UNSAFE_OPTIONS` entry, whole or by a prefix of at least three letters, or bun's `-r`. */
+const isUnsafeOption = (runner, text) => {
+  const name = /^--([^=]{3,})/.exec(text)?.[1];
+  if (name !== undefined && UNSAFE_OPTIONS.some((option) => option.startsWith(name))) {
+    return true;
+  }
+  return runner === 'bun' && BUN_PRELOAD.test(text);
+};
+
 /**
  * The tool word of a command, by an allowlist grammar with no option before it: for `pnpm`, `npm`, `yarn`, `bun` and
- * `turbo` their next word or the word after `run` or `exec` (for `pnpm` also `dlx`), for `npx` and `bunx` their next
- * word, for `node` its next word when that is a `NODE_SCRIPT`, else the runner itself. A tool word is a `PLAIN_WORD`,
- * and one a runner may fetch as a package (after `exec`, `dlx`, `npx` or `bunx`) has no `URL_SCHEME`; else there is none.
+ * `turbo` their next word or the word after `run` or `exec` (for `pnpm` also `dlx`; none for `bun exec`, which runs
+ * its argument as a shell script), for `npx` and `bunx` their next word, for `make` its next word when every word after
+ * it is a `KIND_TARGET` (no option, no `NAME=value`, which may override the recipes' `SHELL`, and no other target), for
+ * `node` its next word when that is a `NODE_SCRIPT`, else the runner itself. A tool word is a `PLAIN_WORD`; one a
+ * runner may fetch as a package (after `exec`, `dlx`, `npx` or `bunx`) has no `URL_SCHEME`, one after `exec` or `dlx`
+ * is an `EXEC_TOOLS` word and one of `bun` has no `.` (a file `bun` would run); a script runner's command has no
+ * `isUnsafeOption` word; else there is none.
  */
 const toolWord = (runner, args) => {
   if (runner.text === 'node') {
     return NODE_SCRIPT.test(args[0]?.text ?? '') ? args[0] : undefined;
+  }
+  if (TARGET_RUNNERS.has(runner.text)) {
+    const kindTargets = args.length > 0 && args.every((arg) => PLAIN_WORD.test(arg.text) && KIND_TARGET.test(arg.text));
+    return kindTargets ? args[0] : undefined;
   }
   const script = SCRIPT_RUNNERS.has(runner.text);
   if (!script && !BINARY_RUNNERS.has(runner.text)) {
     return runner;
   }
   const verb = script ? args[0]?.text : undefined;
+  const shellExec = runner.text === 'bun' && verb === 'exec';
+  if (shellExec || (script && args.some((arg) => isUnsafeOption(runner.text, arg.text)))) {
+    return undefined;
+  }
   const hasVerb = SCRIPT_VERBS.has(verb) || (runner.text === 'pnpm' && verb === 'dlx');
   const tool = hasVerb ? args[1] : args[0];
   if (!tool || !PLAIN_WORD.test(tool.text)) {
     return undefined;
   }
-  const fetches = !script || (hasVerb && verb !== 'run');
+  const exec = hasVerb && verb !== 'run';
+  if ((exec && !EXEC_TOOLS.has(tool.text)) || (runner.text === 'bun' && tool.text.includes('.'))) {
+    return undefined;
+  }
+  const fetches = !script || exec;
   return fetches && URL_SCHEME.test(tool.text) ? undefined : tool;
 };
 

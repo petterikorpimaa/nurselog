@@ -1,17 +1,27 @@
 import {
+  WorkerMissingError,
+  WorkerTimeoutError,
+  appendEvent,
+  createGhFacts,
+  createGitFacts,
+  createLine,
+  createUsageFacts,
+  describeError,
+  diffTargetOf,
+  loadPrices,
+  readReplayAnswer,
+  runReplayJob,
+  runWorkerJob
+} from "./chunk-OMBC2G6E.js";
+import {
   DEFAULT_CONFIG,
   FIELD_NAMES,
   HOOK_DEFAULTS,
   MAIN_AGENT,
-  MAX_CONFIG_BYTES,
-  MAX_POLL_SECONDS,
   MAX_READ_DAYS,
-  MIN_POLL_SECONDS,
   NONCE,
   PACKAGE_ROOT,
-  PROGRESS_ITEMS_CAP,
   RUNNING_CHECK_MS,
-  STALE_AGENT_MS,
   STREAM_ID,
   TOKEN_CHANGED,
   VERIFY_KINDS,
@@ -21,7 +31,6 @@ import {
   boardProof,
   boardUrl,
   byStart,
-  cdTarget,
   checkBoard,
   compareText,
   configKeepDays,
@@ -35,13 +44,8 @@ import {
   ensurePrivateDir,
   expandHome,
   findConfig,
-  firstWorkedCopy,
   gitCommonDir,
-  githubRepoOfRemote,
-  isBranchName,
-  linearRegExp,
   listSpoolFiles,
-  literalWord,
   loadConfig,
   localDay,
   loopbackJson,
@@ -50,25 +54,21 @@ import {
   openNoFollow,
   ownEntry,
   ownValue,
-  patternInput,
   processedTokens,
   pruneSpool,
   purgeableDayFiles,
   readHookConfig,
   readRepositoryRecord,
   readServerState,
-  readSmallFile,
   readWindowStart,
   recordedRootValid,
   redactValue,
   repoHash,
   reportLine,
   repositoryRoot,
-  roleConfig,
   sameText,
   serverStatePath,
   sessionMetrics,
-  shellCode,
   spoolDirExists,
   spoolDirFor,
   startCommand,
@@ -80,1255 +80,24 @@ import {
   uiConfig,
   userConfigPath,
   validateMarkerInput,
-  worktreeAddOfCommand,
   writePrivate
-} from "./chunk-MMMTGD7O.js";
-
-// src/spool/writer.ts
-var createLine = (src, event, data, envelope = {}) => {
-  const line = { v: 1, id: newLineId(), at: (/* @__PURE__ */ new Date()).toISOString(), src, event, sessionId: envelope.sessionId ?? "", cwd: envelope.cwd ?? "" };
-  if (envelope.agentId) {
-    line.agentId = envelope.agentId;
-  }
-  line.data = data;
-  return line;
-};
-var appendEvent = (dir, event, maxLineBytes) => appendSpoolLine(dir, event, "data", maxLineBytes);
-
-// src/facts/shared.ts
-import { execFile } from "child_process";
-var runCommand = (command, args, cwd, env) => new Promise((resolve7, reject) => {
-  const childEnv = env ? { ...process.env, ...env } : void 0;
-  execFile(command, args, { cwd, env: childEnv, timeout: 15e3, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" }, (error, stdout) => {
-    if (error) {
-      reject(error);
-    } else {
-      resolve7(stdout.trim());
-    }
-  });
-});
-var stderrLine = (error) => {
-  const lines = error.message.split("\n");
-  const stderr = lines[0].startsWith("Command failed") ? lines.slice(1) : lines;
-  return stderr.find((line) => line.trim() !== "")?.trim() ?? "";
-};
-var createBashTracker = () => {
-  const open = /* @__PURE__ */ new Map();
-  return (event) => {
-    if (event.event === "tool.pre" && event.data.tool === "Bash" && event.data.input.command) {
-      open.set(event.data.toolUseId, { command: event.data.input.command, cwd: event.cwd });
-      return void 0;
-    }
-    if (event.event === "tool.post" || event.event === "tool.fail") {
-      const finished = open.get(event.data.toolUseId);
-      open.delete(event.data.toolUseId);
-      return event.event === "tool.post" && finished ? { ...finished, interrupted: event.data.interrupted, exitCode: event.data.exitCode } : void 0;
-    }
-    return void 0;
-  };
-};
-
-// src/facts/git.ts
-import { existsSync, readFileSync, realpathSync } from "fs";
-import { stat } from "fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "path";
-var REMOVAL_SWEEP_MS = 5 * 60 * 1e3;
-var CD = /(?:^|&&|;|\|\||\n)\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g;
-var GIT_C = /\bgit\s+-C\s+("[^"]+"|'[^']+'|[^\s;&|]+)/;
-var WORD = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
-var WORKTREE_ADD = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?worktree\s+add\s+([^;&|\n)]+)`);
-var CHECKOUT = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?(?:checkout|switch)\b`);
-var COMMIT = new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?commit\b`);
-var REMOVES = [
-  new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?worktree\s+(?:remove|prune)\b`),
-  new RegExp(String.raw`\bgit\s+(?:-C\s+${WORD}\s+)?branch\b[^;&|\n]*\s(?:-[a-zA-Z]*[dD]|--delete)\b`),
-  /\brm\b[^;&|\n]*\s(?:-[a-zA-Z]*[rR]|--recursive)/
-];
-var VALUE_OPTIONS = /* @__PURE__ */ new Set(["-b", "-B", "--orphan", "--reason"]);
-var SAFE_GIT = ["-c", "log.showSignature=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
-var SAFE_GIT_ENV = Object.freeze({ GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "none", GIT_TERMINAL_PROMPT: "0" });
-var END_OF_OPTIONS = "--end-of-options";
-var NOT_A_REPO = 128;
-var HEADS = "refs/heads/";
-var DIFF_OPTIONS = ["--cached", "--name-only", "-z", "--no-renames", "--diff-filter=d", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"];
-var NEUTRAL_CWD = "/";
-var lastGroup = (command, match) => {
-  const group = match?.[match.length - 1];
-  const end = match && match.index !== void 0 ? match.index + match[0].length : 0;
-  return group === void 0 ? void 0 : command.slice(end - group.length, end);
-};
-var worktreeAddPath = (command) => {
-  const args = lastGroup(command, WORKTREE_ADD.exec(shellCode(command)))?.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  for (let index = 0; index < args.length; index += 1) {
-    if (VALUE_OPTIONS.has(args[index])) {
-      index += 1;
-    } else if (!args[index].startsWith("-")) {
-      return literalWord(args[index]);
-    }
-  }
-  return void 0;
-};
-var realPath = (path) => {
-  const full = resolve(expandHome(path));
-  const rest = [];
-  let existing = full;
-  for (; ; ) {
-    try {
-      return join(realpathSync(existing), ...rest);
-    } catch {
-      const parent = dirname(existing);
-      if (parent === existing) {
-        return full;
-      }
-      rest.unshift(basename(existing));
-      existing = parent;
-    }
-  }
-};
-var canonical = (path) => tildeHome(realPath(path));
-var resolveIn = (base, word) => {
-  if (word === void 0) {
-    return void 0;
-  }
-  const path = expandHome(word);
-  if (isAbsolute(path)) {
-    return resolve(path);
-  }
-  return base === void 0 ? void 0 : resolve(base, path);
-};
-var createGitFacts = (options) => {
-  const { config, write } = options;
-  const run = options.run ?? runCommand;
-  const trunk = config.branches.trunk;
-  const quietBranches = /* @__PURE__ */ new Set([trunk, ...config.branches.promote]);
-  const branches = /* @__PURE__ */ new Map();
-  const forks = /* @__PURE__ */ new Set();
-  const subjects = /* @__PURE__ */ new Set();
-  const resolved = /* @__PURE__ */ new Set();
-  const candidates = /* @__PURE__ */ new Set();
-  const eventDirs = /* @__PURE__ */ new Set();
-  const finishedBash = createBashTracker();
-  const common = options.repoCommonDir;
-  const mainCheckout = common && basename(common) === ".git" ? dirname(common) : void 0;
-  let live = false;
-  let stopped = false;
-  let queue = Promise.resolve();
-  let sweep;
-  let checkWaiting = false;
-  let refsWarning = "";
-  const statWarnings = /* @__PURE__ */ new Set();
-  const pendingAdds = /* @__PURE__ */ new Map();
-  const attempts = /* @__PURE__ */ new Map();
-  const historyReviewers = /* @__PURE__ */ new Map();
-  const historyDiffs = /* @__PURE__ */ new Map();
-  const emit = (data, worktree) => write(createLine("server", "git.fact", data, { cwd: worktree }));
-  const git = (args, cwd) => run("git", [...SAFE_GIT, ...args], cwd, SAFE_GIT_ENV);
-  const quiet = (what) => (error) => {
-    if (error.code !== NOT_A_REPO) {
-      options.log?.("warning", `${what} failed: ${error.message.split("\n")[0]}`);
-    }
-    return "";
-  };
-  const mergeBase = async (where, branch, cwd) => {
-    try {
-      return await git([...where, "merge-base", END_OF_OPTIONS, trunk, branch], cwd);
-    } catch {
-      return git([...where, "merge-base", END_OF_OPTIONS, `origin/${trunk}`, branch], cwd);
-    }
-  };
-  const repoOf = async (path) => {
-    if (!options.repoCommonDir) {
-      return "this";
-    }
-    const common2 = await git(["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(quiet(`git rev-parse in ${path}`));
-    if (common2 === "" || !existsSync(common2)) {
-      return "unknown";
-    }
-    return realpathSync(common2) === options.repoCommonDir ? "this" : "other";
-  };
-  const inThisRepo = async (path) => await repoOf(path) === "this";
-  const branchDetails = async (top, worktree, branch) => {
-    if (quietBranches.has(branch)) {
-      return;
-    }
-    if (!forks.has(branch)) {
-      const sha = await mergeBase(["-C", top], branch).catch(quiet(`git merge-base for ${branch}`));
-      if (sha) {
-        forks.add(branch);
-        emit({ kind: "fork", branch, base: trunk, sha }, worktree);
-      }
-    }
-    if (!subjects.has(branch)) {
-      const logArgs = ["-C", top, "log", "--no-show-signature", "--reverse", "--format=%s", END_OF_OPTIONS, `${trunk}..${branch}`];
-      const log = await git(logArgs).catch(quiet(`git log of ${branch}`));
-      const subject = log.split("\n")[0]?.trim();
-      if (subject) {
-        subjects.add(branch);
-        emit({ kind: "subject", branch, subject }, worktree);
-      }
-    }
-  };
-  const lookUp = async (dir, force) => {
-    const path = expandHome(dir);
-    if (!force && resolved.has(path) || !existsSync(path)) {
-      return;
-    }
-    resolved.add(path);
-    if (!await inThisRepo(path)) {
-      return;
-    }
-    const top = await git(["-C", path, "rev-parse", "--show-toplevel"]).catch(quiet(`git rev-parse in ${path}`));
-    const branch = top ? await git(["-C", top, "branch", "--show-current"]).catch(quiet(`git branch in ${top}`)) : "";
-    if (!branch) {
-      return;
-    }
-    if (!isBranchName(branch)) {
-      options.log?.("warning", `ignored the branch name ${JSON.stringify(branch.slice(0, 80))} in ${top}`);
-      return;
-    }
-    const worktree = tildeHome(top);
-    resolved.add(top);
-    if (branches.get(worktree) !== branch) {
-      branches.set(worktree, branch);
-      emit({ kind: "worktree", worktree, branch }, worktree);
-    }
-    await branchDetails(top, worktree, branch);
-  };
-  const localBranches = async (commonDir) => {
-    let output;
-    try {
-      output = await git(["-C", commonDir, "for-each-ref", "--format=%(refname)", END_OF_OPTIONS, "refs/heads"]);
-    } catch (error) {
-      const failure = error;
-      const reason = `exit ${String(failure.code)}: ${stderrLine(failure)}`;
-      const warning = `git for-each-ref of the branches failed (${reason}); no worktree counts as removed until it works`;
-      if (warning !== refsWarning) {
-        refsWarning = warning;
-        options.log?.("warning", warning);
-      }
-      return void 0;
-    }
-    refsWarning = "";
-    const refs = output.split("\n").filter((ref) => ref.startsWith(HEADS));
-    return new Set(refs.map((ref) => ref.slice(HEADS.length)));
-  };
-  const warnOnce = (warning) => {
-    if (!statWarnings.has(warning)) {
-      statWarnings.add(warning);
-      options.log?.("warning", warning);
-    }
-  };
-  const statEntry = async (path, entry = ".git") => {
-    try {
-      await stat(join(path, entry));
-      return "present";
-    } catch (error) {
-      const failure = error;
-      if (failure.code === "ENOENT") {
-        return "gone";
-      }
-      warnOnce(`could not check whether the worktree ${path} was removed: ${failure.message}`);
-      return "failed";
-    }
-  };
-  const isGone = async (path) => await statEntry(path) === "gone";
-  const forget = (worktree, branch) => {
-    const path = expandHome(worktree);
-    branches.delete(worktree);
-    if (pendingAdds.size > 0) {
-      pendingAdds.delete(canonical(worktree));
-    }
-    forks.delete(branch);
-    subjects.delete(branch);
-    for (const dir of [...resolved, ...eventDirs]) {
-      const full = expandHome(dir);
-      if (full === path || full.startsWith(`${path}/`)) {
-        resolved.delete(dir);
-        eventDirs.delete(dir);
-      }
-    }
-  };
-  const checkRemoved = async () => {
-    if (!common) {
-      return;
-    }
-    const gone = [];
-    for (const [worktree, branch] of [...branches]) {
-      const path = expandHome(worktree);
-      if (path !== mainCheckout && await isGone(path)) {
-        gone.push([worktree, branch]);
-      }
-      if (stopped) {
-        return;
-      }
-    }
-    const heads = gone.length > 0 ? await localBranches(common) : void 0;
-    if (!heads) {
-      return;
-    }
-    for (const [worktree, branch] of gone) {
-      if (stopped) {
-        return;
-      }
-      if (heads.has(branch) || branches.get(worktree) !== branch) {
-        continue;
-      }
-      try {
-        emit({ kind: "worktree-removed", worktree, branch }, worktree);
-        forget(worktree, branch);
-      } catch (error) {
-        const reason = error.message;
-        options.log?.("warning", `writing the worktree-removed fact of ${worktree} failed, checked again next time: ${reason}`);
-      }
-    }
-  };
-  const gitdirOf = (path) => {
-    try {
-      const named = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(path, ".git"), "utf8"))?.[1];
-      return named === void 0 ? void 0 : realPath(resolve(path, named.trim()));
-    } catch {
-      return void 0;
-    }
-  };
-  const namesOtherGitdir = (path) => {
-    const gitdir = gitdirOf(path);
-    return gitdir !== void 0 && common !== void 0 && gitdir !== common && !gitdir.startsWith(`${common}/`);
-  };
-  const namesPrunedGitdir = (path) => {
-    const gitdir = gitdirOf(path);
-    return gitdir !== void 0 && common !== void 0 && gitdir.startsWith(`${common}/`) && !existsSync(gitdir);
-  };
-  const checkAdd = async (path) => {
-    const found = await statEntry(path, "");
-    if (found !== "present") {
-      return found === "gone" ? "unconfirmed" : "undecided";
-    }
-    const repo = await repoOf(path);
-    if (repo !== "unknown") {
-      return repo === "this" ? "confirmed" : "unconfirmed";
-    }
-    if (await statEntry(path, "") === "gone" || namesOtherGitdir(path) || namesPrunedGitdir(path)) {
-      return "unconfirmed";
-    }
-    warnOnce(`could not tell which repository the worktree ${path} belongs to; checked again by the next sweep`);
-    return "undecided";
-  };
-  const confirmAdds = async (retryParked) => {
-    const known = pendingAdds.size > 0 ? new Set([...branches.keys()].map(canonical)) : /* @__PURE__ */ new Set();
-    for (const [key, add] of [...pendingAdds]) {
-      if (stopped) {
-        return;
-      }
-      if (add.parked && !retryParked) {
-        continue;
-      }
-      let verdict;
-      try {
-        verdict = known.has(key) ? "confirmed" : await checkAdd(expandHome(add.path));
-      } catch (error) {
-        warnOnce(`could not check the worktree add of ${add.path}: ${error.message}`);
-        continue;
-      }
-      if (pendingAdds.get(key) !== add) {
-        continue;
-      }
-      if (verdict === "undecided") {
-        add.parked = true;
-      } else if (verdict === "confirmed") {
-        pendingAdds.delete(key);
-      } else {
-        try {
-          emit({ kind: "worktree-removed", worktree: add.path, branch: add.branch }, add.path);
-          pendingAdds.delete(key);
-        } catch (error) {
-          const reason = error.message;
-          options.log?.("warning", `writing the worktree-removed fact of ${add.path} failed, checked again next time: ${reason}`);
-        }
-      }
-    }
-  };
-  const enqueueConfirm = (retryParked = false) => {
-    const waiting = [...pendingAdds.values()].some((add) => retryParked || !add.parked);
-    if (stopped || !common || !waiting) {
-      return;
-    }
-    queue = queue.then(() => confirmAdds(retryParked)).catch((error) => options.log?.("warning", `worktree add check failed: ${error.message}`));
-  };
-  const enqueueCheck = () => {
-    if (stopped || checkWaiting) {
-      return;
-    }
-    checkWaiting = true;
-    const check = () => {
-      checkWaiting = false;
-      return checkRemoved();
-    };
-    queue = queue.then(check).catch((error) => options.log?.("warning", `worktree removal check failed: ${error.message}`));
-  };
-  const knownWorktree = (target) => {
-    if (branches.get(target.worktree) === target.branch) {
-      return target.worktree;
-    }
-    return [...branches].find(([, branch]) => branch === target.branch)?.[0];
-  };
-  const worktreeGitDir = async (top) => {
-    const named = await git(["-C", top, "rev-parse", "--absolute-git-dir"]).catch(quiet(`git rev-parse in ${top}`));
-    const gitDir = named === "" ? void 0 : realPath(named);
-    const inside = common !== void 0 && gitDir !== void 0 && (gitDir === common || gitDir.startsWith(`${common}/worktrees/`));
-    return inside ? gitDir : void 0;
-  };
-  const lookUpDiff = async (agentId, worktree, branch) => {
-    const top = expandHome(worktree);
-    if (!common || !existsSync(top) || !await inThisRepo(top)) {
-      return;
-    }
-    const gitDir = await worktreeGitDir(top);
-    if (gitDir === void 0) {
-      return;
-    }
-    const where = [`--git-dir=${gitDir}`];
-    const current = await git([...where, "branch", "--show-current"], NEUTRAL_CWD).catch(quiet(`git branch in ${top}`));
-    if (current !== branch) {
-      return;
-    }
-    const base = await mergeBase(where, branch, NEUTRAL_CWD).catch(quiet(`git merge-base for ${branch}`));
-    if (!base) {
-      return;
-    }
-    let output;
-    try {
-      output = await git([...where, "diff", ...DIFF_OPTIONS, END_OF_OPTIONS, base, "--"], NEUTRAL_CWD);
-    } catch (error) {
-      quiet(`git diff of ${branch}`)(error);
-      return;
-    }
-    if (stopped) {
-      return;
-    }
-    const files = output.split("\0").filter((file) => file !== "");
-    const total = files.length;
-    const diffLine = (listed) => {
-      const data = { kind: "diff", agentId, worktree, branch, files: listed, total };
-      return createLine("server", "git.fact", data, { cwd: worktree, agentId });
-    };
-    const full = total <= PROGRESS_ITEMS_CAP ? diffLine(files) : void 0;
-    const fits = full !== void 0 && Buffer.byteLength(JSON.stringify(redactValue(full))) < config.spool.maxLineBytes;
-    write(fits ? full : diffLine([]));
-  };
-  const askDiff = (agentId, diffAt, attempt = true) => {
-    if (options.diffTarget === void 0 || !common || attempts.has(agentId)) {
-      return;
-    }
-    let target;
-    try {
-      target = options.diffTarget(agentId);
-    } catch (error) {
-      warnOnce(`the diff target of an agent could not be read: ${error.message}`);
-      return;
-    }
-    if (target === void 0 || !isBranchName(target.branch)) {
-      return;
-    }
-    const key = `${agentId}@${target.legAt}`;
-    if (diffAt !== void 0 && diffAt >= time(target.legAt)) {
-      attempts.set(agentId, key);
-      return;
-    }
-    const worktree = attempt ? knownWorktree(target) : void 0;
-    if (worktree === void 0) {
-      return;
-    }
-    attempts.set(agentId, key);
-    const { branch } = target;
-    const failed = (error) => options.log?.("warning", `git diff lookup of ${branch} failed: ${error.message}`);
-    queue = queue.then(() => lookUpDiff(agentId, worktree, branch)).catch(failed);
-  };
-  const observeAgent = (event) => {
-    const agentId = event.agentId;
-    if (agentId === void 0) {
-      return;
-    }
-    if (event.event === "agent.start" || event.event === "agent.stop") {
-      attempts.delete(agentId);
-    }
-    const review = event.agentType !== void 0 && roleConfig(event.agentType, config).stage === "review";
-    if (!review) {
-      return;
-    }
-    if (!live) {
-      const at = time(event.at);
-      historyReviewers.set(agentId, Math.max(historyReviewers.get(agentId) ?? at, at));
-    } else if (event.event !== "agent.stop") {
-      askDiff(agentId);
-    }
-  };
-  const catchUpDiffs = () => {
-    const now = Date.now();
-    for (const [agentId, newestAt] of historyReviewers) {
-      const diffAt = historyDiffs.get(agentId);
-      const fresh = now - newestAt < STALE_AGENT_MS;
-      if (fresh || diffAt !== void 0) {
-        askDiff(agentId, diffAt, fresh);
-      }
-    }
-    historyReviewers.clear();
-    historyDiffs.clear();
-  };
-  const enqueue = (dir, force = false) => {
-    if (!live) {
-      candidates.add(dir);
-      return;
-    }
-    queue = queue.then(() => lookUp(dir, force)).catch((error) => options.log?.("warning", `git lookup in ${dir} failed: ${error.message}`));
-  };
-  const enqueueOnce = (dir) => {
-    if (!eventDirs.has(dir)) {
-      eventDirs.add(dir);
-      enqueue(dir);
-    }
-  };
-  const noteAdd = ({ command, cwd, interrupted, exitCode }) => {
-    const succeeded = !interrupted && (exitCode === void 0 || exitCode === 0);
-    if (!command.includes("worktree") || !succeeded || stopped || live && !common) {
-      return;
-    }
-    const add = worktreeAddOfCommand(command, cwd);
-    if (add?.branch === void 0) {
-      return;
-    }
-    if (!isBranchName(add.branch)) {
-      warnOnce(`ignored the branch name ${JSON.stringify(add.branch.slice(0, 80))} in the worktree add of ${add.path}`);
-      return;
-    }
-    pendingAdds.set(canonical(add.path), { path: add.path, branch: add.branch, parked: false });
-  };
-  const onBash = ({ command, cwd }) => {
-    const start = expandHome(cwd);
-    const code = shellCode(command);
-    let base = start;
-    for (const match of code.matchAll(CD)) {
-      base = resolveIn(base, cdTarget(lastGroup(command, match) ?? ""));
-    }
-    const gitDir = lastGroup(command, GIT_C.exec(code));
-    if (gitDir) {
-      base = resolveIn(base, literalWord(gitDir));
-    }
-    const added = resolveIn(base, worktreeAddPath(command));
-    if (added) {
-      enqueue(added, true);
-    }
-    enqueueConfirm();
-    if (REMOVES.some((pattern) => pattern.test(code))) {
-      enqueueCheck();
-    }
-    if (base === void 0) {
-      return;
-    }
-    if (CHECKOUT.test(code)) {
-      enqueue(base, true);
-    } else if (COMMIT.test(code)) {
-      enqueue(base, true);
-    } else if (base !== start) {
-      enqueue(base);
-    }
-  };
-  return {
-    observe(event) {
-      if (event.event === "git.fact") {
-        const data = event.data;
-        if (data.kind === "worktree") {
-          branches.set(data.worktree, data.branch);
-          if (pendingAdds.size > 0) {
-            pendingAdds.delete(canonical(data.worktree));
-          }
-        } else if (data.kind === "worktree-removed") {
-          forget(data.worktree, data.branch);
-        } else if (data.kind === "fork") {
-          forks.add(data.branch);
-        } else if (data.kind === "subject") {
-          subjects.add(data.branch);
-        } else if (data.kind === "diff" && !live) {
-          const at = time(event.at);
-          historyDiffs.set(data.agentId, Math.max(historyDiffs.get(data.agentId) ?? at, at));
-        }
-        return;
-      }
-      observeAgent(event);
-      if (event.src === "hook" && event.cwd) {
-        enqueueOnce(event.cwd);
-      }
-      if (event.event === "cwd" && event.data.to) {
-        enqueueOnce(event.data.to);
-      }
-      const bash = finishedBash(event);
-      if (bash) {
-        noteAdd(bash);
-      }
-      if (bash && live) {
-        onBash(bash);
-      }
-    },
-    goLive() {
-      if (live || stopped) {
-        return;
-      }
-      live = true;
-      for (const dir of candidates) {
-        enqueue(dir);
-      }
-      candidates.clear();
-      catchUpDiffs();
-      if (!common) {
-        options.log?.("info", "the repository's git common directory is unknown, so removed worktrees are not checked");
-        pendingAdds.clear();
-        return;
-      }
-      enqueueConfirm();
-      enqueueCheck();
-      sweep = setInterval(() => {
-        enqueueConfirm(true);
-        enqueueCheck();
-      }, REMOVAL_SWEEP_MS);
-      sweep.unref();
-    },
-    idle: () => queue,
-    stop() {
-      live = false;
-      stopped = true;
-      clearInterval(sweep);
-    }
-  };
-};
-
-// src/facts/gh.ts
-var pollIntervalMs = (seconds) => {
-  const value = typeof seconds === "number" && Number.isFinite(seconds) ? seconds : DEFAULT_CONFIG.github.pollSeconds;
-  return Math.min(MAX_POLL_SECONDS, Math.max(MIN_POLL_SECONDS, value)) * 1e3;
-};
-var PR_FIELDS = "number,title,url,state,headRefName,baseRefName,createdAt,mergedAt,closedAt";
-var ACCOUNT_CHECK_MS = 10 * 60 * 1e3;
-var NUDGE_MS = 10 * 1e3;
-var BODY_CHARS = 4e3;
-var PR_COMMAND = /\bgh\s+pr\s+(create|merge)\b/;
-var HOST = "github.com";
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var firstLine = (error) => String(error instanceof Error ? error.message : error).split("\n")[0];
-var matchesLogin = (pattern, login) => {
-  const input = patternInput(login);
-  return pattern !== void 0 && (pattern.test(input) || pattern.test(input.toLowerCase()));
-};
-var hostAccounts = (output) => {
-  let parsed;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    return [];
-  }
-  const hosts = isRecord(parsed) && isRecord(parsed.hosts) ? parsed.hosts : {};
-  const entries = Array.isArray(hosts[HOST]) ? hosts[HOST].filter(isRecord) : [];
-  const accounts = entries.filter((entry) => typeof entry.login === "string").map((entry) => ({
-    login: String(entry.login),
-    active: entry.active === true,
-    state: String(entry.state ?? ""),
-    error: typeof entry.error === "string" ? entry.error : void 0
-  }));
-  return [...accounts.filter((account) => account.active), ...accounts.filter((account) => !account.active)];
-};
-var parseRemotes = (output) => {
-  const urls = /* @__PURE__ */ new Set();
-  for (const line of output.split("\n")) {
-    const url = /^\S+\s+(\S+)\s+\((?:fetch|push)\)(?:\s+\[[^\]]*\])?$/.exec(line.trim())?.[1];
-    if (url !== void 0) {
-      urls.add(url);
-    }
-  }
-  const repos = /* @__PURE__ */ new Set();
-  for (const url of urls) {
-    const repo = githubRepoOfRemote(url);
-    if (repo !== void 0) {
-      repos.add(repo);
-    }
-  }
-  return { repos: [...repos], urls: urls.size };
-};
-var createGhFacts = (options) => {
-  const { config, write, wanted } = options;
-  const run = options.run ?? runCommand;
-  const now = options.now ?? Date.now;
-  const known = /* @__PURE__ */ new Map();
-  const finishedBash = createBashTracker();
-  let accountOk = false;
-  let account;
-  let useToken = false;
-  let checkedAt = Number.NEGATIVE_INFINITY;
-  let polledAt = Number.NEGATIVE_INFINITY;
-  let lastStatus = "";
-  let remotesCheckedAt = Number.NEGATIVE_INFINITY;
-  let repoMismatch;
-  let running;
-  let runningCheckOnly = false;
-  let timer;
-  let live = false;
-  const emitStatus = (given) => {
-    const status = repoMismatch ? { ...given, repoMismatch } : given;
-    const signature = JSON.stringify(status);
-    if (signature !== lastStatus) {
-      lastStatus = signature;
-      write(createLine("server", "gh.fact", { kind: "status", ...status }));
-    }
-  };
-  const shownPattern = stripControl(config.github.accountPattern);
-  if (options.root === void 0 && config.github.repo !== "") {
-    options.log?.("warning", "github.repo is not compared with the git remotes: the repository root is unknown");
-  }
-  let accountWarning;
-  const warnAccount = (message) => {
-    if (message !== void 0 && message !== accountWarning) {
-      options.log?.("warning", message);
-    }
-    accountWarning = message;
-  };
-  const onceWarning = () => {
-    let last;
-    return (message) => {
-      if (message !== void 0 && message !== last) {
-        options.log?.("warning", message);
-      }
-      last = message;
-    };
-  };
-  const warnRepo = onceWarning();
-  const warnRemotesFailure = onceWarning();
-  const checkRemotes = async () => {
-    if (options.root === void 0 || config.github.repo === "" || now() - remotesCheckedAt <= ACCOUNT_CHECK_MS) {
-      return;
-    }
-    remotesCheckedAt = now();
-    let found;
-    try {
-      found = parseRemotes(await run("git", [...SAFE_GIT, "remote", "-v"], options.root, SAFE_GIT_ENV));
-    } catch (error) {
-      remotesCheckedAt = Number.NEGATIVE_INFINITY;
-      const failure = error;
-      const cause = stripControl(stderrLine(failure) || `exit ${String(failure.code)}`);
-      warnRemotesFailure(`git remote -v failed (${cause}), so github.repo is not compared with the remotes`);
-      return;
-    }
-    warnRemotesFailure(void 0);
-    const { repos, urls } = found;
-    const named = config.github.repo.toLowerCase();
-    repoMismatch = void 0;
-    if (repos.some((repo) => repo.toLowerCase() === named) || urls === 0) {
-      warnRepo(void 0);
-    } else if (repos.length === 0) {
-      warnRepo(`git remote -v lists ${urls} ${urls === 1 ? "remote URL" : "remote URLs"}, none a GitHub URL; github.repo is not compared with them`);
-    } else {
-      repoMismatch = { repo: config.github.repo, remotes: repos };
-      warnRepo(`github.repo ${stripControl(config.github.repo)} names none of the git remotes of this repository (${repos.join(", ")}); gh lists the pull requests of github.repo, so the board may show no merges. Fix github.repo or the remote.`);
-    }
-  };
-  const accountPattern = () => {
-    try {
-      return linearRegExp(config.github.accountPattern);
-    } catch (error) {
-      options.log?.("warning", `github.accountPattern is not a usable regular expression: ${stripControl(firstLine(error))}`);
-      return void 0;
-    }
-  };
-  const checkActiveAccount = async () => {
-    useToken = false;
-    let login;
-    try {
-      login = await run("gh", ["api", "user", "--jq", ".login"]);
-    } catch (error) {
-      accountOk = false;
-      emitStatus({ polling: false, accountOk: false, error: `gh api user failed: ${stripControl(firstLine(error))}` });
-      return false;
-    }
-    account = login;
-    accountOk = matchesLogin(accountPattern(), login);
-    if (accountOk) {
-      warnAccount(void 0);
-    } else {
-      warnAccount(`gh is logged in as ${stripControl(login)}, which does not match github.accountPattern ${shownPattern}; run gh auth switch --user <your account>. Nurselog never switches accounts.`);
-    }
-    emitStatus({ polling: accountOk, activeAccount: login, accountOk });
-    return accountOk;
-  };
-  const checkAccount = async () => {
-    checkedAt = now();
-    await checkRemotes();
-    if (options.configKind !== "user") {
-      return checkActiveAccount();
-    }
-    let accounts;
-    try {
-      accounts = hostAccounts(await run("gh", ["auth", "status", "--json", "hosts"]));
-    } catch {
-      accounts = [];
-    }
-    if (!accounts.some((entry) => entry.state === "success")) {
-      return checkActiveAccount();
-    }
-    const pattern = accountPattern();
-    const matching = accounts.filter((entry) => matchesLogin(pattern, entry.login));
-    const picked = matching.find((entry) => entry.state === "success");
-    account = picked?.login;
-    accountOk = picked !== void 0;
-    useToken = accountOk;
-    if (picked) {
-      warnAccount(void 0);
-      emitStatus({ polling: true, activeAccount: picked.login, accountOk: true });
-      return true;
-    }
-    const broken = matching[0];
-    if (broken) {
-      const error = stripControl(firstLine(broken.error ?? `gh reports the account as ${broken.state}`));
-      warnAccount(`gh account ${stripControl(broken.login)} matches github.accountPattern ${shownPattern} but gh reports: ${error}`);
-      emitStatus({ polling: false, accountOk: false, error });
-      return false;
-    }
-    if (pattern) {
-      warnAccount(`no account logged in to gh matches github.accountPattern ${shownPattern}; run gh auth login for the right account. Nurselog never switches accounts.`);
-    }
-    emitStatus({ polling: false, accountOk: false });
-    return false;
-  };
-  const tokenEnv = async () => {
-    if (!useToken || account === void 0) {
-      return void 0;
-    }
-    let token = "";
-    let failure = "it printed no token";
-    try {
-      token = await run("gh", ["auth", "token", "--hostname", HOST, "--user", account]);
-    } catch (error) {
-      failure = stripControl(firstLine(error));
-    }
-    if (token) {
-      return { GH_TOKEN: token, GH_HOST: HOST };
-    }
-    options.log?.("warning", `gh auth token for ${stripControl(account)} failed (${failure}); falling back to the active gh account and its accountPattern check until the next account check`);
-    await checkActiveAccount();
-    return void 0;
-  };
-  const list = async (base, withBody, env) => {
-    const fields = withBody ? `${PR_FIELDS},body` : PR_FIELDS;
-    const output = await run("gh", ["pr", "list", "--repo", config.github.repo, "--base", base, "--state", "all", "--limit", "50", "--json", fields], void 0, env);
-    return JSON.parse(output || "[]");
-  };
-  const record = (pr) => {
-    const signature = `${pr.state}|${pr.mergedAt ?? ""}`;
-    if (known.get(pr.number) === signature) {
-      return;
-    }
-    known.set(pr.number, signature);
-    const kept = { ...pr, title: redactValue(pr.title) };
-    if (pr.body !== void 0) {
-      kept.body = redactValue(pr.body).slice(0, BODY_CHARS);
-    }
-    write(createLine("server", "gh.fact", { kind: "pr", pr: kept }));
-  };
-  const pollOnce = async () => {
-    polledAt = now();
-    const everyPoll = options.configKind !== "user";
-    if (everyPoll || !accountOk || now() - checkedAt > ACCOUNT_CHECK_MS) {
-      await checkAccount();
-    }
-    if (!accountOk) {
-      return;
-    }
-    const env = await tokenEnv();
-    if (!accountOk) {
-      return;
-    }
-    try {
-      for (const pr of await list(config.branches.trunk, false, env)) {
-        record(pr);
-      }
-      for (const target of config.branches.promote) {
-        const prefix = Object.hasOwn(config.github.promoteTitlePrefix, target) ? config.github.promoteTitlePrefix[target] : "";
-        for (const pr of await list(target, true, env)) {
-          if (pr.title.startsWith(prefix)) {
-            record(pr);
-          }
-        }
-      }
-      emitStatus({ polling: true, activeAccount: account, accountOk: true });
-    } catch (error) {
-      const reason = stripControl(firstLine(error));
-      const shown = env ? reason.replaceAll(env.GH_TOKEN, "<token>") : reason;
-      emitStatus({ polling: false, activeAccount: account, accountOk: true, error: `gh pr list failed: ${shown}` });
-    }
-  };
-  const failed = (error) => options.log?.("warning", `gh poll failed: ${error.message}`);
-  const single = (task, checkOnly = false) => {
-    if (!running) {
-      runningCheckOnly = checkOnly;
-      running = task().then(() => void 0).finally(() => {
-        running = void 0;
-        runningCheckOnly = false;
-      });
-    }
-    return running;
-  };
-  const poll = async () => {
-    while (running && runningCheckOnly) {
-      await running.catch(() => void 0);
-    }
-    return single(pollOnce);
-  };
-  return {
-    observe(event) {
-      if (event.event === "gh.fact" && event.data.kind === "pr") {
-        known.set(event.data.pr.number, `${event.data.pr.state}|${event.data.pr.mergedAt ?? ""}`);
-        return;
-      }
-      if (event.event === "git.fact" && event.data.kind === "worktree-removed") {
-        if (live) {
-          poll().catch(failed);
-        }
-        return;
-      }
-      const bash = finishedBash(event);
-      if (live && bash && PR_COMMAND.test(bash.command) && wanted()) {
-        poll().catch(failed);
-      }
-    },
-    checkAccount,
-    poll,
-    goLive() {
-      live = true;
-      single(checkAccount, true).catch(failed);
-      timer = setInterval(() => {
-        if (wanted()) {
-          poll().catch(failed);
-        }
-      }, pollIntervalMs(config.github.pollSeconds));
-      timer.unref();
-    },
-    nudge() {
-      if (!live) {
-        return;
-      }
-      if (wanted()) {
-        if (now() - polledAt > NUDGE_MS) {
-          poll().catch(failed);
-        }
-      } else if (now() - checkedAt > NUDGE_MS) {
-        single(checkAccount, true).catch(failed);
-      }
-    },
-    stop() {
-      live = false;
-      clearInterval(timer);
-    }
-  };
-};
-
-// src/facts/usage.ts
-import { createHash } from "crypto";
-import { closeSync, constants, fstatSync, openSync, readSync } from "fs";
-import { dirname as dirname2, join as join2, resolve as resolve2, sep } from "path";
-var SYNTHETIC_MODEL = "<synthetic>";
-var CHUNK_BYTES = 1 << 20;
-var TOKEN_FIELDS = ["input", "cacheWrite", "cacheWrite1h", "cacheRead", "output"];
-var AGENT_ID = /^[\w-]+$/;
-var loadPrices = (path, log) => {
-  let rows;
-  try {
-    rows = JSON.parse(readSmallFile(path, MAX_CONFIG_BYTES)).pricesUsdPerMillion;
-  } catch (error) {
-    log?.("warning", `no prices read from ${path}: ${error.message}; usage costs 0`);
-    return {};
-  }
-  if (typeof rows !== "object" || rows === null) {
-    log?.("warning", `${path} has no pricesUsdPerMillion object; usage costs 0`);
-    return {};
-  }
-  const prices = {};
-  for (const [model, price] of Object.entries(rows)) {
-    const missing = TOKEN_FIELDS.filter((field) => typeof price?.[field] !== "number");
-    if (missing.length > 0) {
-      log?.("warning", `${path}: ${model} has no price for ${missing.join(", ")}; its requests cost 0`);
-    } else if (model === "__proto__") {
-      log?.("warning", `${path}: ${model} is a reserved name, not a model; its requests cost 0`);
-    } else {
-      ownEntry(prices, model, () => price);
-    }
-  }
-  return prices;
-};
-var priceFor = (prices, model) => {
-  const prefixes = Object.keys(prices).filter((prefix) => model.startsWith(prefix));
-  const longest = prefixes.sort((a, b) => b.length - a.length)[0];
-  return longest ? prices[longest] : void 0;
-};
-var usdFor = (prices, model, tokens) => {
-  const price = priceFor(prices, model);
-  if (!price) {
-    return 0;
-  }
-  const total = TOKEN_FIELDS.reduce((sum, field) => sum + tokens[field] * price[field], 0);
-  return Math.round(total) / 1e6;
-};
-var requestOf = (record) => {
-  const message = record.message;
-  const usage = message?.usage;
-  const requestId = record.requestId || message?.id;
-  if (record.type !== "assistant" || !usage || message?.model === SYNTHETIC_MODEL || !requestId) {
-    return void 0;
-  }
-  const fiveMinutes = usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
-  const oneHour = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-  const split = fiveMinutes + oneHour > 0;
-  return {
-    requestId,
-    model: message?.model || record.requestedModel || "unknown",
-    at: record.timestamp ?? "",
-    input: usage.input_tokens ?? 0,
-    cacheWrite: split ? fiveMinutes : usage.cache_creation_input_tokens ?? 0,
-    cacheWrite1h: split ? oneHour : 0,
-    cacheRead: usage.cache_read_input_tokens ?? 0,
-    output: usage.output_tokens ?? 0
-  };
-};
-var createUsageFacts = (options) => {
-  const { prices, write } = options;
-  const delayMs = options.delayMs ?? 1e3;
-  const mainTranscripts = /* @__PURE__ */ new Map();
-  const files = /* @__PURE__ */ new Map();
-  const timers = /* @__PURE__ */ new Map();
-  const known = /* @__PURE__ */ new Map();
-  const unpriced = /* @__PURE__ */ new Set();
-  const reported = /* @__PURE__ */ new Set();
-  const projectsDir = resolve2(expandHome(options.projectsDir ?? "~/.claude/projects"));
-  let live = false;
-  const warnOnce = (path, message) => {
-    if (!reported.has(path)) {
-      reported.add(path);
-      options.log?.("warning", message);
-    }
-  };
-  const emitBatch = (file, records) => {
-    const batch = /* @__PURE__ */ new Map();
-    for (const record of records) {
-      const request = requestOf(record);
-      if (request && request.output >= (batch.get(request.requestId)?.output ?? -1)) {
-        batch.set(request.requestId, request);
-      }
-    }
-    for (const request of batch.values()) {
-      if (request.output <= (known.get(request.requestId) ?? -1)) {
-        continue;
-      }
-      known.set(request.requestId, request.output);
-      const price = priceFor(prices, request.model);
-      if (!price && !unpriced.has(request.model)) {
-        unpriced.add(request.model);
-        options.log?.("warning", `no price for model ${request.model}; its requests cost 0`);
-      }
-      const data = { ...request, usd: usdFor(prices, request.model, request) };
-      if (price) {
-        data.rates = { cacheRead: price.cacheRead, output: price.output };
-      }
-      write(createLine("server", "usage.fact", data, { sessionId: file.sessionId, agentId: file.agentId, cwd: file.cwd }));
-    }
-  };
-  const openTranscript = (path) => {
-    let fd;
-    try {
-      fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    } catch (error) {
-      const code = error.code;
-      if (code === "ENOENT") {
-        warnOnce(path, `transcript ${path} does not exist; its usage is not counted`);
-        return void 0;
-      }
-      if (code === "ELOOP" || code === "EMLINK") {
-        warnOnce(path, `transcript ${path} is not a regular file of this user; not read`);
-        return void 0;
-      }
-      throw error;
-    }
-    try {
-      const stat2 = fstatSync(fd);
-      const uid = process.getuid?.();
-      if (stat2.isFile() && (uid === void 0 || stat2.uid === uid)) {
-        return { fd, size: stat2.size };
-      }
-    } catch (error) {
-      closeSync(fd);
-      throw error;
-    }
-    closeSync(fd);
-    warnOnce(path, `transcript ${path} is not a regular file of this user; not read`);
-    return void 0;
-  };
-  const read = (path) => {
-    const file = files.get(path);
-    const opened = file ? openTranscript(path) : void 0;
-    if (!file || !opened) {
-      return;
-    }
-    const { fd, size } = opened;
-    const records = [];
-    try {
-      if (size < file.offset) {
-        file.offset = 0;
-        file.partial = Buffer.alloc(0);
-      }
-      while (file.offset < size) {
-        const chunk = Buffer.alloc(Math.min(CHUNK_BYTES, size - file.offset));
-        const count = readSync(fd, chunk, 0, chunk.length, file.offset);
-        if (count === 0) {
-          break;
-        }
-        file.offset += count;
-        const data = Buffer.concat([file.partial, chunk.subarray(0, count)]);
-        const end = data.lastIndexOf(10);
-        file.partial = Buffer.from(data.subarray(end + 1));
-        for (const line of end === -1 ? [] : data.subarray(0, end).toString("utf8").split("\n")) {
-          try {
-            const record = JSON.parse(line);
-            if (record.type === "assistant" && !record.requestId && !record.message?.id) {
-              record.requestId = `anon-${createHash("sha1").update(line).digest("hex").slice(0, 16)}`;
-            }
-            records.push(record);
-          } catch {
-          }
-        }
-      }
-    } finally {
-      closeSync(fd);
-    }
-    emitBatch(file, records);
-  };
-  const readSafely = (path) => {
-    try {
-      read(path);
-    } catch (error) {
-      options.log?.("warning", `transcript ${path} not read: ${error.message}`);
-    }
-  };
-  const schedule = (path) => {
-    if (!live || timers.has(path)) {
-      return;
-    }
-    timers.set(path, setTimeout(() => {
-      timers.delete(path);
-      readSafely(path);
-    }, delayMs));
-  };
-  const follow = (path, sessionId, cwd, agentId) => {
-    if (!files.has(path) && !(resolve2(path).startsWith(`${projectsDir}${sep}`) && path.endsWith(".jsonl"))) {
-      warnOnce(path, `transcript ${path} is outside ${projectsDir}; not read`);
-      return;
-    }
-    if (!files.has(path)) {
-      files.set(path, { sessionId, agentId, cwd, offset: 0, partial: Buffer.alloc(0) });
-    }
-    schedule(path);
-  };
-  const text = (value) => typeof value === "string" && value ? value : void 0;
-  return {
-    observe(event, payload) {
-      if (event.event === "usage.fact") {
-        known.set(event.data.requestId, Math.max(event.data.output, known.get(event.data.requestId) ?? -1));
-        return;
-      }
-      if (event.src !== "hook" || !event.sessionId) {
-        return;
-      }
-      const named = event.event === "session.start" ? event.data.transcriptPath : void 0;
-      const mainPath = named ?? (event.agentId ? void 0 : text(payload?.transcript_path));
-      if (mainPath) {
-        mainTranscripts.set(event.sessionId, expandHome(mainPath));
-      }
-      const main = mainTranscripts.get(event.sessionId);
-      if (main) {
-        follow(main, event.sessionId, event.cwd);
-      }
-      if (!event.agentId) {
-        return;
-      }
-      const stopped = event.event === "agent.stop" ? event.data.transcriptPath : void 0;
-      const agentPath = stopped ?? text(payload?.agent_transcript_path);
-      if (agentPath) {
-        follow(expandHome(agentPath), event.sessionId, event.cwd, event.agentId);
-      } else if (main && AGENT_ID.test(event.agentId)) {
-        follow(join2(dirname2(main), event.sessionId, "subagents", `agent-${event.agentId}.jsonl`), event.sessionId, event.cwd, event.agentId);
-      }
-    },
-    goLive() {
-      live = true;
-      for (const path of files.keys()) {
-        schedule(path);
-      }
-    },
-    flush() {
-      for (const [path, timer] of timers) {
-        clearTimeout(timer);
-        timers.delete(path);
-        readSafely(path);
-      }
-    },
-    stop() {
-      live = false;
-      for (const timer of timers.values()) {
-        clearTimeout(timer);
-      }
-      timers.clear();
-    }
-  };
-};
+} from "./chunk-OHFJPS3R.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
-import { readFileSync as readFileSync3 } from "fs";
+import { readFileSync as readFileSync2 } from "fs";
 import { createServer } from "http";
-import { join as join3 } from "path";
+import { join } from "path";
 
 // src/spool/fixture-job.ts
-import { existsSync as existsSync2 } from "fs";
-import { Worker } from "worker_threads";
-var FixtureWorkerMissingError = class extends Error {
-};
-var FixtureTimeoutError = class extends Error {
-};
 var FIXTURE_TIMEOUT_MS = 120 * 1e3;
-var runFixtureJob = (workerFile, job, options = {}) => new Promise((resolve7, reject) => {
-  if (!existsSync2(workerFile)) {
-    reject(new FixtureWorkerMissingError(`${workerFile} is not built yet; run pnpm build in the Nurselog package`));
-    return;
-  }
-  if (options.signal?.aborted) {
-    reject(new Error("the fixture was cancelled"));
-    return;
-  }
-  const worker = new Worker(workerFile, { workerData: job });
+var runFixtureJob = (workerFile, job, options = {}) => {
   const timeoutMs = options.timeoutMs ?? FIXTURE_TIMEOUT_MS;
-  let settled = false;
-  const finish = (outcome) => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-    clearTimeout(timer);
-    options.signal?.removeEventListener("abort", cancel);
-    outcome();
-    void worker.terminate();
-  };
-  const timer = setTimeout(() => finish(() => reject(new FixtureTimeoutError(`the fixture worker timed out after ${timeoutMs / 1e3} s`))), timeoutMs);
-  const cancel = () => finish(() => reject(new Error("the fixture was cancelled")));
-  options.signal?.addEventListener("abort", cancel, { once: true });
-  worker.once("message", (answer) => finish(() => resolve7(answer)));
-  worker.once("error", (error) => finish(() => reject(error)));
-  worker.once("exit", (code) => finish(() => reject(new Error(`the fixture worker exited with code ${code} before it answered`))));
-});
+  return runWorkerJob(workerFile, job, "fixture", { signal: options.signal, timeoutMs });
+};
 
 // src/server/peer-uid.ts
-import { readFileSync as readFileSync2 } from "fs";
+import { readFileSync } from "fs";
 import { endianness } from "os";
 var PROC_TABLES = ["/proc/net/tcp", "/proc/net/tcp6"];
 var OVERFLOW_UID = 65534;
@@ -1390,7 +159,7 @@ var clientUid = (table, connection, littleEndian = endianness() === "LE") => {
   }
   return void 0;
 };
-var readProc = (path) => readFileSync2(path, "utf8");
+var readProc = (path) => readFileSync(path, "utf8");
 var peerVerdict = (socket, ownUid, read) => {
   const { localAddress, localPort, remoteAddress, remotePort } = socket;
   if (localAddress === void 0 || localPort === void 0 || remoteAddress === void 0 || remotePort === void 0) {
@@ -1424,6 +193,8 @@ var procPeerCheck = (socket) => peerVerdict(socket, process.getuid?.(), readProc
 
 // src/server/http.ts
 var THROTTLE_MS = 100;
+var LOADING_WAIT_MS = 30 * 1e3;
+var LOADING = { error: "loading", message: "This repository is still reading its spool; try again in a moment." };
 var KEEP_ALIVE_MS = 15e3;
 var MAX_CLIENTS = 32;
 var MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
@@ -1432,6 +203,7 @@ var COOKIE_MAX_AGE_S = 365 * 24 * 60 * 60;
 var TICKET_MS = 60 * 1e3;
 var MAX_TICKETS = 64;
 var BEARER = /^Bearer (\S+)$/i;
+var UNKNOWN_REPOSITORY = { error: "unknown-repository", message: "No served repository has this id; GET /api/repositories lists them." };
 var NOT_AVAILABLE = { error: "not-available", message: "Answering a waiting agent from the board is not available yet (features.answerFromUi, design section 11)." };
 var SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
@@ -1528,7 +300,7 @@ var UI_ASSETS = /* @__PURE__ */ new Map([
 ]);
 var readAsset = (path) => {
   try {
-    return readFileSync3(path);
+    return readFileSync2(path);
   } catch (error) {
     if (error.code === "ENOENT") {
       return void 0;
@@ -1597,9 +369,10 @@ var typicalTextOf = (repository, view) => {
   return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
 };
 var createBoardServer = (options) => {
-  const uiDir = options.uiDir ?? join3(PACKAGE_ROOT, "src", "ui");
-  const builtUiDir = options.builtUiDir ?? join3(PACKAGE_ROOT, "dist", "ui");
+  const uiDir = options.uiDir ?? join(PACKAGE_ROOT, "src", "ui");
+  const builtUiDir = options.builtUiDir ?? join(PACKAGE_ROOT, "dist", "ui");
   const maxClients = options.maxClients ?? MAX_CLIENTS;
+  const loadingWaitMs = options.loadingWaitMs ?? LOADING_WAIT_MS;
   const maxBuffered = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const log = options.log ?? (() => void 0);
   const peerCheck = options.peerCheck ?? (process.platform === "linux" ? procPeerCheck : void 0);
@@ -1663,7 +436,7 @@ var createBoardServer = (options) => {
       const messages = /* @__PURE__ */ new Map();
       for (const [stream, shown] of streams) {
         const repository = listChanged || dirty.has(shown.id) ? repositoryById(shown.id) : void 0;
-        if (!repository) {
+        if (!repository || repository.loading?.()) {
           continue;
         }
         const name = `${shown.view} ${shown.id}`;
@@ -1733,7 +506,7 @@ var createBoardServer = (options) => {
       sendJson(response, 503, { error: "too-many-clients", message: `Nurselog serves at most ${maxClients} event streams.` });
       return;
     }
-    const message = `data: ${snapshotText(repository, view)}
+    const message = repository.loading?.() ? "" : `data: ${snapshotText(repository, view)}
 
 `;
     response.writeHead(200, { ...SECURITY_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
@@ -1743,6 +516,42 @@ ${message}`);
     streams.set(response, { id: repository.id, view, sent: message });
     request.on("close", () => streams.delete(response));
     options.onClient?.();
+  };
+  const whenReady = (request, response, repository, answer2) => {
+    if (!repository.loading?.()) {
+      answer2();
+      return;
+    }
+    let timer;
+    let left = false;
+    const waited = new Promise((resolve5) => {
+      timer = setTimeout(() => resolve5(false), loadingWaitMs);
+    });
+    const leave = () => {
+      left = true;
+      clearTimeout(timer);
+    };
+    response.once("close", leave);
+    const ready = (repository.ready ?? Promise.resolve()).then(() => true);
+    void Promise.race([ready, waited]).then((settled) => {
+      clearTimeout(timer);
+      response.off("close", leave);
+      if (left) {
+        return;
+      }
+      try {
+        if (!settled) {
+          response.setHeader("Retry-After", "5");
+          sendJson(response, 503, LOADING);
+        } else if (repositoryById(repository.id) !== repository) {
+          sendJson(response, 404, UNKNOWN_REPOSITORY);
+        } else {
+          answer2();
+        }
+      } catch (error) {
+        failed(request, response, error);
+      }
+    });
   };
   const sendSession = (response, repository, id, agentId) => {
     const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
@@ -1762,10 +571,10 @@ ${message}`);
   };
   let slicing;
   const sliceFailure = (error) => {
-    if (error instanceof FixtureWorkerMissingError) {
+    if (error instanceof WorkerMissingError) {
       return { status: 503, body: { error: "not-built", message: "The fixture worker is not built yet; run pnpm build in the Nurselog package." } };
     }
-    if (error instanceof FixtureTimeoutError) {
+    if (error instanceof WorkerTimeoutError) {
       return { status: 500, body: { error: "timed-out", message: "The fixture timed out." } };
     }
     return { status: 500, body: { error: "internal", message: "The fixture could not be sliced." } };
@@ -1813,7 +622,7 @@ ${message}`);
 `);
   };
   const sendUi = (response, asset) => {
-    const body = readAsset(join3(asset.built ? builtUiDir : uiDir, asset.file));
+    const body = readAsset(join(asset.built ? builtUiDir : uiDir, asset.file));
     if (body === void 0 && asset.built) {
       sendText(response, 404, `The board script dist/ui/${asset.file} is not built yet; run pnpm build in the Nurselog package.
 `);
@@ -1907,6 +716,14 @@ ${message}`);
     }
     sendJson(response, 501, NOT_AVAILABLE);
   };
+  const failed = (request, response, error) => {
+    log("warning", `${request.method} request failed: ${error.message}`);
+    if (!response.headersSent) {
+      sendJson(response, 500, { error: "internal", message: "Nurselog could not answer this request." });
+    } else {
+      response.destroy();
+    }
+  };
   const route = (request, response) => {
     const host = request.headers.host ?? "";
     if (host !== `127.0.0.1:${boundPort}` && host !== `localhost:${boundPort}`) {
@@ -1946,15 +763,16 @@ ${message}`);
     if (asset) {
       sendUi(response, asset);
     } else if (REPOSITORY_ROUTES.has(key) && !repository) {
-      sendJson(response, 404, { error: "unknown-repository", message: "No served repository has this id; GET /api/repositories lists them." });
+      sendJson(response, 404, UNKNOWN_REPOSITORY);
     } else if (key === "GET /api/repositories") {
       sendJson(response, 200, summaries());
     } else if (key === "GET /api/state" && repository) {
-      sendJsonText(response, 200, snapshotText(repository, view));
+      whenReady(request, response, repository, () => sendJsonText(response, 200, snapshotText(repository, view)));
     } else if (key === "GET /api/session" && repository) {
-      sendSession(response, repository, target.id ?? "", target.agent);
+      whenReady(request, response, repository, () => sendSession(response, repository, target.id ?? "", target.agent));
     } else if (key === "GET /api/fixture" && repository) {
-      sendFixture(response, repository, target.session ?? "").catch((error) => log("warning", `GET /api/fixture failed: ${error.message}`));
+      const slice = () => sendFixture(response, repository, target.session ?? "").catch((error) => log("warning", `GET /api/fixture failed: ${error.message}`));
+      whenReady(request, response, repository, () => void slice());
     } else if (key === "GET /api/config" && repository) {
       sendJson(response, 200, repository.uiConfig());
     } else if (key === "GET /api/events" && repository) {
@@ -1974,12 +792,7 @@ ${message}`);
     try {
       route(request, response);
     } catch (error) {
-      log("warning", `${request.method} request failed: ${error.message}`);
-      if (!response.headersSent) {
-        sendJson(response, 500, { error: "internal", message: "Nurselog could not answer this request." });
-      } else {
-        response.destroy();
-      }
+      failed(request, response, error);
     }
   };
   const server = createServer(handle);
@@ -1991,15 +804,15 @@ ${message}`);
     }
   });
   return {
-    listen: () => new Promise((resolve7, reject) => {
+    listen: () => new Promise((resolve5, reject) => {
       server.once("error", reject);
       server.listen(options.port, options.host, () => {
         server.off("error", reject);
         boundPort = server.address().port;
-        resolve7(boundPort);
+        resolve5(boundPort);
       });
     }),
-    close: () => new Promise((resolve7) => {
+    close: () => new Promise((resolve5) => {
       slicing?.abort();
       for (const follow of followed.values()) {
         follow.unsubscribe();
@@ -2012,10 +825,10 @@ ${message}`);
       }
       streams.clear();
       if (!server.listening) {
-        resolve7();
+        resolve5();
         return;
       }
-      server.close(() => resolve7());
+      server.close(() => resolve5());
       server.closeAllConnections();
     }),
     clients: () => streams.size,
@@ -2025,9 +838,9 @@ ${message}`);
 };
 
 // src/server/replay.ts
-import { readFileSync as readFileSync4 } from "fs";
+import { readFileSync as readFileSync3 } from "fs";
 var ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
-var readLines = (path) => readFileSync4(path, "utf8").split("\n").filter((line) => line.trim());
+var readLines = (path) => readFileSync3(path, "utf8").split("\n").filter((line) => line.trim());
 var parse = (text) => {
   try {
     return JSON.parse(text);
@@ -2099,8 +912,8 @@ var replayFixtures = (paths, speed, onLine) => {
   let timer;
   let finish = () => {
   };
-  const done = new Promise((resolve7) => {
-    finish = resolve7;
+  const done = new Promise((resolve5) => {
+    finish = resolve5;
   });
   let index = 0;
   let previous;
@@ -2130,38 +943,16 @@ var replayFixtures = (paths, speed, onLine) => {
 
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
-import { existsSync as existsSync3, linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
-import { dirname as dirname3, join as join7, resolve as resolve5 } from "path";
+import { existsSync, linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
+import { dirname, join as join5, resolve as resolve3 } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 // src/server/context.ts
-import { join as join6, resolve as resolve4 } from "path";
-
-// src/facts/diff-target.ts
-var diffTargetOf = (state, agentId) => {
-  const homeId = ownValue(state.index.agentRuns, agentId);
-  const homeRun = homeId === void 0 ? void 0 : ownValue(state.board.runs, homeId);
-  const home = homeRun === void 0 ? void 0 : ownValue(homeRun.agents, agentId);
-  if (home === void 0 || home.endedAt !== void 0 || home.stage !== "review") {
-    return void 0;
-  }
-  const copies = [];
-  for (const run of Object.values(state.board.runs)) {
-    const agent = ownValue(run.agents, agentId);
-    if (agent !== void 0) {
-      copies.push({ run, agent });
-    }
-  }
-  const first = firstWorkedCopy(state, copies);
-  if (first === void 0 || first.run.branch === "" || first.run.branch === "?" || first.run.worktree === "") {
-    return void 0;
-  }
-  return { branch: first.run.branch, worktree: first.run.worktree, legAt: home.resumedAt ?? home.startedAt };
-};
+import { join as join4, resolve as resolve2 } from "path";
 
 // src/spool/aggregates.ts
-import { closeSync as closeSync2, lstatSync, readdirSync, readFileSync as readFileSync5, readSync as readSync2, renameSync, rmSync, unlinkSync } from "fs";
-import { join as join4 } from "path";
+import { closeSync, lstatSync, readdirSync, readFileSync as readFileSync4, readSync, renameSync, rmSync, unlinkSync } from "fs";
+import { join as join2 } from "path";
 
 // src/insights/percentile.ts
 var percentile = (values, p) => {
@@ -2302,7 +1093,7 @@ var sessionAggregate = (session) => {
 var AGGREGATES_FILE = "aggregates.ndjson";
 var MAX_AGGREGATES_BYTES = 64 * 1024 * 1024;
 var NEWLINE = 10;
-var CHUNK_BYTES2 = 1024 * 1024;
+var CHUNK_BYTES = 1024 * 1024;
 var TEMP_FILE = /^aggregates\.ndjson(?:\.(\d+))?\.tmp$/;
 var LEFT_OVER_TEMP_MS = 10 * 60 * 1e3;
 var MAX_LINE_BYTES = 4 * 1024 * 1024;
@@ -2378,17 +1169,17 @@ var withOpened = (path, read) => {
   try {
     return read(opened);
   } finally {
-    closeSync2(opened.fd);
+    closeSync(opened.fd);
   }
 };
 var eachLine = (fd, onLine) => {
-  const chunk = Buffer.alloc(CHUNK_BYTES2);
+  const chunk = Buffer.alloc(CHUNK_BYTES);
   const parts = [];
   let held = 0;
   let overlong = false;
   let position = 0;
   for (; ; ) {
-    const read = readSync2(fd, chunk, 0, CHUNK_BYTES2, position);
+    const read = readSync(fd, chunk, 0, CHUNK_BYTES, position);
     if (read === 0) {
       return;
     }
@@ -2426,18 +1217,18 @@ var countLines = (path, counted = () => true) => {
   withOpened(path, ({ fd }) => eachLine(fd, (line) => count += counted(line) ? 1 : 0));
   return count;
 };
-var readText = (path) => withOpened(path, ({ fd, stat: stat2 }) => {
-  if (stat2.size > MAX_AGGREGATES_BYTES) {
+var readText = (path) => withOpened(path, ({ fd, stat }) => {
+  if (stat.size > MAX_AGGREGATES_BYTES) {
     throw new Error(`${path}: larger than ${MAX_AGGREGATES_BYTES} bytes`);
   }
   try {
-    return readFileSync5(fd, "utf8");
+    return readFileSync4(fd, "utf8");
   } catch (error) {
     throw new Error(`${path}: ${error.message}`);
   }
 });
 var readAggregates = (dir, onError) => {
-  const path = join4(dir, AGGREGATES_FILE);
+  const path = join2(dir, AGGREGATES_FILE);
   let text;
   try {
     text = readText(path);
@@ -2457,21 +1248,21 @@ var readAggregates = (dir, onError) => {
   }
   return aggregates;
 };
-var appendText = (path, line) => withOpened(path, ({ fd, stat: stat2 }) => {
-  if (stat2.size + Buffer.byteLength(line) + 1 > MAX_AGGREGATES_BYTES) {
+var appendText = (path, line) => withOpened(path, ({ fd, stat }) => {
+  if (stat.size + Buffer.byteLength(line) + 1 > MAX_AGGREGATES_BYTES) {
     throw new Error(`${path}: would grow over ${MAX_AGGREGATES_BYTES} bytes, nothing appended until a prune brings it under`);
   }
-  if (stat2.size === 0) {
+  if (stat.size === 0) {
     return line;
   }
   const last = Buffer.alloc(1);
-  readSync2(fd, last, 0, 1, stat2.size - 1);
+  readSync(fd, last, 0, 1, stat.size - 1);
   return last[0] === NEWLINE ? line : `
 ${line}`;
 }) ?? line;
 var appendAggregate = (dir, aggregate) => {
   ensurePrivateDir(dir);
-  const path = join4(dir, AGGREGATES_FILE);
+  const path = join2(dir, AGGREGATES_FILE);
   appendPrivate(path, appendText(path, `${JSON.stringify(aggregate)}
 `));
 };
@@ -2499,12 +1290,12 @@ var processAlive = (pid) => {
     return error.code !== "ESRCH";
   }
 };
-var leftOver = (name, stat2) => {
+var leftOver = (name, stat) => {
   const pid = TEMP_FILE.exec(name)?.[1];
   if (pid === void 0 || Number(pid) === process.pid) {
     return true;
   }
-  return !processAlive(Number(pid)) || Date.now() - stat2.mtimeMs > LEFT_OVER_TEMP_MS;
+  return !processAlive(Number(pid)) || Date.now() - stat.mtimeMs > LEFT_OVER_TEMP_MS;
 };
 var removeTemps = (dir) => {
   let names;
@@ -2517,15 +1308,15 @@ var removeTemps = (dir) => {
     throw error;
   }
   for (const name of names.filter((entry) => TEMP_FILE.test(entry))) {
-    const stat2 = lstatSync(join4(dir, name), { throwIfNoEntry: false });
-    if ((stat2?.isFile() || stat2?.isSymbolicLink()) && leftOver(name, stat2)) {
-      rmSync(join4(dir, name), { force: true });
+    const stat = lstatSync(join2(dir, name), { throwIfNoEntry: false });
+    if ((stat?.isFile() || stat?.isSymbolicLink()) && leftOver(name, stat)) {
+      rmSync(join2(dir, name), { force: true });
     }
   }
 };
 var rewrite = (dir, keep) => {
   removeTemps(dir);
-  const path = join4(dir, AGGREGATES_FILE);
+  const path = join2(dir, AGGREGATES_FILE);
   if (countLines(path, (line) => !keep(line)) === 0) {
     return 0;
   }
@@ -2543,7 +1334,7 @@ var rewrite = (dir, keep) => {
         }
         batch += `${line}
 `;
-        if (batch.length >= CHUNK_BYTES2) {
+        if (batch.length >= CHUNK_BYTES) {
           appendPrivate(temp, batch);
           batch = "";
         }
@@ -2561,9 +1352,9 @@ var rewrite = (dir, keep) => {
   return dropped;
 };
 var pruneAggregates = (dir, keepDays, now) => rewrite(dir, finishedFrom(pruneCutoff(keepDays, now)));
-var ownedByMe = (stat2) => typeof process.getuid !== "function" || stat2.uid === process.getuid();
-var countForPurge = (path, stat2) => {
-  if (!ownedByMe(stat2)) {
+var ownedByMe = (stat) => typeof process.getuid !== "function" || stat.uid === process.getuid();
+var countForPurge = (path, stat) => {
+  if (!ownedByMe(stat)) {
     throw new Error(`${path} belongs to another user`);
   }
   try {
@@ -2573,16 +1364,16 @@ var countForPurge = (path, stat2) => {
   }
 };
 var purgeableAggregates = (dir, before) => {
-  const path = join4(dir, AGGREGATES_FILE);
+  const path = join2(dir, AGGREGATES_FILE);
   if (!spoolDirExists(dir)) {
     return 0;
   }
-  const stat2 = lstatSync(path, { throwIfNoEntry: false });
-  if (stat2?.isFile() !== true) {
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (stat?.isFile() !== true) {
     return 0;
   }
   if (before === void 0) {
-    return countForPurge(path, stat2);
+    return countForPurge(path, stat);
   }
   const kept = finishedFrom(dayStart(before));
   return countLines(path, (line) => !kept(line));
@@ -2591,18 +1382,18 @@ var purgeAggregates = (dir, before) => {
   if (!spoolDirExists(dir)) {
     return 0;
   }
-  const path = join4(dir, AGGREGATES_FILE);
-  const stat2 = lstatSync(path, { throwIfNoEntry: false });
+  const path = join2(dir, AGGREGATES_FILE);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
   if (before !== void 0) {
-    const taken = stat2?.isFile() ? rewrite(dir, finishedFrom(dayStart(before))) : 0;
+    const taken = stat?.isFile() ? rewrite(dir, finishedFrom(dayStart(before))) : 0;
     removeTemps(dir);
     return taken;
   }
   let count = 0;
-  if (stat2?.isFile()) {
-    count = countForPurge(path, stat2);
+  if (stat?.isFile()) {
+    count = countForPurge(path, stat);
     unlinkSync(path);
-  } else if (stat2?.isSymbolicLink()) {
+  } else if (stat?.isSymbolicLink()) {
     unlinkSync(path);
   }
   removeTemps(dir);
@@ -2620,7 +1411,7 @@ var createAggregateLog = (options) => {
   const settleMs = options.settleMs ?? AGGREGATE_SETTLE_MS;
   const now = options.now ?? (() => /* @__PURE__ */ new Date());
   const onInfo = options.onInfo ?? (() => void 0);
-  const path = join4(dir, AGGREGATES_FILE);
+  const path = join2(dir, AGGREGATES_FILE);
   const known = /* @__PURE__ */ new Map();
   const pending = /* @__PURE__ */ new Map();
   let appendFailure;
@@ -2761,8 +1552,8 @@ var createAggregateLog = (options) => {
 };
 
 // src/server/repositories.ts
-import { closeSync as closeSync3, constants as constants2, lstatSync as lstatSync2, openSync as openSync2, readdirSync as readdirSync2, readSync as readSync3 } from "fs";
-import { join as join5, relative, resolve as resolve3, sep as sep2 } from "path";
+import { closeSync as closeSync2, constants, lstatSync as lstatSync2, openSync, readdirSync as readdirSync2, readSync as readSync2 } from "fs";
+import { join as join3, relative, resolve, sep } from "path";
 var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
 var RECORD_FILE = "repository.json";
 var CONFIG_FILE = "nurselog.config.json";
@@ -2779,12 +1570,12 @@ var hashDirectories = (base) => {
   return entries.filter((entry) => entry.isDirectory() && HASH_DIRECTORY.test(entry.name)).map((entry) => entry.name);
 };
 var recordedRoot = (base, hash) => {
-  const root = readRepositoryRecord(join5(base, hash, RECORD_FILE))?.root;
+  const root = readRepositoryRecord(join3(base, hash, RECORD_FILE))?.root;
   return root !== void 0 && recordedRootValid(root, hash) ? root : void 0;
 };
 var NEWLINE2 = 10;
 var TAIL_CHUNK_BYTES = 64 * 1024;
-var READ_NO_FOLLOW = constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0);
+var READ_NO_FOLLOW = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 var activityAt = (text) => {
   let line;
   try {
@@ -2797,14 +1588,14 @@ var activityAt = (text) => {
   return Number.isNaN(time2) ? void 0 : new Date(time2).toISOString();
 };
 var newestActivityIn = (path, from, to) => {
-  const fd = openSync2(path, READ_NO_FOLLOW);
+  const fd = openSync(path, READ_NO_FOLLOW);
   try {
     let end = to;
     let carry = Buffer.alloc(0);
     while (end > from) {
       const start = Math.max(from, end - TAIL_CHUNK_BYTES);
       const chunk = Buffer.alloc(end - start);
-      readSync3(fd, chunk, 0, chunk.length, start);
+      readSync2(fd, chunk, 0, chunk.length, start);
       const data = Buffer.concat([chunk, carry]);
       const cut = start > from ? data.indexOf(NEWLINE2) + 1 : 0;
       carry = cut > 0 ? Buffer.from(data.subarray(0, cut - 1)) : start > from ? data : Buffer.alloc(0);
@@ -2819,27 +1610,27 @@ var newestActivityIn = (path, from, to) => {
     }
     return void 0;
   } finally {
-    closeSync3(fd);
+    closeSync2(fd);
   }
 };
 var scanned = /* @__PURE__ */ new Map();
 var newestActivityOf = (path) => {
-  const stat2 = lstatSync2(path);
-  if (!stat2.isFile() || typeof process.getuid === "function" && stat2.uid !== process.getuid()) {
+  const stat = lstatSync2(path);
+  if (!stat.isFile() || typeof process.getuid === "function" && stat.uid !== process.getuid()) {
     return void 0;
   }
-  const size = stat2.size;
+  const size = stat.size;
   const known = scanned.get(path);
   const from = known && known.size <= size ? known.size : 0;
-  const fd = openSync2(path, READ_NO_FOLLOW);
+  const fd = openSync(path, READ_NO_FOLLOW);
   let to = size;
   try {
     const tail = Buffer.alloc(Math.min(size - from, TAIL_CHUNK_BYTES));
-    readSync3(fd, tail, 0, tail.length, size - tail.length);
+    readSync2(fd, tail, 0, tail.length, size - tail.length);
     const last = tail.lastIndexOf(NEWLINE2);
     to = last === -1 ? from : size - tail.length + last + 1;
   } finally {
-    closeSync3(fd);
+    closeSync2(fd);
   }
   const found = to > from ? newestActivityIn(path, from, to) : void 0;
   const at = found ?? (from > 0 ? known?.at : void 0);
@@ -2883,7 +1674,7 @@ var withinReadDays = (at, readDays, now) => {
   const first = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (readDays - 1)));
   return localDay(new Date(at)) >= first;
 };
-var segmentsOf = (root) => root.split(sep2).filter(Boolean);
+var segmentsOf = (root) => root.split(sep).filter(Boolean);
 var tabNames = (roots) => {
   const segments = roots.map(segmentsOf);
   const depths = roots.map(() => 1);
@@ -2931,20 +1722,36 @@ var newestDayIn = (dir, onError) => {
 };
 var holdsAggregates = (dir, onError) => {
   try {
-    return spoolDirExists(dir) && lstatSync2(join5(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
+    return spoolDirExists(dir) && lstatSync2(join3(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
   } catch (error) {
     reportLookup(dir, error, onError);
     return false;
   }
 };
-var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError) => {
+var foreignOwner = (dir, uid) => {
+  if (uid === void 0) {
+    return void 0;
+  }
+  try {
+    const stat = lstatSync2(dir, { throwIfNoEntry: false });
+    return stat?.isDirectory() === true && stat.uid !== uid ? stat.uid : void 0;
+  } catch {
+    return void 0;
+  }
+};
+var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = process.getuid?.()) => {
   const base = defaultRoot();
   const today = localDay(now);
   const orphans = [];
   for (const hash of hashDirectories(base).sort()) {
-    const dir = join5(base, hash);
-    const root = readRepositoryRecord(join5(dir, RECORD_FILE))?.root;
+    const dir = join3(base, hash);
+    const root = readRepositoryRecord(join3(dir, RECORD_FILE))?.root;
     if (root !== void 0 && recordedRootValid(root, hash)) {
+      continue;
+    }
+    const owner = foreignOwner(dir, uid);
+    if (owner !== void 0) {
+      onError?.(`orphaned spool ${tildeHome(dir)} left alone: it belongs to uid ${owner}, not to this user; remove it as that user`);
       continue;
     }
     const listed = newestDayIn(dir, onError);
@@ -2962,7 +1769,7 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError) => {
 var pruneOrphanedSpools = (now, onError) => {
   const deleted = [];
   for (const orphan of listOrphanedSpools(now, onError)) {
-    const config = join5(orphan.dir, CONFIG_FILE);
+    const config = join3(orphan.dir, CONFIG_FILE);
     const shown = tildeHome(orphan.dir);
     try {
       const keepDays = configKeepDays(config) ?? HOOK_DEFAULTS.spool.keepDays;
@@ -3003,7 +1810,7 @@ var pruneRecordedAggregates = (now, onError) => {
     if (root === void 0) {
       continue;
     }
-    const dir = join5(base, hash);
+    const dir = join3(base, hash);
     let keepDays = DEFAULT_CONFIG.insights.keepDays;
     try {
       keepDays = configKeepDays(userConfigPath(root), "insights") ?? keepDays;
@@ -3014,7 +1821,7 @@ var pruneRecordedAggregates = (now, onError) => {
     pruneAggregatesIn(dir, keepDays, now, onError);
     try {
       const configured = spoolDirFor(readHookConfig(root), root);
-      if (resolve3(configured) !== resolve3(dir)) {
+      if (resolve(configured) !== resolve(dir)) {
         pruneAggregatesIn(configured, keepDays, now, onError);
       }
     } catch (error) {
@@ -3055,52 +1862,71 @@ var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
 var TICK_MS = 60 * 1e3;
 var AGGREGATE_CHECK_MS = 60 * 1e3;
 var hasOpenRun = (state) => Object.values(state.runs).some((run) => run.branch !== "" && run.branch !== "?" && run.chip.tone !== "done");
-var stopEach = (stops, log) => {
+var stopEach = (stops, warn) => {
   for (const stop of stops.splice(0)) {
     try {
       stop();
     } catch (error) {
-      log("warning", `stopping failed: ${error.message}`);
+      warn(`stopping failed: ${error.message}`);
     }
   }
 };
+var SLOW_REPLAY_MS = 30 * 1e3;
 var createSpoolContext = (options) => {
   const { config, root, spoolDir, log } = options;
   let name = options.name;
   const warn = (message) => log("warning", stripControlLines(`${name}: ${message}`));
-  const windowStartMs = readWindowStart(/* @__PURE__ */ new Date(), config.spool.readDays).getTime();
+  const windowStart = readWindowStart(/* @__PURE__ */ new Date(), config.spool.readDays);
+  const first = localDay(windowStart);
   const info = (message) => log("info", stripControlLines(`${name}: ${message}`));
-  const aggregates = createAggregateLog({ dir: spoolDir, keepDays: config.insights.keepDays, windowStartMs, onError: warn, onInfo: info });
+  const aggregates = createAggregateLog({ dir: spoolDir, keepDays: config.insights.keepDays, windowStartMs: windowStart.getTime(), onError: warn, onInfo: info });
   const store = createStore(config, { onFinish: (sessionId, finishedAt) => aggregates.noteFinish(sessionId, finishedAt) });
   const write = (line) => appendEvent(spoolDir, line, config.spool.maxLineBytes);
-  const fixtureWorker = options.fixtureWorker ?? join6(PACKAGE_ROOT, "dist", "fixture-worker.js");
+  const fixtureWorker = options.fixtureWorker ?? join4(PACKAGE_ROOT, "dist", "fixture-worker.js");
+  const slowReplayMs = options.slowReplayMs ?? SLOW_REPLAY_MS;
+  const replayWorker = options.replayWorker || join4(PACKAGE_ROOT, "dist", "replay-worker.js");
   const stops = [];
   const observers = [];
   let lastLineAt2 = options.lastLineAt;
   const ghWanted = options.facts && config.github.repo !== "";
   const ghLog = (level, message) => level === "warning" ? warn(message) : info(message);
   const pollWanted = () => options.clients() > 0 && hasOpenRun(store.state().board);
-  const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, root, write, log: ghLog, wanted: pollWanted }) : void 0;
-  let lines = () => 0;
-  try {
-    const diffTarget = (agentId) => diffTargetOf(store.peek(), agentId);
-    const git = options.facts ? createGitFacts({ config, write, log, repoCommonDir: gitCommonDir(root), diffTarget }) : void 0;
-    const usage = options.facts ? createUsageFacts({ prices: loadPrices(resolve4(root, expandHome(config.pricesFrom)), log), write, log }) : void 0;
-    if (git && usage) {
-      observers.push((event) => git.observe(event), (event, payload) => usage.observe(event, payload));
-      stops.push(() => git.stop(), () => usage.stop());
-    }
-    if (gh) {
-      observers.push((event) => gh.observe(event));
-      stops.push(() => gh.stop());
-    }
-    const onLine = createLineHandler(store, config, observers);
-    const onHistory = createHistoryHandler(store, config, observers, warn);
-    const onCleanUp = (now) => aggregates.prune(now);
-    const reader = createSpoolReader({ dir: spoolDir, readDays: config.spool.readDays, keepDays: config.spool.keepDays, onError: warn, onLine, onHistory, onCleanUp });
-    reader.start();
-    stops.push(() => reader.stop());
-    lines = reader.lines;
+  const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, root, write, run: options.run, log: ghLog, wanted: pollWanted }) : void 0;
+  const diffTarget = (agentId) => diffTargetOf(store.peek(), agentId);
+  const repoCommonDir = options.facts ? gitCommonDir(root) : void 0;
+  const prices = options.facts ? loadPrices(resolve2(root, expandHome(config.pricesFrom)), log) : {};
+  const git = options.facts ? createGitFacts({ config, write, run: options.run, log, repoCommonDir, diffTarget }) : void 0;
+  const usage = options.facts ? createUsageFacts({ prices, write, log }) : void 0;
+  if (git && usage) {
+    observers.push((event) => git.observe(event), (event, payload) => usage.observe(event, payload));
+    stops.push(() => git.stop(), () => usage.stop());
+  }
+  if (gh) {
+    observers.push((event) => gh.observe(event));
+    stops.push(() => gh.stop());
+  }
+  const onLine = createLineHandler(store, config, observers);
+  const onHistory = createHistoryHandler(store, config, observers, warn);
+  const onCleanUp = (now) => aggregates.prune(now);
+  const reader = createSpoolReader({ dir: spoolDir, readDays: config.spool.readDays, keepDays: config.spool.keepDays, onError: warn, onLine, onHistory, onCleanUp });
+  stops.push(() => reader.stop());
+  const producers = { git: git !== void 0, usage: usage !== void 0, gh: gh !== void 0 };
+  const job = { dir: spoolDir, config, first, ...options.facts ? { facts: { root, configKind: options.configKind, repoCommonDir, prices } } : {} };
+  let loading = true;
+  let closed = false;
+  let endReplay;
+  let step = "";
+  let settle = () => void 0;
+  const ready = new Promise((resolve5) => {
+    settle = resolve5;
+  });
+  const finish = () => {
+    loading = false;
+    settle();
+  };
+  const goLive = () => {
+    step = "the go-live";
+    reader.follow();
     store.state();
     const check = setInterval(() => aggregates.flush(store), options.aggregateCheckMs ?? AGGREGATE_CHECK_MS);
     stops.push(() => {
@@ -3110,6 +1936,9 @@ var createSpoolContext = (options) => {
     git?.goLive();
     usage?.goLive();
     gh?.goLive();
+    if (options.clients() > 0) {
+      gh?.nudge();
+    }
     if (options.facts) {
       const tick = setInterval(() => {
         try {
@@ -3120,9 +1949,87 @@ var createSpoolContext = (options) => {
       }, TICK_MS);
       stops.push(() => clearInterval(tick));
     }
+  };
+  const replayInProcess = () => {
+    step = "the in-process replay";
+    reader.readHistory(first);
+    goLive();
+  };
+  const restore = (answer, image) => {
+    for (const line of answer.logs) {
+      const level = line.level === "warning" ? "warning" : "info";
+      if (line.named) {
+        (level === "warning" ? warn : info)(line.message);
+      } else {
+        log(level, line.message);
+      }
+    }
+    step = "the store restore";
+    store.restore(image);
+    step = "the history views";
+    const { views } = answer;
+    if (git && usage && views) {
+      git.restoreHistory(views.git);
+      usage.restoreHistory(views.usage);
+    }
+    if (gh && views?.gh) {
+      gh.restoreHistory(views.gh);
+    }
+    step = "the reader resume";
+    reader.resume(answer.handover);
+    goLive();
+  };
+  const replayInWorker = async () => {
+    if (closed) {
+      return;
+    }
+    const controller = new AbortController();
+    endReplay = () => controller.abort();
+    const slow = setTimeout(() => info(`still reading its history after ${slowReplayMs / 1e3} s`), slowReplayMs);
+    let answer;
+    let failure;
+    try {
+      answer = await runReplayJob(replayWorker, job, controller.signal);
+    } catch (error) {
+      failure = describeError(error);
+    } finally {
+      endReplay = void 0;
+      clearTimeout(slow);
+    }
+    if (closed) {
+      return;
+    }
+    const read = failure === void 0 ? readReplayAnswer(answer, producers) : void 0;
+    try {
+      if (read && "answer" in read) {
+        restore(read.answer, read.image);
+        return;
+      }
+      warn(`the history is replayed on the board's thread: the replay worker failed: ${failure ?? read?.problem}`);
+      replayInProcess();
+    } catch (error) {
+      const reason = `the start after the history replay failed at ${step}: ${describeError(error)}`;
+      stopEach(stops, warn);
+      if (options.onFailed) {
+        options.onFailed(reason);
+      } else {
+        warn(reason);
+      }
+    }
+  };
+  try {
+    reader.cleanUp();
+    if (options.replayWorker === false) {
+      replayInProcess();
+      finish();
+    }
   } catch (error) {
-    stopEach(stops, log);
+    stopEach(stops, warn);
     throw error;
+  }
+  if (options.replayWorker !== false) {
+    const queue = options.queueReplay ?? ((replay) => void replay());
+    queue(() => replayInWorker().finally(finish));
   }
   return {
     id: options.id,
@@ -3132,6 +2039,8 @@ var createSpoolContext = (options) => {
     root,
     store,
     spoolDir,
+    ready,
+    loading: () => loading && !closed,
     async fixture(sessionId, signal) {
       const answer = await runFixtureJob(fixtureWorker, { dir: spoolDir, sessionId, config }, { signal });
       for (const message of answer.warnings) {
@@ -3149,9 +2058,14 @@ var createSpoolContext = (options) => {
       name = nextName;
       lastLineAt2 = at;
     },
-    lines: () => lines(),
+    lines: () => reader.lines(),
     nudge: () => gh?.nudge(),
-    close: () => stopEach(stops, log)
+    close: () => {
+      closed = true;
+      endReplay?.();
+      stopEach(stops, warn);
+      settle();
+    }
   };
 };
 var createReplayContext = (options) => {
@@ -3169,6 +2083,8 @@ var createReplayContext = (options) => {
     name: options.name,
     root: options.root,
     store,
+    ready: Promise.resolve(),
+    loading: () => false,
     uiConfig: () => options.ui,
     lastLineAt: () => lastLineAt2,
     typical: () => ({}),
@@ -3231,8 +2147,8 @@ var START_TICKET_MS = 10 * 60 * 1e3;
 var LOCK_STALE_MS = 10 * 1e3;
 var LOCK_RETRY_MS = 25;
 var SCAN_MS = 10 * 1e3;
-var PACKAGE_FILE = join7(PACKAGE_ROOT, "src", "ui", "index.html");
-var ORPHAN_MARKER = join7(PACKAGE_ROOT, ".orphaned_at");
+var PACKAGE_FILE = join5(PACKAGE_ROOT, "src", "ui", "index.html");
+var ORPHAN_MARKER = join5(PACKAGE_ROOT, ".orphaned_at");
 var packageGone = (path) => {
   try {
     statSync(path);
@@ -3295,7 +2211,7 @@ var withLock = async (lock, work) => {
   }
 };
 var claimStateFile = async (stateFile, text) => {
-  ensurePrivateDir(dirname3(stateFile));
+  ensurePrivateDir(dirname(stateFile));
   const temp = `${stateFile}.${process.pid}-${randomBytes2(4).toString("hex")}.tmp`;
   try {
     writeFileSync(temp, text, { mode: 384, flag: "wx" });
@@ -3327,10 +2243,10 @@ var startNurselog = async (options = {}) => {
   const orphanMarker = options.orphanMarker ?? ORPHAN_MARKER;
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const live = !options.replay;
-  if (live && existsSync3(orphanMarker)) {
+  if (live && existsSync(orphanMarker)) {
     throw new OrphanedCopyError(orphanMarker);
   }
-  const token = live ? ensureBoardToken(join7(dirname3(stateFile), "token")) : randomBytes2(32).toString("base64url");
+  const token = live ? ensureBoardToken(join5(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
   const speed = options.replay?.speed ?? 1;
   const contexts = /* @__PURE__ */ new Map();
   const setups = /* @__PURE__ */ new Map();
@@ -3394,6 +2310,20 @@ var startNurselog = async (options = {}) => {
     }
   };
   const pruneOrphans = dailyOrphanPrune(warn);
+  let replayTurn = Promise.resolve();
+  const queueReplay = (name) => (replay) => {
+    replayTurn = replayTurn.then(replay).catch((error) => warn(`${name}: the history replay failed: ${describeError(error)}`));
+  };
+  const replayInProcess = /* @__PURE__ */ new Set();
+  const dropFailed = (id, context, message) => {
+    replayInProcess.add(id);
+    if (context && contexts.get(id) === context) {
+      contexts.delete(id);
+      context.close();
+      server.update();
+    }
+    failed(id, message);
+  };
   let unlisted = /* @__PURE__ */ new Map();
   const scan = () => {
     pruneOrphans();
@@ -3436,7 +2366,8 @@ var startNurselog = async (options = {}) => {
         context.close();
       }
     }
-    for (const [id, { repository, setup, config }] of served) {
+    const byActivity = [...served].sort(([, a], [, b]) => (b.repository.lastLineAt ?? "").localeCompare(a.repository.lastLineAt ?? ""));
+    for (const [id, { repository, setup, config }] of byActivity) {
       const context = contexts.get(id);
       if (context) {
         context.seen(repository.name, repository.lastLineAt);
@@ -3447,8 +2378,12 @@ var startNurselog = async (options = {}) => {
         const spoolDir = spoolDirFor(config, root);
         const facts = options.facts !== false;
         const clients = () => server.clients();
-        const fixtureWorker = options.fixtureWorker;
-        contexts.set(id, createSpoolContext({ id, name, root, config, configKind: setup.kind, spoolDir, lastLineAt: lastLineAt2, facts, clients, log, fixtureWorker }));
+        const { fixtureWorker } = options;
+        const replayWorker = replayInProcess.has(id) ? false : options.replayWorker;
+        let created;
+        const onFailed = (reason) => dropFailed(id, created, `${name} is not served: ${reason}`);
+        created = createSpoolContext({ id, name, root, config, configKind: setup.kind, spoolDir, lastLineAt: lastLineAt2, facts, clients, log, fixtureWorker, replayWorker, queueReplay: queueReplay(name), onFailed });
+        contexts.set(id, created);
         failures.delete(id);
       } catch (error) {
         failed(id, `${nameOf(repository)} is not served: ${error.message}`);
@@ -3474,7 +2409,7 @@ var startNurselog = async (options = {}) => {
     if (packageGone(packageFile)) {
       return `${tildeHome(packageFile)} is gone, so the package it runs from was removed`;
     }
-    if (existsSync3(orphanMarker)) {
+    if (existsSync(orphanMarker)) {
       return `${tildeHome(orphanMarker)} marks the plugin copy it runs from as replaced or uninstalled`;
     }
     return void 0;
@@ -3511,7 +2446,7 @@ var startNurselog = async (options = {}) => {
   try {
     if (options.replay) {
       const { fixtures, config } = options.replay;
-      const root = resolve5(options.replay.root);
+      const root = resolve3(options.replay.root);
       const ui = uiConfig(config, repositoryRoot(root));
       const id = repoHash(root);
       contexts.set(id, createReplayContext({ id, name: ui.repo || "replay", root, config, ui, fixtures, speed }));
@@ -3540,8 +2475,8 @@ var startNurselog = async (options = {}) => {
 
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
-import { closeSync as closeSync4, constants as constants3, existsSync as existsSync4, fstatSync as fstatSync2, openSync as openSync3, readFileSync as readFileSync6, readSync as readSync4 } from "fs";
-import { join as join8, resolve as resolve6 } from "path";
+import { closeSync as closeSync3, constants as constants2, existsSync as existsSync2, fstatSync, openSync as openSync2, readFileSync as readFileSync5, readSync as readSync3 } from "fs";
+import { join as join6, resolve as resolve4 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
   start [--replay <fixture>] [--speed <n>] [--port <n>]  start the one board for every repository, or print the repository's tab while it runs (the default command; builds the package once when dist/ is missing)
@@ -3672,7 +2607,7 @@ var questionMarker = (args, readStdin) => {
   return { ...result, data: { ...result.data, id }, output: id };
 };
 var MARKERS = { plan: planMarker, gate: gateMarker, question: questionMarker };
-var readStandardInput = () => readFileSync6(0, "utf8");
+var readStandardInput = () => readFileSync5(0, "utf8");
 var parseMarker = (kind, args, readStdin = readStandardInput) => {
   const marker = Object.hasOwn(MARKERS, kind) ? MARKERS[kind] : void 0;
   if (!marker) {
@@ -3713,8 +2648,8 @@ var resolveRepository = (repo, cwd = process.cwd()) => {
   if (repo === "") {
     throw new Error("--repo needs a path");
   }
-  const start = resolve6(cwd, repo ?? ".");
-  if (!existsSync4(start)) {
+  const start = resolve4(cwd, repo ?? ".");
+  if (!existsSync2(start)) {
     throw new Error(`${stripControl(start)} does not exist`);
   }
   const root = repositoryRoot(start);
@@ -3781,20 +2716,20 @@ var boardTab = async (board, root, timeoutMs = BOARD_TIMEOUT_MS) => {
 var linesToday = (path) => {
   let fd;
   try {
-    fd = openSync3(path, constants3.O_RDONLY | constants3.O_NOFOLLOW | constants3.O_NONBLOCK);
+    fd = openSync2(path, constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK);
   } catch {
     return 0;
   }
   try {
-    const stat2 = fstatSync2(fd);
-    const otherUser = typeof process.getuid === "function" && stat2.uid !== process.getuid();
-    if (!stat2.isFile() || otherUser) {
+    const stat = fstatSync(fd);
+    const otherUser = typeof process.getuid === "function" && stat.uid !== process.getuid();
+    if (!stat.isFile() || otherUser) {
       return 0;
     }
-    const buffer = Buffer.alloc(stat2.size);
+    const buffer = Buffer.alloc(stat.size);
     let length = 0;
     while (length < buffer.length) {
-      const read = readSync4(fd, buffer, length, buffer.length - length, length);
+      const read = readSync3(fd, buffer, length, buffer.length - length, length);
       if (read === 0) {
         break;
       }
@@ -3802,7 +2737,7 @@ var linesToday = (path) => {
     }
     return buffer.toString("utf8", 0, length).split("\n").filter(Boolean).length;
   } finally {
-    closeSync4(fd);
+    closeSync3(fd);
   }
 };
 var runStatus = async (args, io) => {
@@ -3821,7 +2756,7 @@ ${USAGE}`);
   const stateFile = serverStatePath();
   const state = readServerState(stateFile);
   const dir = spoolDirFor(config, root);
-  const today = join8(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
+  const today = join6(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
   const lines = linesToday(today);
   const board = await checkBoard(stateFile, RUNNING_CHECK_MS);
   const running = state !== void 0 && board.status !== "none";
@@ -3901,21 +2836,6 @@ ${USAGE}`);
 };
 
 export {
-  createLine,
-  appendEvent,
-  runCommand,
-  createBashTracker,
-  SAFE_GIT,
-  SAFE_GIT_ENV,
-  worktreeAddPath,
-  createGitFacts,
-  PR_FIELDS,
-  createGhFacts,
-  loadPrices,
-  priceFor,
-  usdFor,
-  requestOf,
-  createUsageFacts,
   createBoardServer,
   shiftTimes,
   mergeFixtures,

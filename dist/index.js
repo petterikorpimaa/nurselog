@@ -1,25 +1,26 @@
 import {
+  createBoardServer,
+  mergeFixtures,
+  parseMarker,
+  parseStream,
+  replayFixtures,
+  shiftTimes,
+  startNurselog
+} from "./chunk-IKZLAETW.js";
+import {
   PR_FIELDS,
   appendEvent,
   createBashTracker,
-  createBoardServer,
   createGhFacts,
   createGitFacts,
   createLine,
   createUsageFacts,
   loadPrices,
-  mergeFixtures,
-  parseMarker,
-  parseStream,
   priceFor,
-  replayFixtures,
   requestOf,
   runCommand,
-  shiftTimes,
-  startNurselog,
-  usdFor,
-  worktreeAddPath
-} from "./chunk-O5JZARZ5.js";
+  usdFor
+} from "./chunk-OMBC2G6E.js";
 import {
   DEFAULT_CONFIG,
   SPOOL_EVENT_NAMES,
@@ -63,7 +64,7 @@ import {
   uiConfig,
   userConfigPath,
   validateConfig
-} from "./chunk-MMMTGD7O.js";
+} from "./chunk-OHFJPS3R.js";
 
 // src/cli/markers.ts
 var parseStream2 = (spec) => parseStream(spec);
@@ -129,6 +130,5 @@ export {
   uiConfig,
   usdFor,
   userConfigPath,
-  validateConfig,
-  worktreeAddPath
+  validateConfig
 };

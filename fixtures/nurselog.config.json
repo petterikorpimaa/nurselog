@@ -49,11 +49,11 @@
     "contextLimits": { "default": 200000, "claude-opus": 200000, "claude-sonnet": 200000, "claude-fable": 200000, "claude-haiku-5": 200000 }
   },
   "verification": {
-    "runners": ["pnpm", "npm", "npx", "yarn", "node", "turbo", "tsc", "eslint", "vitest"],
+    "runners": ["pnpm", "npm", "npx", "yarn", "bun", "node", "turbo", "make", "tsc", "eslint", "vitest"],
     "kinds": {
       "typecheck": "\\b(typecheck|tsc)\\b",
       "lint": "\\b(lint|eslint)\\b",
-      "test": "\\b(vitest|test:run)\\b|\\bpnpm\\b.*\\btest\\b"
+      "test": "\\b(vitest|test:run)\\b|\\b(pnpm|npm|yarn|bun|make)\\b[^&|;]*\\btest\\b"
     },
     "fullRunOnly": true
   },
