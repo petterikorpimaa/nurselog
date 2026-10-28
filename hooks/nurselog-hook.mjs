@@ -21,7 +21,7 @@ const QUIET_SOURCES = new Set(['compact', 'clear']);
 /** How long a SessionStart that started the board waits for it to answer (design section 9). */
 const AUTO_START_WAIT_MS = 1500;
 /** The role stages whose agents end their report with the report block (design section 10). */
-const REPORTING_STAGES = new Set(['build', 'review', 'pr']);
+const REPORTING_STAGES = new Set(['implement', 'review', 'pr']);
 
 const text = (value) => (typeof value === 'string' ? value : '');
 
@@ -154,7 +154,7 @@ const serverMessage = async (payload, dir) => {
 
 /**
  * The context an event injects (design section 13): the markers paragraph at every SessionStart, the report-block
- * paragraph at the SubagentStart of an agent whose role stage is build, review or pr, else undefined.
+ * paragraph at the SubagentStart of an agent whose role stage is implement, review or pr, else undefined.
  */
 const injectedContext = (payload, config) => {
   if (payload.hook_event_name === 'SessionStart') {

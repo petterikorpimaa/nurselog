@@ -1,5 +1,5 @@
 // The context the plugin injects (design sections 10 and 13): the markers paragraph for the main thread at SessionStart
-// and the report-block paragraph for an agent whose role stage is build, review or pr at SubagentStart. Plain ESM
+// and the report-block paragraph for an agent whose role stage is implement, review or pr at SubagentStart. Plain ESM
 // without dependencies, so the hook runs without a build; a test keeps both equal to the fenced blocks of section 10.
 
 /** The markers paragraph: how the main thread adds its workflow markers with the marker tools. */

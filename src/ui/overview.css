@@ -131,7 +131,7 @@
 .tokens-line { fill: none; stroke: var(--c); stroke-width: 1.2; stroke-linejoin: round; }
 .tokens-totals { display: flex; flex-direction: column; gap: 5px; }
 .tokens-row {
-  display: grid; grid-template-columns: 52px minmax(0, 1fr) 54px; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 60px minmax(0, 1fr) 54px; gap: 8px; align-items: center;
   font: 500 11px var(--f-mono); color: var(--fg-3); transition: opacity .3s;
 }
 .tokens-row.off { opacity: .45; }

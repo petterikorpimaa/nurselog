@@ -86,13 +86,13 @@ it; `--from -` reads a complete proposal from stdin instead of detecting. It nev
 1. Run `nurselog init` and read the proposal.
 2. Read the workflow: `CLAUDE.md`, `AGENTS.md`, the descriptions (not only the names) in `.claude/agents/*.md`, and the
    skills.
-3. Refine the proposal: the role stages (`roles`: `build`, `review`, `pr` or `other`, and `short` for a reviewer
-   label), `join.pattern` (the command that writes the diff the reviewers read), the verification commands
-   (`verification`), the budgets (for example a tool-call limit in `CLAUDE.md`, under `budgets.roles`) and the docs
-   tools (`docs.roles`, `docs.tools`).
+3. Refine the proposal: the role stages (`roles`: `implement`, `review`, `pr` or `other`, and `short` for a
+   reviewer label; a stage `build`, the old name of `implement`, is still read), `join.pattern` (the command that
+   writes the diff the reviewers read), the verification commands (`verification`), the budgets (for example a
+   tool-call limit in `CLAUDE.md`, under `budgets.roles`) and the docs tools (`docs.roles`, `docs.tools`).
 4. Show the user the whole config, and a list of the parts of their workflow the board cannot show, found by comparing
-   it with the README's "How it works": the stages under "Workflow stages" (Plan, Build, Join, Review, Fix, PR, Merge,
-   Promote, Docs) and the gaps listed under "What each part needs".
+   it with the README's "How it works": the stages under "Workflow stages" (Plan, Implement, Join, Review, Fix, PR,
+   Merge, Promote, Docs) and the gaps listed under "What each part needs".
 5. Only after the user approves, write it with the approved JSON on stdin (add `--repo-file` for a committed config):
 
    ```bash

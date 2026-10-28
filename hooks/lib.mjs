@@ -9,25 +9,13 @@ import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DEFAULT_ROLES, escapeRegExp, LEGACY_ROLE_STAGE, stripControl } from './browser-safe.mjs';
 import { FAILURE_ERROR_CHARS, keptStdout } from './verification.mjs';
 
-export const HOOK_DEFAULTS = { spool: { dir: '~/.local/share/nurselog', maxLineBytes: 65536, keepDays: 14 } };
+// The default roles and the text helpers live in `browser-safe.mjs`, which the browser-safe core of `src/` imports.
+export { DEFAULT_ROLES, escapeRegExp, LEGACY_ROLE_STAGE, stripControl };
 
-/** The default roles (design section 8), the one copy: `DEFAULT_CONFIG.roles` of `src/config.ts` is built from it. */
-export const DEFAULT_ROLES = {
-  implementer: { stage: 'build' },
-  'conventions-checker': { stage: 'review', short: 'conv' },
-  'code-reviewer': { stage: 'review', short: 'code' },
-  'spec-reviewer': { stage: 'review', short: 'spec' },
-  'typescript-reviewer': { stage: 'review', short: 'ts' },
-  'silent-failure-hunter': { stage: 'review', short: 'silent' },
-  'security-reviewer': { stage: 'review', short: 'security' },
-  'design-reviewer': { stage: 'review', short: 'design' },
-  'database-reviewer': { stage: 'review', short: 'db' },
-  'pr-test-analyzer': { stage: 'review', short: 'tests' },
-  'pr-shepherd': { stage: 'pr' },
-  '*': { stage: 'other' },
-};
+export const HOOK_DEFAULTS = { spool: { dir: '~/.local/share/nurselog', maxLineBytes: 65536, keepDays: 14 } };
 
 /** The CLI of this package: `hooks/` and `dist/` both sit one level below the package root. */
 export const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'nurselog');
@@ -131,9 +119,6 @@ export const notSetUpMessage = (cli = CLI_PATH, short = shortCommandWorks(cli)) 
   return `Nurselog is not set up for this repository; run: ${cliCommand(undefined, 'init', cli, short)}`;
 };
 
-/** Removes control characters from a text built from config or repository values before it is printed. */
-export const stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
-
 /**
  * `stripControl` per line, the lines kept apart by `\n` and the later ones indented, so `fatal: x\nhint: y` stays two
  * lines and no message can start a line of its own that looks like a log entry; a `\r` is still removed.
@@ -143,8 +128,6 @@ export const stripControlLines = (text) => text.split('\n').map(stripControl).jo
 export const STATE_FILE_WARNING = 'server.stateFile is no longer used and is ignored; the board writes ~/.local/share/nurselog/server.json';
 /** A config no longer chooses the port (design section 9). */
 export const SERVER_PORT_WARNING = 'server.port is ignored: one board serves every repository, on 6767 or --port';
-
-export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const expandHome = (path) => (path === '~' || path.startsWith('~/') ? join(homedir(), path.slice(1)) : path);
 
@@ -417,11 +400,12 @@ const parseObject = (text) => {
 /**
  * The roles of a config file merged over `DEFAULT_ROLES` the way `loadConfig` merges them (role by role, key by key),
  * in an object without a prototype, so an agent type such as `constructor` names no role. A `roles` that is not an
- * object is ignored.
+ * object is ignored. A role stage `build` reads as `implement`, as in `loadConfig`.
  */
 const mergeRoles = (roles) => {
   const merged = Object.assign(Object.create(null), DEFAULT_ROLES);
-  for (const [type, role] of Object.entries(isObject(roles) ? roles : {})) {
+  for (const [type, given] of Object.entries(isObject(roles) ? roles : {})) {
+    const role = isObject(given) && given.stage === LEGACY_ROLE_STAGE ? { ...given, stage: 'implement' } : given;
     merged[type] = isObject(role) && isObject(merged[type]) ? { ...merged[type], ...role } : role;
   }
   return merged;

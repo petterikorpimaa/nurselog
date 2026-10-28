@@ -16,24 +16,27 @@ import {
   runLink,
   runStatus,
   startNurselog
-} from "./chunk-IKZLAETW.js";
+} from "./chunk-XW5TBIYW.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-B2LPHKGH.js";
+} from "./chunk-NFVUCHPF.js";
 import {
+  DEFAULT_CONFIG,
+  PACKAGE_ROOT,
   SAFE_GIT,
   SAFE_GIT_ENV,
-  runCommand
-} from "./chunk-OMBC2G6E.js";
+  loadConfig,
+  mergeOverDefaults,
+  runCommand,
+  validateConfig
+} from "./chunk-4VI3FZIO.js";
 import {
   BRANCH_KEY_PATTERN,
-  DEFAULT_CONFIG,
   LINUX_APP_BROWSERS,
   MAC_APP_BROWSERS,
   MAX_CONFIG_BYTES,
   OWNER_LINE,
-  PACKAGE_ROOT,
   RUNNING_CHECK_MS,
   STREAM_ID,
   SignInFileError,
@@ -55,9 +58,7 @@ import {
   githubRepoOfRemote,
   isBranchName,
   launch,
-  loadConfig,
   localDay,
-  mergeOverDefaults,
   notProvenMessage,
   notSetUpMessage,
   openAppWindow,
@@ -66,6 +67,7 @@ import {
   purgeSpool,
   purgeableDayFiles,
   readHookConfig,
+  readLegacyNames,
   readServerState,
   readSmallFile,
   readSpoolDays,
@@ -84,10 +86,9 @@ import {
   tildeHome,
   time,
   userConfigPath,
-  validateConfig,
   waitForBoard,
   writeSignInFile
-} from "./chunk-OHFJPS3R.js";
+} from "./chunk-KSQVLKAZ.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
@@ -190,12 +191,12 @@ var BRANCH_KEY = branchKeyRegExp(BRANCH_KEY_PATTERN);
 var GLOB_CHARS = /[*?{}[\]]/;
 var COMMENT = /\s+#.*$/;
 var ARGUMENTS = /\([^)]*\)?/g;
-var BUILD_NAMES = ["implementer", "builder", "developer", "coder", "engineer"];
-var BUILD_SUFFIXES = ["-dev"];
+var IMPLEMENT_NAMES = ["implementer", "builder", "developer", "coder", "engineer"];
+var IMPLEMENT_SUFFIXES = ["-dev"];
 var REVIEW_NAMES = ["reviewer", "qa", "tester"];
 var REVIEW_SUFFIXES = ["-reviewer", "-checker", "-analyzer", "-hunter", "-qa", "-tester"];
 var FILE_WRITING_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-var BUILD_TOOLS = /* @__PURE__ */ new Set([...FILE_WRITING_TOOLS, "Bash"]);
+var IMPLEMENT_TOOLS = /* @__PURE__ */ new Set([...FILE_WRITING_TOOLS, "Bash"]);
 var QUOTED = /^(["'])((?:(?!\1).)*)\1$/;
 var SKIPPED_LIST_LINE = /^\s*(?:#.*)?$/;
 var RECENT_BRANCHES = 50;
@@ -349,9 +350,9 @@ var readAgent = (file) => {
 };
 var endsAfter = (name, suffix) => name.endsWith(suffix) && name.length > suffix.length;
 var roleOf = (name) => {
-  const buildName = BUILD_NAMES.some((build) => name === build || endsAfter(name, `-${build}`));
-  if (buildName || BUILD_SUFFIXES.some((suffix2) => endsAfter(name, suffix2))) {
-    return { stage: "build" };
+  const implementName = IMPLEMENT_NAMES.some((stem) => name === stem || endsAfter(name, `-${stem}`));
+  if (implementName || IMPLEMENT_SUFFIXES.some((suffix2) => endsAfter(name, suffix2))) {
+    return { stage: "implement" };
   }
   if (REVIEW_NAMES.includes(name)) {
     return { stage: "review" };
@@ -364,12 +365,12 @@ var roleOf = (name) => {
 };
 var roleOfTools = (name, tools) => {
   const writes = tools?.some((tool) => FILE_WRITING_TOOLS.has(tool)) ?? false;
-  return writes && !DEFAULT_CONFIG.docs.roles.includes(name) ? { stage: "build" } : void 0;
+  return writes && !DEFAULT_CONFIG.docs.roles.includes(name) ? { stage: "implement" } : void 0;
 };
 var roleOfAgent = (agent) => {
   const named = roleOf(agent.name);
   if (named) {
-    const readOnly = named.stage === "build" && agent.tools !== void 0 && !agent.tools.some((tool) => BUILD_TOOLS.has(tool));
+    const readOnly = named.stage === "implement" && agent.tools !== void 0 && !agent.tools.some((tool) => IMPLEMENT_TOOLS.has(tool));
     return readOnly ? void 0 : named;
   }
   return roleOfTools(agent.name, agent.tools);
@@ -467,6 +468,7 @@ var proposalProblems = (text, root, repoFile) => {
     return { problems: ["the proposal on stdin must be a JSON object"], dropped: [] };
   }
   const proposal = parsed;
+  readLegacyNames(proposal);
   const dropped = repoFile ? repositoryOnly(proposal) : [];
   try {
     const problems = validateConfig(mergeOverDefaults(proposal), root);
@@ -599,7 +601,7 @@ var AREAS = ["implementers", "review", "verification", "tokens", "questions"];
 var AREA_NAMES = { implementers: "Implementers", review: "Review", verification: "Verification", tokens: "Token economy", questions: "Questions and waits" };
 var SIGNAL_NAMES = {
   "budget-first-stop": "budget at the first stop",
-  "second-implementer": "second build runs",
+  "second-implementer": "second implement runs",
   "second-round": "second review rounds",
   "fix-followups": "fix follow-ups",
   "quiet-reviewer": "quiet review roles",
@@ -624,10 +626,10 @@ var MAIN_ROLE = "main";
 var OVERHEAD_STANDING = 0.01;
 var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 var plainText = (text) => text.replace(CONTROL, "");
-var NO_BUILDS = "no subagent of a build-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
-var NO_BUDGET = "no tool-call budget is set for the roles of the build runs (budgets.roles.<role>.toolCalls)";
-var NO_FIRST_STOP = "no build run with a tool-call budget stopped";
-var NO_STREAM = "no build run was on a stream";
+var NO_IMPLEMENT_RUNS = "no subagent of an implement-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
+var NO_BUDGET = "no tool-call budget is set for the roles of the implement runs (budgets.roles.<role>.toolCalls)";
+var NO_FIRST_STOP = "no implement run with a tool-call budget stopped";
+var NO_STREAM = "no implement run was on a stream";
 var NO_REVIEWS = "no subagent of a review-stage role ran (roles.<role>.stage)";
 var NO_ROUND = "no review-stage role reviewed a branch";
 var NO_BLOCK = "no review-stage agent wrote a report block";
@@ -636,7 +638,7 @@ var NO_REQUESTS = "no requests were recorded (usage facts come from the transcri
 var NO_LIMIT = "no context limit is known for the main thread's model (budgets.contextLimits)";
 var NO_OVERHEAD = "no session recorded the Nurselog overhead (its hook or board predates the count)";
 var NOT_STORED = "the session aggregates lack it (an older board wrote them)";
-var BUILD_RUN = ["build run", "build runs"];
+var IMPLEMENT_RUN = ["implement run", "implement runs"];
 var STREAM = ["stream", "streams"];
 var BRANCH = ["branch", "branches"];
 var RUN = ["run", "runs"];
@@ -649,7 +651,7 @@ var entriesOf = (value) => Array.isArray(value) ? value.filter(isRecord) : void 
 var numberOf = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
 var timeOf = (value) => typeof value === "string" ? time(value) : Number.NaN;
 var isNumber = (value) => value !== null;
-var buildRun = (entry) => ({
+var implementRun = (entry) => ({
   callsAtFirstStop: numberOf(entry.callsAtFirstStop),
   callLimit: numberOf(entry.callLimit),
   commands: numberOf(entry.commands),
@@ -689,7 +691,7 @@ var readSession = (aggregate, finished) => {
   return {
     id: aggregate.id,
     finished,
-    builds: entriesOf(aggregate.builds)?.map(buildRun),
+    builds: entriesOf(aggregate.builds)?.map(implementRun),
     reviews: reviews === void 0 ? void 0 : reviewRuns(reviews),
     rows: entriesOf(aggregate.rows)?.map(rowNumbers),
     roles: roles === void 0 ? void 0 : roleNumbers(roles),
@@ -786,7 +788,7 @@ var budgetFirstStop = (sides) => {
   const builds = buildsOf(sides.window);
   const window = kOfN(budgetRuns(sides.window), atBudget);
   if (builds.length === 0) {
-    return { lacks: NO_BUILDS };
+    return { lacks: NO_IMPLEMENT_RUNS };
   }
   if (window.n === 0) {
     const limited = builds.some((run) => run.callLimit !== null && run.callLimit > 0);
@@ -798,9 +800,9 @@ var budgetFirstStop = (sides) => {
   const standing = ruled && k * 100 >= STANDING_PERCENT * window.n;
   const flag = standing ? "standing" : comparison(rateFlag(window, baseline));
   const rule = ruled ? `; the rule flags ${STANDING_PERCENT} % or more` : "";
-  const comparedTo = before(sides, baseline, BUILD_RUN, kOfNText);
+  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, kOfNText);
   const share = `${Math.floor(k * 100 / window.n)} %${rule}; ${comparedTo}`;
-  const body = `${k} of the last ${count(window.n, BUILD_RUN)} reached their tool-call budget by their first stop (${share})`;
+  const body = `${k} of the last ${count(window.n, IMPLEMENT_RUN)} reached their tool-call budget by their first stop (${share})`;
   return { lines: [{ flag, window, baseline, body }] };
 };
 var ownedRows = (sessions) => sessions.flatMap((session) => (session.rows ?? []).filter((row) => row.owned));
@@ -812,11 +814,11 @@ var ownerLacks = (sessions) => {
 var secondImplementer = (sides) => {
   if (streamRuns(sides.window).length === 0) {
     if (buildsOf(sides.window).length === 0) {
-      return { lacks: NO_BUILDS };
+      return { lacks: NO_IMPLEMENT_RUNS };
     }
     return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_STREAM };
   }
-  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second build run")] };
+  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second implement run")] };
 };
 var reviewsOf = (sessions) => sessions.flatMap((session) => session.reviews ?? []);
 var blockRuns = (sessions) => reviewsOf(sessions).filter((run) => run.fixItems !== null);
@@ -880,7 +882,7 @@ var commandLacks = (sides) => {
   if (verifiedRuns(sides.window).length > 0) {
     return void 0;
   }
-  return buildsOf(sides.window).length === 0 ? NO_BUILDS : NO_COMMAND;
+  return buildsOf(sides.window).length === 0 ? NO_IMPLEMENT_RUNS : NO_COMMAND;
 };
 var verifyCommands = (sides) => {
   const lacks = commandLacks(sides);
@@ -890,8 +892,8 @@ var verifyCommands = (sides) => {
   const window = medianOf(commandCounts(sides.window));
   const baseline = onBaseline(sides, (sessions) => medianOf(commandCounts(sessions)));
   const commands = count(window.value ?? 0, ["verification command", "verification commands"]);
-  const comparedTo = before(sides, baseline, BUILD_RUN, (evidence) => String(evidence.value ?? 0));
-  const body = `build runs ran a median of ${commands} over ${count(window.n, RUN)} (${comparedTo})`;
+  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, (evidence) => String(evidence.value ?? 0));
+  const body = `implement runs ran a median of ${commands} over ${count(window.n, RUN)} (${comparedTo})`;
   return { lines: [{ window, baseline, body }] };
 };
 var failedUnits = (sessions) => verifiedRuns(sessions).filter((run) => run.failed !== null);
@@ -903,7 +905,7 @@ var failedRuns = (sides) => {
   if (failedUnits(sides.window).length === 0) {
     return { lacks: NOT_STORED };
   }
-  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, BUILD_RUN, "had a failed full-package command")] };
+  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENT_RUN, "had a failed full-package command")] };
 };
 var outputRoles = (sessions, role) => {
   const entries = sessions.flatMap((session) => session.roles ?? []);

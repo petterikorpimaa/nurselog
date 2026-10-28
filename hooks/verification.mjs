@@ -1,6 +1,6 @@
 // The verification defaults and the rule of what a Bash `tool.post` keeps of its stdout (design sections 2.2, 2.3 and
 // 7), shared by the hook (`hooks/lib.mjs`, which keeps it), the mapping (`src/model/hook-payload.ts`, which cuts it
-// from a raw payload) and the config defaults (`src/config.ts`, `DEFAULT_CONFIG.verification`). Plain ESM without
+// from a raw payload) and the config defaults (`src/config-core.ts`, `DEFAULT_CONFIG.verification`). Plain ESM without
 // imports, so it runs anywhere without a build and stays safe in the board's browser bundle (`src/model/paths.ts`
 // re-exports `stripPrefix`); `verification.d.mts` types it for TypeScript.
 

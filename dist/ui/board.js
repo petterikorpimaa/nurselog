@@ -83,19 +83,19 @@ var createClock = () => {
   };
 };
 var elapsedMs = (run, now) => {
-  const start2 = parseTime(run.startedAt);
-  if (start2 === void 0) {
+  const start = parseTime(run.startedAt);
+  if (start === void 0) {
     return 0;
   }
   const end = parseTime(run.pr?.mergedAt) ?? parseTime(run.endedAt) ?? now;
-  return Math.max(0, end - start2);
+  return Math.max(0, end - start);
 };
 var sessionElapsedMs = (session, now) => {
-  const start2 = parseTime(session.startedAt);
-  if (start2 === void 0) {
+  const start = parseTime(session.startedAt);
+  if (start === void 0) {
     return 0;
   }
-  return Math.max(0, (parseTime(session.endedAt) ?? now) - start2);
+  return Math.max(0, (parseTime(session.endedAt) ?? now) - start);
 };
 
 // src/model/display-state.ts
@@ -669,7 +669,7 @@ var FALLBACK_CONFIG = {
 var cssName = (id) => id.replace(/[^A-Za-z0-9_-]/g, "-");
 var packageVar = (id) => `--pkg-${cssName(id)}`;
 var stageVar = (key) => `--st-${key}`;
-var createContext = (config, now, root = document.documentElement) => {
+var createContext = (config, now, source, root = document.documentElement) => {
   const colors = new Map(config.packages.map((pkg) => [pkg.id, pkg.color]));
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const vars = {};
@@ -690,7 +690,8 @@ var createContext = (config, now, root = document.documentElement) => {
     runs: {},
     sessions: {},
     typical: {},
-    repositoryId: ""
+    repositoryId: "",
+    source
   };
 };
 
@@ -729,10 +730,10 @@ var enterStarts = (fresh, placed, useFrom) => {
     const origin = useFrom && item2.from ? shifted(positionOf(item2.from.key), item2.from) ?? fallbackOf(item2) : void 0;
     const attachment = attachmentOf(item2);
     const attachedAt = attachment ? shifted(positionOf(attachment.key), attachment) : void 0;
-    const start2 = origin ?? targetOf(item2) ?? attachedAt ?? [0, 0];
+    const start = origin ?? targetOf(item2) ?? attachedAt ?? [0, 0];
     resolving.delete(item2.key);
-    starts.set(item2.key, start2);
-    return start2;
+    starts.set(item2.key, start);
+    return start;
   }
   for (const item2 of fresh) {
     startOf2(item2);
@@ -844,17 +845,17 @@ var tweenShare = (elapsed2) => easeCurve(Math.min(1, Math.max(0, elapsed2 / TWEE
 var tweenPlacements = (placements, starts, share2) => {
   const along = (from, to) => share2 === 1 || from === void 0 ? to : from + (to - from) * share2;
   for (const [key, placement] of placements) {
-    const start2 = starts.get(key);
-    placement.opacity = along(start2?.opacity, placement.alive ? 1 : 0);
+    const start = starts.get(key);
+    placement.opacity = along(start?.opacity, placement.alive ? 1 : 0);
     const goal = targetOf(placement.item);
     if (!goal) {
       continue;
     }
-    placement.x = along(start2?.x, goal[0]);
-    placement.y = along(start2?.y, goal[1]);
+    placement.x = along(start?.x, goal[0]);
+    placement.y = along(start?.y, goal[1]);
     if (placement.item.kind === "bar") {
-      placement.y0 = along(start2?.y0, placement.item.y0);
-      placement.y1 = along(start2?.y1, placement.item.y1);
+      placement.y0 = along(start?.y0, placement.item.y0);
+      placement.y1 = along(start?.y1, placement.item.y1);
       placement.y = (placement.y0 + placement.y1) / 2;
     }
   }
@@ -887,7 +888,7 @@ var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|tes
 var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
 
 // src/model/progress.ts
-var PHASE_SHARES = { build: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
+var PHASE_SHARES = { implement: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
 
 // src/model/retention.ts
 var PRUNE_EVERY_MS = 60 * 1e3;
@@ -990,7 +991,7 @@ var focusScrollLeft = (layout, host) => {
 };
 var STAGE_LABELS = {
   plan: "Plan",
-  build: "Build",
+  implement: "Implement",
   join: "Join",
   review: "Review",
   fix: "Fix",
@@ -1140,11 +1141,11 @@ var graphLayout = (run, options) => {
   };
   const laneEnds = run.reviewers.map((reviewer) => laneOut(reviewer.id));
   const reviewWidth = Math.max(200, Math.ceil(90 + Math.max(0, ...laneEnds)));
-  const buildWidth2 = maxDepth === 0 ? 176 : 134 + 118 * maxDepth;
+  const implementWidth2 = maxDepth === 0 ? 176 : 134 + 118 * maxDepth;
   const reached = (id) => run.stages[id].startedAt !== void 0;
   const shown = {
     plan: reached("plan"),
-    build: reached("build") || streams.length > 0,
+    implement: reached("implement") || streams.length > 0,
     join: reached("join"),
     review: reached("review") || run.reviewers.length > 0,
     fix: fixKeys.length > 0,
@@ -1153,7 +1154,7 @@ var graphLayout = (run, options) => {
     promote: reached("promote"),
     docs: reached("docs")
   };
-  const natural = { plan: 84, build: buildWidth2, join: 70, review: reviewWidth, fix: 128, pr: 84, merge: 84, promote: 84, docs: 84 };
+  const natural = { plan: 84, implement: implementWidth2, join: 70, review: reviewWidth, fix: 128, pr: 84, merge: 84, promote: 84, docs: 84 };
   const ids = STAGE_IDS.filter((id) => shown[id]);
   const columns = [];
   const column = {};
@@ -1187,7 +1188,7 @@ var graphLayout = (run, options) => {
     switch (id) {
       case "plan":
         return [{ key: "plan", from: "plan", at: { key: keys.plan, dx: 11 }, color: "shared", done: run.stages.plan.state === "done" }];
-      case "build":
+      case "implement":
         return order.map((stream) => {
           const lane = keys.stream(stream.id);
           const color = `package:${stream.package}`;
@@ -1226,22 +1227,22 @@ var graphLayout = (run, options) => {
     add({ kind: "node", key: keys.plan, at, state: run.stages.plan.state, color: "shared", mark: planMark, radius: NODE_RADIUS, ...slide2("plan", at) });
   }
   const laneYs = [];
-  const build = column.build;
-  if (build) {
-    const buildStartedAt = run.stages.build.startedAt;
-    const buildStart = build.start;
+  const implement = column.implement;
+  if (implement) {
+    const implementStartedAt = run.stages.implement.startedAt;
+    const implementStart = implement.start;
     order.forEach((stream, index) => {
       const y = cy + (index - (order.length - 1) / 2) * STREAM_LANE;
       laneYs.push(y);
       const depth = depths.get(stream.id) ?? 0;
       const parent = parents.get(stream.id);
       const color = `package:${stream.package}`;
-      const nodeX = maxDepth === 0 ? buildStart + 128 : buildStart + 96 + 118 * depth;
+      const nodeX = maxDepth === 0 ? implementStart + 128 : implementStart + 96 + 118 * depth;
       let pillX = nodeX - 54;
       if (maxDepth === 0) {
-        pillX = buildStart + 58;
+        pillX = implementStart + 58;
       } else if (depth === 0) {
-        pillX = buildStart + 50;
+        pillX = implementStart + 50;
       }
       const half = pillWidth(stream.package) / 2;
       let origin;
@@ -1259,8 +1260,8 @@ var graphLayout = (run, options) => {
       const nodeState = rerun ? firstAgent?.state ?? "handed" : stream.state;
       const nodeModel = rerun ? firstAgent?.model ?? stream.model : stream.model;
       const nodeMark = markOf(nodeModel, options);
-      const pillFrom = origin ? { from: origin } : slide2("build", pillAt);
-      const nodeFrom = origin ? { from: origin } : slide2("build", nodeAt);
+      const pillFrom = origin ? { from: origin } : slide2("implement", pillAt);
+      const nodeFrom = origin ? { from: origin } : slide2("implement", nodeAt);
       const pillSkipped = stream.state === "skipped" ? { skipped: true } : {};
       add({ kind: "pill", key: pill, at: pillAt, text: stream.package, color, ...pillSkipped, ...pillFrom });
       const latest2 = stream.agentIds.at(-1);
@@ -1277,10 +1278,10 @@ var graphLayout = (run, options) => {
       }
       const pillState = flowInto(stream.state === "handed" ? "running" : stream.state, runStale);
       add({ kind: "edge", key: keys.streamPillEdge(stream.id), a: { key: pill, dx: half }, b: { key: node, dx: -11 }, shape: "line", state: pillState, color });
-      const addedDuringBuild = !stream.planned && buildStartedAt !== void 0 && stream.addedAt > buildStartedAt;
-      if (addedDuringBuild) {
+      const addedDuringImplement = !stream.planned && implementStartedAt !== void 0 && stream.addedAt > implementStartedAt;
+      if (addedDuringImplement) {
         const at = { key: pill, dx: -half, dy: -12 };
-        add({ kind: "text", key: `text:added:${stream.id}`, at, text: "+ added during build", tone: "added", anchor: "start" });
+        add({ kind: "text", key: `text:added:${stream.id}`, at, text: "+ added during Implement", tone: "added", anchor: "start" });
       }
     });
   }
@@ -1306,7 +1307,7 @@ var graphLayout = (run, options) => {
     }
     const joinAtCenter = { xKey: keys.joinBar, dx: -4, yKey: "anchor:center" };
     const into = (exit) => exit.lane ? { xKey: keys.joinBar, dx: -4, yKey: exit.lane } : joinAtCenter;
-    feed("join", into, (exit) => exit.done || exit.from !== "build" ? "done" : "pending");
+    feed("join", into, (exit) => exit.done || exit.from !== "implement" ? "done" : "pending");
   }
   const review = column.review;
   const dotX = (review?.start ?? 0) + 60;
@@ -1357,11 +1358,11 @@ var graphLayout = (run, options) => {
         const above = reviewerIndex <= (run.reviewers.length - 1) / 2;
         const middle = reviewerIndex > 0 && reviewerIndex < run.reviewers.length - 1;
         const side = above ? -1 : 1;
-        const start2 = { key: keys.fix(key), dy: 11 * side };
+        const start = { key: keys.fix(key), dy: 11 * side };
         const landing = { key: reviewerNode, dx: (labelEnds.get(fix.reviewerId) ?? 0) - 4, dy: 8 * side };
         const shape = above ? "arc" : "arc-below";
         const lift = middle ? { lift: MIDDLE_LOOP_LIFT } : {};
-        add({ kind: "edge", key: keys.fixLoop(key), a: start2, b: landing, shape, ...lift, state: loop, color: "warm" });
+        add({ kind: "edge", key: keys.fixLoop(key), a: start, b: landing, shape, ...lift, state: loop, color: "warm" });
       }
     });
   }
@@ -1415,7 +1416,7 @@ var graphLayout = (run, options) => {
     let labelX = entry.center;
     if (id === "plan") {
       labelX = planX;
-    } else if (id === "build") {
+    } else if (id === "implement") {
       labelX = entry.center + 22;
     } else if (id === "review") {
       labelX = dotX + 20;
@@ -1564,7 +1565,7 @@ var xAt = (axis, at) => {
 };
 var stageColor = (stage) => {
   if (stage === "join") {
-    return "build";
+    return "implement";
   }
   if (stage === "merge") {
     return "pr";
@@ -2412,6 +2413,7 @@ var DOT_MS = 850;
 var FAN_DELAY = 500;
 var FAN_STAGGER = 120;
 var POP_MS2 = 550;
+var SHEEN_MS = 1400;
 var NONE = { pops: [], dots: [], sweep: false };
 var isActive2 = (state) => state === "running" || state === "waiting";
 var hasLeftPending = (state) => state !== "pending" && state !== "skipped";
@@ -2529,12 +2531,12 @@ var dotsOf = (before, current) => {
   const drawn = queue.filter((dot) => dot.edges.every((edge) => present.has(edge)));
   const dots = drawn.map((dot, index) => ({ ...dot, delay: index * DOT_STAGGER }));
   if (fan.length > 0) {
-    const start2 = drawn.length * DOT_STAGGER;
+    const start = drawn.length * DOT_STAGGER;
     for (const edge of (layout.feeds.review ?? []).filter((feed) => !feed.skipped)) {
-      dots.push({ edges: [edge.key], color: edge.color, delay: start2 });
+      dots.push({ edges: [edge.key], color: edge.color, delay: start });
     }
     fan.forEach((id, index) => {
-      const delay = start2 + FAN_DELAY + index * FAN_STAGGER;
+      const delay = start + FAN_DELAY + index * FAN_STAGGER;
       dots.push({ edges: [keys.reviewerIn(id)], color: "review", delay, to: keys.reviewer(id) });
     });
   }
@@ -2571,10 +2573,10 @@ var wrapPieces = (a, b, drop, reach = 0, turn = TURN) => {
   if (bx >= turnX) {
     return curvePieces(a, b);
   }
-  const start2 = [turnX, ay];
-  const lead = turnX > ax ? [[a, start2]] : [];
+  const start = [turnX, ay];
+  const lead = turnX > ax ? [[a, start]] : [];
   const level = ay + drop;
-  const down = [start2, [turnX + TURN, ay], [turnX + TURN, level], [turnX, level]];
+  const down = [start, [turnX + TURN, ay], [turnX + TURN, level], [turnX, level]];
   if (Math.abs(by - level) <= 0.5) {
     return [...lead, down, [[turnX, level], b]];
   }
@@ -2605,19 +2607,19 @@ var levelPieces = (a, b, drop, reach, turn = TURN, step = 0) => {
   const turnX = ax + Math.max(0, drop === 0 ? Math.min(reach, bx - ax) : reach);
   const lead = leadPieces(a, turnX, step);
   const ay = startY + step;
-  const start2 = [turnX, ay];
+  const start = [turnX, ay];
   const level = startY + drop;
   const rise = turn > TURN ? Math.min(TURN, (bx - turnX) / 2 - turn) : TURN;
   if (rise >= TURN / 2 && bx - turnX >= 2 * rise + 2 * turn) {
-    const out = [start2, [turnX + rise, ay], [turnX + rise, level], [turnX + 2 * rise, level]];
+    const out = [start, [turnX + rise, ay], [turnX + rise, level], [turnX + 2 * rise, level]];
     const run = [[turnX + 2 * rise, level], [bx - 2 * turn, level]];
     const into2 = [[bx - 2 * turn, level], [bx - turn, level], [bx - turn, by], b];
     return [...lead, out, run, into2];
   }
   if (bx >= turnX) {
-    return [...lead, ...curvePieces(start2, b)];
+    return [...lead, ...curvePieces(start, b)];
   }
-  const down = [start2, [turnX + TURN, ay], [turnX + TURN, level], [turnX, level]];
+  const down = [start, [turnX + TURN, ay], [turnX + TURN, level], [turnX, level]];
   const back = [[turnX, level], [bx, level]];
   const into = [[bx, level], [bx - turn, level], [bx - turn, by], b];
   return [...lead, down, back, into];
@@ -2818,7 +2820,7 @@ var bubbleItems = (targets) => [...targets].map(([target, { at, questions }]) =>
 
 // src/ui/graph/progress-ring.ts
 var RING_PARTS = 8;
-var PHASE_NAMES = { build: ["read", "edit", "verify"], pr: ["push", "open the PR", "finish"] };
+var PHASE_NAMES = { implement: ["read", "edit", "verify"], pr: ["push", "open the PR", "finish"] };
 var LONGEST_RUNS = 9;
 var RING_GAP = 3;
 var TICK_FROM = 4.5;
@@ -2829,7 +2831,7 @@ var LIGHT_MIN_SECONDS = 1.4;
 var LIGHT_MAX_SECONDS = 5;
 var RING_IN = [{ opacity: 0 }, { opacity: 1 }];
 var RING_IN_MS = 550;
-var isPhase = (kind) => kind === "build" || kind === "pr";
+var isPhase = (kind) => kind === "implement" || kind === "pr";
 var isCount = (value2) => typeof value2 === "number" && Number.isFinite(value2) && value2 >= 0;
 var partsOf = (progress) => {
   const flags = progress.parts;
@@ -2933,10 +2935,10 @@ var partArcs = (parts) => {
     return [{ from: 0, to: 1 }];
   }
   const arcs = [];
-  let start2 = 0;
+  let start = 0;
   for (const part of parts) {
-    arcs.push({ from: start2 + PART_GAP / 2, to: start2 + part.share - PART_GAP / 2 });
-    start2 += part.share;
+    arcs.push({ from: start + PART_GAP / 2, to: start + part.share - PART_GAP / 2 });
+    start += part.share;
   }
   return arcs;
 };
@@ -3071,7 +3073,7 @@ var AGENT_STEP = 28;
 var PLAN_REACH = 64;
 var PLAN_RIGHT = 56;
 var REVIEW_INSET = 34;
-var NATURAL = { plan: PLAN_REACH + PLAN_RIGHT, build: 96, join: 56, review: 90, fix: 96, pr: 84, merge: 84, promote: 84, docs: 84 };
+var NATURAL = { plan: PLAN_REACH + PLAN_RIGHT, implement: 96, join: 56, review: 90, fix: 96, pr: 84, merge: 84, promote: 84, docs: 84 };
 var GATE_BUBBLE = { dx: 21, dy: -8 };
 var LINK_TEXT = 40;
 var CONTINUED_DX = 14;
@@ -3245,6 +3247,13 @@ var flowOf = (node) => {
   return isActive3(node.state) ? "running" : "done";
 };
 var textWidth = (text2) => text2.length * CHAR2;
+var fixCountOf = (session, reviewer) => {
+  if (reviewer.state !== "changes") {
+    return {};
+  }
+  const count = session.followups.filter((item2) => item2.type === "fix" && item2.origin.agentId === reviewer.agentId).length;
+  return count > 0 ? { count } : {};
+};
 var PILL_LABEL_MAX = 40;
 var pillText = (row2) => row2.branchLabel === void 0 ? shortBranch(row2.branch) : clip2(labelText(row2.branchLabel), PILL_LABEL_MAX);
 var pillTip = (row2) => row2.branchLabel === void 0 ? {} : { tip: `${labelText(row2.branchLabel)}
@@ -3284,7 +3293,7 @@ var mergeText = (session, row2) => {
   }
   return `merged ${shortDuration(Date.parse(merge.at) - Date.parse(session.endedAt))} later`;
 };
-var ROW_STAGE_COLUMN = { build: "build", join: "join", review: "review", fix: "fix", pr: "pr", merge: "merge" };
+var ROW_STAGE_COLUMN = { implement: "implement", join: "join", review: "review", fix: "fix", pr: "pr", merge: "merge" };
 var reviewerDy = (row2, reOnly, index) => {
   return reOnly ? -RE_REVIEW_ROOM - index * REVIEWER_PITCH : (index - (row2.reviewers.length - 1) / 2) * REVIEWER_PITCH;
 };
@@ -3332,7 +3341,7 @@ var fromTextOf = (session, row2) => {
   return void 0;
 };
 var runStep = (runs) => runs > 2 ? LABELLED_RUN_STEP : RUN_STEP;
-var buildWidth = (plan) => {
+var implementWidth = (plan) => {
   let nodes = PILL_INSET + plan.pillW + RUN_GAP + NODE_R + 16;
   if (plan.multi) {
     const depth = Math.max(0, ...plan.depths.values());
@@ -3393,7 +3402,7 @@ var placeSession = (session, options, room) => {
   const planAgents = groups2.filter((group) => !group.folded).flatMap((group) => group.agents);
   const shown = {
     plan: true,
-    build: rows.length > 0,
+    implement: rows.length > 0,
     join: rows.some((row2) => row2.join !== void 0),
     review: rows.some((row2) => row2.reviewers.length > 0),
     fix: rows.some((row2) => row2.fixes.length > 0),
@@ -3543,22 +3552,22 @@ var placeSession = (session, options, room) => {
     ...NATURAL,
     promote: NATURAL.promote + (gateOnPromote ? GATE_ROOM : 0),
     plan: planReach + PLAN_RIGHT,
-    build: Math.max(NATURAL.build, ...plans.map(buildWidth)),
+    implement: Math.max(NATURAL.implement, ...plans.map(implementWidth)),
     review: Math.ceil(NATURAL.review + Math.max(0, ...reviewLabels)),
     fix: Math.ceil(fixLeft + fixRight),
     merge: Math.ceil(Math.max(NATURAL.merge, ...mergeLabels.map((width2) => width2 + 24)))
   };
   const inLineB = (id) => wrap && LINE_B.includes(id);
   const setA = buildColumns({ ...shown, ...Object.fromEntries(LINE_B.map((id) => [id, shown[id] && !wrap])) }, natural, X0, room.a);
-  const bStart = setA.byId.build?.start ?? setA.end;
-  const shownB = { ...shown, plan: false, build: false, join: false, review: false };
+  const bStart = setA.byId.implement?.start ?? setA.end;
+  const shownB = { ...shown, plan: false, implement: false, join: false, review: false };
   const setB = wrap ? buildColumns(shownB, natural, bStart, room.b) : { ids: [], byId: {}, columns: [], end: bStart };
   const lacking = { a: {}, b: {} };
   let lacks = false;
   const setOf = (id) => inLineB(id) ? setB : setA;
   const column = (id) => setOf(id).byId[id];
   const slide2 = (id, at) => slideFrom(setOf(id), id, at, midY);
-  const lineBAfter = setA.byId.build ? "build" : setA.ids[setA.ids.length - 1];
+  const lineBAfter = setA.byId.implement ? "implement" : setA.ids[setA.ids.length - 1];
   items.push(...columnAnchors(setA, natural, midY), ...columnAnchors(setB, natural, midY, lineBAfter));
   let extent = Math.max(setA.end, setB.end);
   const planColumn = setA.byId.plan;
@@ -3647,13 +3656,13 @@ ${FOLD_HINT}` : label };
     const { row: row2, color, pill, pillW, y } = plan;
     const branch = row2.branch;
     const base = { branch, pipeline: row2.pipeline };
-    const build = setA.byId.build;
-    const pl = build.start + PILL_INSET;
+    const implement = setA.byId.implement;
+    const pl = implement.start + PILL_INSET;
     const pillKey = sessionKeys.pill(branch);
     let endX = pl + pillW;
     let endB = 0;
     let endY = y;
-    let endColumnA = "build";
+    let endColumnA = "implement";
     let endColumnB = "fix";
     const reach = (id, x) => {
       if (inLineB(id)) {
@@ -3689,8 +3698,8 @@ ${FOLD_HINT}` : label };
     const pillExit = { key: pillKey, dx: pillW / 2 };
     const laneExits = [];
     const laneYs = [];
-    const runChain = (stream, start2, startKey, x0, laneY, laneColor) => {
-      let previous = start2;
+    const runChain = (stream, start, startKey, x0, laneY, laneColor) => {
+      let previous = start;
       let previousKey = startKey;
       stream.runs.forEach((run, index) => {
         const key = sessionKeys.agent(run.agentId);
@@ -3806,7 +3815,8 @@ ${FOLD_HINT}` : label };
         const enter = slide2("review", { x: rx - 20, y });
         const firstRound = reviewer.afterFix === void 0 ? { fan: branch } : {};
         const dot = { edges: [`edge:agent:${reviewer.agentId}`], when: "start", color: "review", out: [`edge:agent:${reviewer.agentId}>review`], ...firstRound };
-        add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...nodeBase, ...enter, dot });
+        const fixCount = fixCountOf(session, reviewer);
+        add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...fixCount, ...nodeBase, ...enter, dot });
         const tone2 = isEnded(reviewer.state) ? "reviewer-dim" : "reviewer";
         add({ kind: "text", key: `text:agent:${reviewer.agentId}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
         labelledRight.add(key);
@@ -3978,9 +3988,9 @@ ${FOLD_HINT}` : label };
       }
     }
   }
-  const pillsLeft = (setA.byId.build?.start ?? planColumn.end) + PILL_INSET;
-  const summaryFloor = setA.byId.review?.start ?? setA.byId.join?.end ?? setA.byId.build?.end ?? 0;
-  const summaryMin = Math.max(summaryFloor, pillsLeft - PILL_INSET + NATURAL.build + NATURAL.join);
+  const pillsLeft = (setA.byId.implement?.start ?? planColumn.end) + PILL_INSET;
+  const summaryFloor = setA.byId.review?.start ?? setA.byId.join?.end ?? setA.byId.implement?.end ?? 0;
+  const summaryMin = Math.max(summaryFloor, pillsLeft - PILL_INSET + NATURAL.implement + NATURAL.join);
   const checkColumn = wrap ? void 0 : setA.byId.merge;
   const promoteA = wrap ? void 0 : setA.byId.promote;
   const promoteLeft = { key: sessionKeys.promote, dx: -NODE_R };
@@ -4346,11 +4356,19 @@ var letterText = (text2, y) => {
   return element;
 };
 var check = (r) => icon(`M${round3(-r * 0.38)} 0.3 l${round3(r * 0.27)} ${round3(r * 0.27)} l${round3(r * 0.5)} ${round3(-r * 0.55)}`);
-var cross = (r) => {
-  const a = round3(r * 0.32);
-  return icon(`M-${a} -${a} L${a} ${a} M${a} -${a} L-${a} ${a}`);
+var WRENCH = "M2.6 -5.2a3 3 0 0 0 -3.4 4L-5 3l2 2 4.2 -4.2a3 3 0 0 0 4 -3.4l-1.8 1.8 -1.6 -.4 -.4 -1.6z";
+var wrench = (r) => {
+  const d = WRENCH.replace(/-?\d*\.?\d+/g, (value2) => round3(Number(value2) * r / 12));
+  return svgEl("path", { class: "node-icon node-wrench", d });
 };
-var drawNode = (group, state, mark, radius, rings = RUN_RINGS) => {
+var countText = (count) => {
+  const text2 = String(count);
+  const long = text2.length >= 3;
+  const element = svgEl("text", { class: long ? "node-count long" : "node-count", y: long ? 2.9 : 3.6 });
+  element.textContent = text2;
+  return element;
+};
+var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count) => {
   const core = svgEl("g", { class: "node-core" });
   core.append(svgEl("circle", { class: "node-outline", r: radius }));
   const parts = [];
@@ -4365,7 +4383,7 @@ var drawNode = (group, state, mark, radius, rings = RUN_RINGS) => {
   } else if (state === "done" || state === "approved") {
     core.append(check(radius));
   } else if (state === "changes") {
-    core.append(cross(radius));
+    core.append(count !== void 0 && count > 0 ? countText(count) : wrench(radius));
   } else if (state === "handed") {
     const inner = round3(radius - 1.6);
     core.append(svgEl("path", { class: "node-half", d: `M0 -${inner} A${inner} ${inner} 0 0 0 0 ${inner} Z` }));
@@ -4399,6 +4417,33 @@ var drawSheen = (core, radius, state) => {
   core.insertBefore(sheen, core.children[1] ?? null);
   return { sheen, band };
 };
+var rollCount = 0;
+var drawRoll = (core, radius) => {
+  const count = [...core.children].find((child) => child.classList.contains("node-count"));
+  if (!count) {
+    return void 0;
+  }
+  rollCount += 1;
+  const id = `graph-roll-${rollCount}`;
+  const clip3 = svgEl("clipPath", { id });
+  clip3.append(svgEl("circle", { r: round3(radius - 0.8) }));
+  const roll = svgEl("g", { class: "node-roll", "clip-path": `url(#${id})` });
+  core.insertBefore(clip3, count);
+  core.insertBefore(roll, count);
+  const glyph = wrench(radius);
+  roll.append(glyph, count);
+  count.style.opacity = "0";
+  const settle = () => {
+    const parent = roll.parentNode;
+    if (parent) {
+      count.style.opacity = "";
+      parent.insertBefore(count, roll);
+      roll.remove();
+      clip3.remove();
+    }
+  };
+  return { wrench: glyph, count, distance: Math.round(radius * 14) / 10, settle };
+};
 
 // src/ui/graph/scene.ts
 var TRAIL = [
@@ -4415,8 +4460,8 @@ var SWEEP = [{ transform: "none" }, { transform: "scale(1.35)", offset: 0.4 }, {
 var SWEEP_STEP_MS = 55;
 var ORBIT_IN = [{ opacity: 0 }, { opacity: 1 }];
 var SHEEN = [{ transform: "translateX(-16px)" }, { transform: "translateX(16px)" }];
-var SHEEN_MS = 1400;
 var SHEEN_EASING = "cubic-bezier(.5,0,.3,1)";
+var ROLL_MS = 450;
 var DIM_MS = 200;
 var PIXEL_EPSILON = 1e-6;
 var HIT_REACH = 5;
@@ -4442,7 +4487,7 @@ var textElement = (className, text2, attributes = {}) => {
 var signatureOf = (item2) => {
   switch (item2.kind) {
     case "node":
-      return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}`;
+      return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}|${item2.count ?? ""}`;
     case "pill":
       return `${item2.text}|${item2.color}|${item2.compact === true}|${item2.skipped === true}|${item2.tip ?? ""}`;
     case "rect":
@@ -4617,7 +4662,7 @@ var createScene = (host, context, options = {}) => {
         const classes = ["node", item2.state, ...item2.stale ? ["stale"] : [], ...item2.idle ? ["idle"] : []];
         element.setAttribute("class", classes.join(" "));
         element.style.setProperty("--c", colorValue(item2.color, context));
-        entry.core = drawNode(element, item2.state, item2.mark, item2.radius, session ? sessionRings(item2) : RUN_RINGS);
+        entry.core = drawNode(element, item2.state, item2.mark, item2.radius, session ? sessionRings(item2) : RUN_RINGS, item2.count);
         entry.orbit = [...element.children].find((child) => child.classList.contains("node-orbit"));
         entry.title = void 0;
         if (session) {
@@ -4751,7 +4796,7 @@ var createScene = (host, context, options = {}) => {
     const share2 = tweenShare(elapsed2);
     tweenPlacements(entries, tween.starts, share2);
     const from = tween.view;
-    const along = (start2, goal) => share2 === 1 ? goal : start2 + (goal - start2) * share2;
+    const along = (start, goal) => share2 === 1 ? goal : start + (goal - start) * share2;
     view = { w: along(from.w, viewTarget.w), h: along(from.h, viewTarget.h), pw: along(from.pw, viewTarget.pw) };
     return elapsed2 >= TWEEN_MS;
   };
@@ -4896,9 +4941,9 @@ var createScene = (host, context, options = {}) => {
         view = { ...viewTarget };
         showView(view);
       }
-      const create = (start2) => {
-        const entry = { ...start2, element: createElement(start2.item, start2.opacity), signature: "", geometry: "", shownOpacity: String(start2.opacity) };
-        if (start2.item.kind === "bubble") {
+      const create = (start) => {
+        const entry = { ...start, element: createElement(start.item, start.opacity), signature: "", geometry: "", shownOpacity: String(start.opacity) };
+        if (start.item.kind === "bubble") {
           listen(entry);
         }
         return entry;
@@ -4951,6 +4996,31 @@ var createScene = (host, context, options = {}) => {
         const crossing = drawn.band.animate(SHEEN, { duration: SHEEN_MS, delay: sheen.delay, easing: SHEEN_EASING, fill: "both" });
         crossing.onfinish = () => drawn.sheen.remove();
         crossing.oncancel = () => drawn.sheen.remove();
+      }
+      for (const roll of effects.rolls ?? []) {
+        const entry = entries.get(roll.key);
+        const drawn = entry?.item.kind === "node" && entry.core ? drawRoll(entry.core, entry.item.radius) : void 0;
+        if (!drawn) {
+          continue;
+        }
+        const timing = { duration: ROLL_MS, delay: roll.delay, easing: SHEEN_EASING };
+        const out = drawn.wrench.animate([{ transform: "none" }, { transform: `translateY(-${drawn.distance}px)` }], { ...timing, fill: "both" });
+        const rise = [{ transform: `translateY(${drawn.distance}px)`, opacity: 1 }, { transform: "none", opacity: 1 }];
+        const up = drawn.count.animate(rise, { ...timing, fill: "forwards" });
+        let ended = false;
+        const end = () => {
+          if (ended) {
+            return;
+          }
+          ended = true;
+          drawn.settle();
+          out.cancel();
+          up.cancel();
+        };
+        for (const animation of [out, up]) {
+          animation.onfinish = end;
+          animation.oncancel = end;
+        }
       }
       const now = performance.now();
       for (const dot of effects.dots) {
@@ -5104,10 +5174,6 @@ var createGraphView = (host, context) => {
 };
 
 // src/ui/table/agent-fetch.ts
-var agentUrl = (repositoryId, sessionId, agentId) => {
-  const repo = encodeURIComponent(repositoryId);
-  return `/api/session?repo=${repo}&id=${encodeURIComponent(sessionId)}&agent=${encodeURIComponent(agentId)}`;
-};
 var isAgentOf = (body, agentId) => {
   if (typeof body !== "object" || body === null) {
     return false;
@@ -5115,13 +5181,9 @@ var isAgentOf = (body, agentId) => {
   const { id, recent, budget } = body;
   return id === agentId && Array.isArray(recent) && typeof budget === "object" && budget !== null;
 };
-var fetchAgent = async (repositoryId, sessionId, agentId, signal) => {
+var readAgent = async (source, repositoryId, sessionId, agentId, signal) => {
   try {
-    const response = await fetch(agentUrl(repositoryId, sessionId, agentId), { headers: { accept: "application/json" }, signal });
-    if (!response.ok) {
-      return void 0;
-    }
-    const body = await response.json();
+    const body = await source.agent(repositoryId, sessionId, agentId, signal);
     return isAgentOf(body, agentId) ? body : void 0;
   } catch {
     return void 0;
@@ -5234,8 +5296,8 @@ var verifyCell = (meter, agentRunning, cap = MAX_PIPS) => {
   const all = verifyPips(meter, agentRunning);
   const used = usedRounds(meter);
   const end = Math.min(all.length, Math.max(used, cap));
-  const start2 = Math.max(0, end - cap);
-  return { pips: all.slice(start2, end), title: verifyTitle(meter, agentRunning, start2) };
+  const start = Math.max(0, end - cap);
+  return { pips: all.slice(start, end), title: verifyTitle(meter, agentRunning, start) };
 };
 
 // src/ui/table/rows.ts
@@ -5307,7 +5369,7 @@ var nowCell = (agent, state, waitingText) => {
   return last ? callCell(last) : { kind: "empty", tool: "", text: "", failed: false };
 };
 var ratioOf = (meter) => meter.limit > 0 ? Math.min(1, meter.used / meter.limit) : void 0;
-var countText = (meter) => meter.limit > 0 ? `${meter.used}/${meter.limit}` : String(meter.used);
+var countText2 = (meter) => meter.limit > 0 ? `${meter.used}/${meter.limit}` : String(meter.used);
 var contextSize = (count) => {
   const value2 = Math.max(0, count);
   if (value2 >= 999500) {
@@ -5315,7 +5377,7 @@ var contextSize = (count) => {
   }
   return `${Math.round(value2 / 1e3)}k`;
 };
-var countCell = (meter) => ({ text: countText(meter), ratio: ratioOf(meter), level: meter.level });
+var countCell = (meter) => ({ text: countText2(meter), ratio: ratioOf(meter), level: meter.level });
 var rowOf = (agent, parts, config) => {
   const { state, superseded, pill } = parts;
   const main = agent.id === MAIN_AGENT;
@@ -5551,15 +5613,15 @@ var callDuration = (call) => {
   if (call.durationMs !== void 0) {
     return duration(call.durationMs);
   }
-  const start2 = parseTime(call.startedAt);
+  const start = parseTime(call.startedAt);
   const end = parseTime(call.endedAt);
-  return start2 === void 0 || end === void 0 ? "" : duration(end - start2);
+  return start === void 0 || end === void 0 ? "" : duration(end - start);
 };
 var recentCalls = (agent, limit = 9) => {
-  const start2 = parseTime(agent.startedAt) ?? 0;
+  const start = parseTime(agent.startedAt) ?? 0;
   return agent.recent.slice(-limit).reverse().map((call) => ({
     id: call.toolUseId,
-    time: sinceStart((parseTime(call.startedAt) ?? start2) - start2),
+    time: sinceStart((parseTime(call.startedAt) ?? start) - start),
     tool: call.tool,
     summary: call.summary,
     mark: callMark(call),
@@ -6253,14 +6315,14 @@ var createSessionTableView = (host, context) => {
       abort(load2);
     }
     if (result.load && current) {
-      start2(id, load2, current.id);
+      start(id, load2, current.id);
     }
   };
-  const start2 = (id, load2, sessionId) => {
+  const start = (id, load2, sessionId) => {
     abort(load2);
     const controller = new AbortController();
     load2.controller = controller;
-    void fetchAgent(context.repositoryId, sessionId, id, controller.signal).then((agent) => {
+    void readAgent(context.source, context.repositoryId, sessionId, id, controller.signal).then((agent) => {
       if (destroyed || load2.controller !== controller || loads.get(id) !== load2) {
         return;
       }
@@ -6648,11 +6710,11 @@ var turnsModel = (source) => {
   const turns = [];
   let next = 0;
   for (const reply of replies) {
-    const start2 = next;
+    const start = next;
     while (next < developer.length && timeOf2(developer[next]) <= timeOf2(reply)) {
       next += 1;
     }
-    turns.push(toTurn(developer.slice(start2, next), reply, source));
+    turns.push(toTurn(developer.slice(start, next), reply, source));
   }
   const rest = developer.slice(next);
   const newest2 = rest.at(-1);
@@ -6817,8 +6879,8 @@ var rectDistance = (a, b) => {
   const bottom = Math.abs(a.top + a.height - b.top - b.height);
   return Math.max(left, top, right, bottom);
 };
-var moveMs = (from, to, start2, fullMs) => {
-  const full = rectDistance(start2, to);
+var moveMs = (from, to, start, fullMs) => {
+  const full = rectDistance(start, to);
   if (full <= 0) {
     return fullMs;
   }
@@ -6826,11 +6888,11 @@ var moveMs = (from, to, start2, fullMs) => {
   return Math.max(MIN_MOVE_MS, Math.round(fullMs * fraction));
 };
 var openPlan = (box, opener, inFlight, viewport2) => {
-  const start2 = isUsable(opener, viewport2) ? opener : fallbackRect(box);
-  const move = inFlight ? moveMs(inFlight, box, start2, OPEN_MS) : OPEN_MS;
+  const start = isUsable(opener, viewport2) ? opener : fallbackRect(box);
+  const move = inFlight ? moveMs(inFlight, box, start, OPEN_MS) : OPEN_MS;
   const contentAt = Math.round(move * CONTENT_AT_MS / OPEN_MS);
   const doneAt = contentAt + CONTENT_MS + (CONTENT_GROUPS - 1) * CONTENT_STAGGER_MS;
-  return { from: inFlight ?? start2, moveMs: move, contentAt, doneAt };
+  return { from: inFlight ?? start, moveMs: move, contentAt, doneAt };
 };
 var closePlan = (box, opener, inFlight, viewport2) => {
   if (!isUsable(opener, viewport2)) {
@@ -7007,8 +7069,8 @@ var textBlocks = (text2) => {
     flushParagraph();
     endList();
   };
-  const newList = (ordered, start2, indent) => {
-    return { block: { kind: "list", ordered, start: start2, items: [] }, indent, texts: /* @__PURE__ */ new Map() };
+  const newList = (ordered, start, indent) => {
+    return { block: { kind: "list", ordered, start, items: [] }, indent, texts: /* @__PURE__ */ new Map() };
   };
   const addItem = (open2, content) => {
     const item2 = { spans: [], children: [] };
@@ -7055,11 +7117,11 @@ var textBlocks = (text2) => {
       flushParagraph();
       const indent = indentOf(item2[1]);
       const ordered = /\d/.test(item2[2]);
-      const start2 = ordered ? Number.parseInt(item2[2], 10) : 1;
+      const start = ordered ? Number.parseInt(item2[2], 10) : 1;
       if (list?.item && indent > list.indent) {
         if (!list.nested || list.nested.block.ordered !== ordered) {
           closeList(list.nested);
-          list.nested = newList(ordered, start2, indent);
+          list.nested = newList(ordered, start, indent);
           list.item.children.push(list.nested.block);
         }
         addItem(list.nested, item2[3]);
@@ -7067,7 +7129,7 @@ var textBlocks = (text2) => {
       }
       if (!list || list.block.ordered !== ordered) {
         endList();
-        list = newList(ordered, start2, indent);
+        list = newList(ordered, start, indent);
         blocks.push(list.block);
       }
       closeList(list.nested);
@@ -8306,7 +8368,7 @@ var sessionQuestionName = (session, question) => {
 var agentColumn = (session, agentId) => {
   for (const row2 of session.rows) {
     if (row2.streams.some((stream) => stream.runs.some((run) => run.agentId === agentId))) {
-      return "build";
+      return "implement";
     }
     if (row2.reviewers.some((reviewer) => reviewer.agentId === agentId)) {
       return "review";
@@ -8674,9 +8736,9 @@ var createQuestionsCore = (host, context, options) => {
         return;
       }
       const box = layer.getBoundingClientRect();
-      const start2 = from.getBoundingClientRect();
+      const start = from.getBoundingClientRect();
       const end = entry.item.getBoundingClientRect();
-      const origin = { x: start2.left - box.left + start2.width / 2 - 30, y: start2.top - box.top + start2.height / 2 - 10 };
+      const origin = { x: start.left - box.left + start.width / 2 - 30, y: start.top - box.top + start.height / 2 - 10 };
       const target = { x: end.left - box.left + 16, y: end.top - box.top + 4 };
       const chip = el("div", "fly-chip", "? question");
       chip.setAttribute("aria-hidden", "true");
@@ -9086,9 +9148,9 @@ var sessionTokens = (item2) => {
   return total.input + total.cacheWrite + total.cacheWrite1h + total.cacheRead + total.output;
 };
 var finishedDurationMs = (item2) => {
-  const start2 = parseTime(item2.startedAt);
+  const start = parseTime(item2.startedAt);
   const end = parseTime(item2.endedAt) ?? parseTime(item2.finishedAt);
-  return start2 === void 0 || end === void 0 ? 0 : Math.max(0, end - start2);
+  return start === void 0 || end === void 0 ? 0 : Math.max(0, end - start);
 };
 var finishedFacts2 = (item2) => {
   return `${elapsed(finishedDurationMs(item2))} \xB7 ${tokens(sessionTokens(item2))} \xB7 ${cost(item2.costUsd)}`;
@@ -9996,9 +10058,6 @@ var createChipsRow = (host, context, actions) => {
 };
 
 // src/ui/session-fetch.ts
-var sessionUrl = (repositoryId, sessionId) => {
-  return `/api/session?repo=${encodeURIComponent(repositoryId)}&id=${encodeURIComponent(sessionId)}`;
-};
 var isSessionOf = (body, sessionId) => {
   if (typeof body !== "object" || body === null) {
     return false;
@@ -10007,19 +10066,15 @@ var isSessionOf = (body, sessionId) => {
   const agentsObject = typeof agents === "object" && agents !== null && !Array.isArray(agents);
   return id === sessionId && Array.isArray(rows) && Array.isArray(pipelines) && agentsObject;
 };
-var fetchSession = async (repositoryId, sessionId, signal) => {
+var sessionReader = (source) => async (repositoryId, sessionId, signal) => {
   try {
-    const response = await fetch(sessionUrl(repositoryId, sessionId), { headers: { accept: "application/json" }, signal });
-    if (!response.ok) {
-      return void 0;
-    }
-    const body = await response.json();
+    const body = await source.session(repositoryId, sessionId, signal);
     return isSessionOf(body, sessionId) ? body : void 0;
   } catch {
     return void 0;
   }
 };
-var createLoader = (read = fetchSession) => {
+var createLoader = (read) => {
   const loads = /* @__PURE__ */ new Map();
   const abort = (sessionId) => {
     loads.get(sessionId)?.abort();
@@ -10402,7 +10457,7 @@ var createFinishedPanel = (context, options) => {
   };
 };
 var createFinishedSessionsPanel = (context, options) => {
-  const loader = createLoader(options.fetchSession ?? fetchSession);
+  const loader = createLoader(options.fetchSession ?? sessionReader(context.source));
   const make = (id) => {
     const onShow = (next) => step(id, next ? { type: "show", ready: isReady(id) } : { type: "hide" });
     const row2 = createFinishedSessionRow(context, { onShow, onClear: () => clearRow(id) });
@@ -11105,20 +11160,20 @@ var createConnectionState = (show, delay = CONNECTING_DELAY_MS) => {
 // src/ui/ranking.ts
 var RANK_TOP = 5;
 var MAIN_STAGE_COLOR = "var(--shared)";
-var BEFORE_BUILD = ["plan"];
-var AFTER_BUILD = ["review", "fix", "pr", "docs", "main"];
-var BUILD_PREFIX = "build:";
+var BEFORE_IMPLEMENT = ["plan"];
+var AFTER_IMPLEMENT = ["review", "fix", "pr", "docs", "main"];
+var IMPLEMENT_PREFIX = "implement:";
 var stageOrder = (keys2, packages) => {
   const used = new Set(keys2);
-  const configured = packages.map((pkg) => `${BUILD_PREFIX}${pkg.id}`);
+  const configured = packages.map((pkg) => `${IMPLEMENT_PREFIX}${pkg.id}`);
   const known = new Set(configured);
-  const others = [...used].filter((key) => key.startsWith(BUILD_PREFIX) && !known.has(key)).sort();
-  const builds = [...configured, ...others];
-  return [...BEFORE_BUILD, ...builds, ...AFTER_BUILD].filter((key) => used.has(key));
+  const others = [...used].filter((key) => key.startsWith(IMPLEMENT_PREFIX) && !known.has(key)).sort();
+  const packageKeys = [...configured, ...others];
+  return [...BEFORE_IMPLEMENT, ...packageKeys, ...AFTER_IMPLEMENT].filter((key) => used.has(key));
 };
 var stageKeyColor = (stage) => {
-  if (stage.startsWith(BUILD_PREFIX)) {
-    return `var(${packageVar(stage.slice(BUILD_PREFIX.length))}, var(${stageVar("build")}))`;
+  if (stage.startsWith(IMPLEMENT_PREFIX)) {
+    return `var(${packageVar(stage.slice(IMPLEMENT_PREFIX.length))}, var(${stageVar("implement")}))`;
   }
   if (stage === "main") {
     return MAIN_STAGE_COLOR;
@@ -11126,10 +11181,10 @@ var stageKeyColor = (stage) => {
   return `var(${stageVar(stage)})`;
 };
 var stageKeyTitle = (stage, packages) => {
-  if (stage.startsWith(BUILD_PREFIX)) {
-    const id = stage.slice(BUILD_PREFIX.length);
+  if (stage.startsWith(IMPLEMENT_PREFIX)) {
+    const id = stage.slice(IMPLEMENT_PREFIX.length);
     const label = packages.find((pkg) => pkg.id === id)?.label ?? id;
-    return `build \xB7 ${label}`;
+    return `implement \xB7 ${label}`;
   }
   return stage === "main" ? "main thread" : stage;
 };
@@ -11170,7 +11225,7 @@ var swatch = (key, label, color, dashed = false) => ({ key, label, color, dashed
 var legendStages = (config) => {
   const stages = [
     swatch("plan", "Plan", `var(${stageVar("plan")})`),
-    swatch("build", "Build", `var(${stageVar("build")})`),
+    swatch("implement", "Implement", `var(${stageVar("implement")})`),
     swatch("review", "Review", `var(${stageVar("review")})`),
     swatch("fix", "Fix", `var(${stageVar("fix")})`),
     swatch("pr", "PR", `var(${stageVar("pr")})`)
@@ -11234,6 +11289,7 @@ var LEGEND_NODES = [
   { state: "done", label: "done" },
   { state: "approved", label: "approved" },
   { state: "changes", label: "changes requested" },
+  { state: "changes", count: 3, label: "fixes requested" },
   { state: "handed", label: "stopped at budget" },
   { state: "running", className: "stale", label: "stale" },
   { state: "failed", label: "failed" },
@@ -11252,11 +11308,11 @@ var text = (className, value2, y, x = 0) => {
   element.textContent = value2;
   return element;
 };
-var nodeGroup = (state, color, mark, radius, x = 0, extra) => {
+var nodeGroup = (state, color, mark, radius, x = 0, extra, count) => {
   const classes = extra ? `node ${state} ${extra}` : `node ${state}`;
   const group = svgEl("g", { class: classes, transform: `translate(${x} 0)` });
   setVars(group, { "--c": color });
-  drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }));
+  drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }), count);
   return group;
 };
 var pillGroup = (color, compact, x = 0) => {
@@ -11309,9 +11365,9 @@ var row = (title, items, note) => {
 var nodesRow = (config, color) => {
   const marks = legendMarks(config);
   const mark = legendSampleMark(marks);
-  const items = LEGEND_NODES.map(({ state, label, className }) => {
+  const items = LEGEND_NODES.map(({ state, label, className, count }) => {
     const svg = sample("-13 -13 26 26", 26, 26);
-    svg.append(nodeGroup(state, color, mark, NODE_R2, 0, className));
+    svg.append(nodeGroup(state, color, mark, NODE_R2, 0, className, count));
     return item(svg, label);
   });
   return row("Nodes", items, marksNote(marks));
@@ -11759,7 +11815,6 @@ var FIXTURE_ANNOUNCEMENTS = {
   failed: "The session fixture could not be saved"
 };
 var FIXTURE_NOTE_MS = 2e3;
-var fixtureUrl = (repositoryId, sessionId) => `/api/fixture?repo=${encodeURIComponent(repositoryId)}&session=${encodeURIComponent(sessionId)}`;
 var dispositionName = (header, fallback) => /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
 var plainClick = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
 var saveBlob = (blob, name) => {
@@ -11770,9 +11825,10 @@ var saveBlob = (blob, name) => {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 };
-var browserDeps = () => ({ fetch: (url) => window.fetch(url), save: saveBlob });
+var browserDeps = () => ({ save: saveBlob });
 var createFixtureLink = (context, deps = browserDeps()) => {
-  if (!context.config.sessionFixtures) {
+  const download = context.config.sessionFixtures ? context.source.fixture : void 0;
+  if (!download) {
     return void 0;
   }
   const element = el("a", "session-fixture", FIXTURE_LINK_TEXT);
@@ -11798,7 +11854,7 @@ var createFixtureLink = (context, deps = browserDeps()) => {
   };
   const request = async (sessionId) => {
     try {
-      const response = await deps.fetch(fixtureUrl(context.repositoryId, sessionId));
+      const response = await download.read(context.repositoryId, sessionId);
       if (!response.ok) {
         return response.status === 429 ? "busy" : "failed";
       }
@@ -11834,7 +11890,7 @@ var createFixtureLink = (context, deps = browserDeps()) => {
       }
       id = next;
       element.hidden = id === "";
-      element.setAttribute("href", fixtureUrl(context.repositoryId, id));
+      element.setAttribute("href", download.url(context.repositoryId, id));
     },
     save,
     destroy() {
@@ -11891,8 +11947,8 @@ var iconOf = (type) => {
   } else if (type === "improve") {
     icon2.append(svgEl("path", { d: "M7 1.6l1.4 3.9 3.9 1.4-3.9 1.4L7 12.2 5.6 8.3 1.7 6.9l3.9-1.4z", fill: "currentColor" }));
   } else {
-    const wrench = { d: "M9.6 1.8a3 3 0 0 0-3.4 4L2 10l2 2 4.2-4.2a3 3 0 0 0 4-3.4l-1.8 1.8-1.6-.4-.4-1.6z", fill: "none", stroke: "currentColor" };
-    icon2.append(svgEl("path", { ...wrench, "stroke-width": 1.4, "stroke-linejoin": "round" }));
+    const wrench2 = { d: "M9.6 1.8a3 3 0 0 0-3.4 4L2 10l2 2 4.2-4.2a3 3 0 0 0 4-3.4l-1.8 1.8-1.6-.4-.4-1.6z", fill: "none", stroke: "currentColor" };
+    icon2.append(svgEl("path", { ...wrench2, "stroke-width": 1.4, "stroke-linejoin": "round" }));
   }
   return icon2;
 };
@@ -12257,7 +12313,7 @@ var fitGraph = (session, options, hostWidth, wrapped) => {
 // src/ui/graph/session-effects.ts
 var MESSAGE_POP_MS = 80;
 var QUESTION_POP_MS = 80;
-var NONE2 = { pops: [], dots: [], sweep: false, folds: [], sheens: [] };
+var NONE2 = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [] };
 var isEnded2 = (state) => !isActive2(state) && state !== "pending" && state !== "skipped";
 var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
 var SHEEN_STATES = ["done", "approved", "changes"];
@@ -12275,6 +12331,23 @@ var sheensOf = (previous, current, pops) => {
     }
   }
   return sheens;
+};
+var rollsOf = (previous, current, pops) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const rolls = [];
+  for (const item2 of current.items) {
+    const old = before.get(item2.key);
+    if (item2.kind !== "node" || item2.state !== "changes" || item2.count === void 0 || old?.kind !== "node") {
+      continue;
+    }
+    if (old.state === "running") {
+      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+      rolls.push({ key: item2.key, delay: pop + POP_MS2 + SHEEN_MS });
+    } else if (old.state === "changes" && old.count === void 0) {
+      rolls.push({ key: item2.key, delay: 0 });
+    }
+  }
+  return rolls;
 };
 var foldsOf = (previous, current) => {
   const before = foldedPipelines(previous.session, previous.expanded);
@@ -12377,17 +12450,17 @@ var dotsOf2 = (previous, current, unfolded) => {
     }
     const bar = current.items.find((item2) => item2.kind === "bar" && item2.branch === branch);
     const feed = bar ? dots.find((dot) => dot.to === bar.key) : void 0;
-    let start2 = feed?.delay;
-    if (start2 === void 0) {
-      start2 = slot * DOT_STAGGER;
+    let start = feed?.delay;
+    if (start === void 0) {
+      start = slot * DOT_STAGGER;
       slot += 1;
       if (bar?.dot) {
-        dots.push({ edges: bar.dot.edges, color: bar.dot.color, delay: start2 });
+        dots.push({ edges: bar.dot.edges, color: bar.dot.color, delay: start });
       }
     }
     reviewers.forEach((reviewer, index) => {
       const dot = reviewer.dot;
-      dots.push({ edges: dot.edges, color: dot.color, to: reviewer.key, delay: start2 + FAN_DELAY + index * FAN_STAGGER });
+      dots.push({ edges: dot.edges, color: dot.color, to: reviewer.key, delay: start + FAN_DELAY + index * FAN_STAGGER });
     });
   }
   return dots.filter(drawn);
@@ -12415,7 +12488,8 @@ var sessionEffects = (previous, current) => {
   const sweep = previous.session.chip.tone !== "done" && current.session.chip.tone === "done";
   const dots = planned.map(({ edges, color, delay, reverse }) => reverse ? { edges, color, delay, reverse } : { edges, color, delay });
   const sheens = sheensOf(previous.layout, current.layout, pops);
-  return { pops, dots, sweep, folds, sheens };
+  const rolls = rollsOf(previous.layout, current.layout, pops);
+  return { pops, dots, sweep, folds, sheens, rolls };
 };
 
 // src/ui/graph/session-view.ts
@@ -13150,7 +13224,7 @@ var needsRedraw = (drawn, next) => {
 };
 var GROUPS = [
   { label: "Plan", includes: (stage) => stage === "plan" },
-  { label: "Build", includes: (stage) => stage.startsWith("build:") },
+  { label: "Implement", includes: (stage) => stage.startsWith("implement:") },
   { label: "Review", includes: (stage) => stage === "review" },
   { label: "Fix", includes: (stage) => stage === "fix" },
   { label: "PR", includes: (stage) => stage === "pr" },
@@ -14004,17 +14078,17 @@ var tabViews = (list, selectedId) => list.map((repository) => {
 });
 var plainClick2 = (event) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
 var waitingTotal = (list) => list.reduce((sum, repository) => sum + Math.max(0, repository.waiting), 0);
-var documentTitle = (list, selected) => {
+var documentTitle = (list, selected, label) => {
   if (!selected) {
-    return "Nurselog";
+    return label;
   }
   const waiting = waitingTotal(list);
   const count = waiting > 0 ? `(${waiting}) ` : "";
-  return `${count}${selected.name} \xB7 Nurselog`;
+  return `${count}${selected.name} \xB7 ${label}`;
 };
-var inView = (start2, end, viewStart, viewEnd) => start2 >= viewStart - 0.5 && end <= viewEnd + 0.5;
+var inView = (start, end, viewStart, viewEnd) => start >= viewStart - 0.5 && end <= viewEnd + 0.5;
 var hiddenWaiting = (boxes, viewStart, viewEnd) => {
-  let start2;
+  let start;
   let end;
   for (const box of boxes) {
     if (box.waiting <= 0) {
@@ -14025,14 +14099,14 @@ var hiddenWaiting = (boxes, viewStart, viewEnd) => {
     const fits = spanEnd - spanStart <= viewEnd - viewStart + 1;
     const shownStart = fits ? spanStart : box.nameStart;
     const shownEnd = fits ? spanEnd : box.nameEnd;
-    if (shownStart < viewStart - 0.5 && (!start2 || box.start > start2.start)) {
-      start2 = box;
+    if (shownStart < viewStart - 0.5 && (!start || box.start > start.start)) {
+      start = box;
     }
     if (shownEnd > viewEnd + 0.5 && (!end || box.end < end.end)) {
       end = box;
     }
   }
-  return { start: start2?.id, end: end?.id };
+  return { start: start?.id, end: end?.id };
 };
 var tabNameId = (id) => `repo-tab-${id}-name`;
 var INCHWORM_REACH = 0.42;
@@ -14346,11 +14420,11 @@ var createTopBar = (host, options) => {
     if (element === selectedTab()) {
       selectedInView = true;
     }
-    const start2 = element.offsetLeft - TAB_MARGIN;
+    const start = element.offsetLeft - TAB_MARGIN;
     const end = element.offsetLeft + element.offsetWidth + TAB_MARGIN - strip.clientWidth;
     let left;
-    if (strip.scrollLeft > start2) {
-      left = Math.max(0, start2);
+    if (strip.scrollLeft > start) {
+      left = Math.max(0, start);
     } else if (strip.scrollLeft < end) {
       left = end;
     }
@@ -14391,15 +14465,15 @@ var createTopBar = (host, options) => {
     strip.dataset.moreEnd = String(moreEnd);
     const boxes = [];
     for (const [id, tab] of tabs) {
-      const start2 = tab.element.offsetLeft;
-      const end = start2 + tab.element.offsetWidth;
-      const nameStart = start2 + tab.element.clientLeft + tab.name.offsetLeft;
+      const start = tab.element.offsetLeft;
+      const end = start + tab.element.offsetWidth;
+      const nameStart = start + tab.element.clientLeft + tab.name.offsetLeft;
       const nameEnd = nameStart + tab.name.offsetWidth;
-      const badgeStart = start2 + tab.element.clientLeft + tab.waiting.offsetLeft;
+      const badgeStart = start + tab.element.clientLeft + tab.waiting.offsetLeft;
       const badgeEnd = badgeStart + tab.waiting.offsetWidth;
-      boxes.push({ id, start: start2, end, nameStart, nameEnd, badgeStart, badgeEnd, waiting: tab.view?.waiting ?? 0 });
+      boxes.push({ id, start, end, nameStart, nameEnd, badgeStart, badgeEnd, waiting: tab.view?.waiting ?? 0 });
       if (id === selectedId) {
-        selectedInView = inView(start2, end, viewStart, viewEnd);
+        selectedInView = inView(start, end, viewStart, viewEnd);
       }
     }
     const clearStart = moreStart ? viewStart + TAB_MARGIN : viewStart;
@@ -14621,7 +14695,7 @@ var clearSnapshot = (context) => {
   context.typical = {};
 };
 
-// src/ui/board.ts
+// src/ui/board-page.ts
 var branchLabels = (board, canOpen) => {
   if (isSessionView(board)) {
     const onBranch = (branch) => {
@@ -14646,34 +14720,6 @@ var RISE_STAGGER_MS = 45;
 var RISE_ITEMS = 9;
 var TOP_GAP = 12;
 var EASE13 = "cubic-bezier(.2,.8,.2,1)";
-var fetchJson = async (path) => {
-  try {
-    const response = await fetch(path, { headers: { accept: "application/json" } });
-    return response.ok ? await response.json() : void 0;
-  } catch {
-    return void 0;
-  }
-};
-var fetchList = async () => {
-  try {
-    const response = await fetch("/api/repositories", { headers: { accept: "application/json" } });
-    if (response.status === UNAUTHORIZED) {
-      return SIGNED_OUT;
-    }
-    return response.ok ? await response.json() : void 0;
-  } catch {
-    return void 0;
-  }
-};
-var repoQuery = (id) => id === void 0 ? "" : `?repo=${encodeURIComponent(id)}`;
-var eventsQuery = (id, view) => {
-  const params = new URLSearchParams();
-  if (id !== void 0) {
-    params.set("repo", id);
-  }
-  params.set("view", view);
-  return `?${params.toString()}`;
-};
 var parseBoard = (data) => {
   try {
     const board = JSON.parse(String(data));
@@ -14693,14 +14739,14 @@ var emptied = (snapshot) => {
   }
   return { ...snapshot, runs: {}, order: [] };
 };
-var start = async () => {
+var startBoard = async (source) => {
   const topBarHost = document.getElementById("topbar");
   const boardHost = document.getElementById("board");
   if (!topBarHost || !boardHost) {
     return;
   }
   boardHost.replaceChildren();
-  const [health, firstList] = await Promise.all([fetchJson("/api/health"), fetchList()]);
+  const [health, firstList] = await Promise.all([source.health(), source.repositories()]);
   const replay = health?.mode === "replay";
   const speed = typeof health?.speed === "number" ? health.speed : 1;
   const clock = createClock();
@@ -14742,7 +14788,7 @@ var start = async () => {
   window.addEventListener("pagehide", () => badge.clear());
   const drawTabs = () => {
     topBar.setTabs(repositories, selected?.id);
-    document.title = documentTitle(repositories, selected);
+    document.title = documentTitle(repositories, selected, source.label);
     badge.set(waitingTotal(repositories));
     if (selected) {
       boardHost.setAttribute("aria-labelledby", tabNameId(selected.id));
@@ -14773,13 +14819,13 @@ var start = async () => {
     drawTabs();
   };
   const checkRestart = async () => {
-    const current = await fetchJson("/api/health");
+    const current = await source.health();
     if (typeof current?.startedAt === "string" && current.startedAt !== health?.startedAt) {
       window.location.reload();
     }
   };
   const checkList = async (own) => {
-    const list = await fetchList();
+    const list = await source.repositories();
     if (list === SIGNED_OUT) {
       signOut();
       return;
@@ -14791,38 +14837,39 @@ var start = async () => {
   };
   const connect = (own) => {
     retry = void 0;
-    const stream = new EventSource(`/api/events${eventsQuery(shown?.id, view)}`);
+    const stream = source.openStream(shown?.id, view, {
+      open() {
+        if (failed) {
+          failed = false;
+          void checkRestart();
+        }
+      },
+      message(data) {
+        const board = own === generation ? parse(data) : void 0;
+        if (!board) {
+          return;
+        }
+        latest = board;
+        pending = true;
+        clock.observe(board, Date.now());
+        connection.set("connected");
+      },
+      error(closed) {
+        if (own !== generation) {
+          return;
+        }
+        failed = true;
+        void checkList(own);
+        if (!closed) {
+          connection.set("reconnecting");
+          return;
+        }
+        stream.close();
+        connection.set("disconnected");
+        retry = window.setTimeout(() => connect(own), RETRY_MS);
+      }
+    });
     events = stream;
-    stream.addEventListener("open", () => {
-      if (failed) {
-        failed = false;
-        void checkRestart();
-      }
-    });
-    stream.addEventListener("message", (message) => {
-      const board = own === generation ? parse(message.data) : void 0;
-      if (!board) {
-        return;
-      }
-      latest = board;
-      pending = true;
-      clock.observe(board, Date.now());
-      connection.set("connected");
-    });
-    stream.addEventListener("error", () => {
-      if (own !== generation) {
-        return;
-      }
-      failed = true;
-      void checkList(own);
-      if (stream.readyState !== EventSource.CLOSED) {
-        connection.set("reconnecting");
-        return;
-      }
-      stream.close();
-      connection.set("disconnected");
-      retry = window.setTimeout(() => connect(own), RETRY_MS);
-    });
   };
   const retire = (previous) => {
     const { host, stack, board } = previous;
@@ -14899,7 +14946,7 @@ var start = async () => {
     for (const move of moves) {
       move.pause();
     }
-    const start2 = () => {
+    const start = () => {
       if (own !== generation) {
         return;
       }
@@ -14908,7 +14955,7 @@ var start = async () => {
         move.play();
       }
     };
-    out.finished.then(start2, start2);
+    out.finished.then(start, start);
   };
   const show = async (next) => {
     if (signedOut) {
@@ -14934,11 +14981,11 @@ var start = async () => {
       retire(drawn);
       drawn = void 0;
     }
-    const config = await fetchJson(`/api/config${repoQuery(next?.id)}`);
+    const config = await source.config(next?.id);
     if (own !== generation) {
       return;
     }
-    const context = createContext({ ...FALLBACK_CONFIG, ...config }, now);
+    const context = createContext({ ...FALLBACK_CONFIG, ...config }, now, source);
     context.repositoryId = next?.id ?? "";
     shown = { id: next?.id, context };
     connect(own);
@@ -14990,20 +15037,20 @@ var start = async () => {
     current.stack?.link?.(link);
   };
   const linkHooks = (current) => ({
-    hover(source) {
+    hover(link) {
       if (current !== drawn) {
         return;
       }
-      current.linkSource = source;
+      current.linkSource = link;
       relink(current);
     },
-    opens(source) {
+    opens(link) {
       const board = current.board;
-      return current === drawn && board !== void 0 && isSessionView(board) && openTarget(board, source, canOpenOf(current)) !== void 0;
+      return current === drawn && board !== void 0 && isSessionView(board) && openTarget(board, link, canOpenOf(current)) !== void 0;
     },
-    open(source) {
+    open(link) {
       const board = current.board;
-      const sessionId = current === drawn && board && isSessionView(board) ? openTarget(board, source, canOpenOf(current)) : void 0;
+      const sessionId = current === drawn && board && isSessionView(board) ? openTarget(board, link, canOpenOf(current)) : void 0;
       if (sessionId !== void 0) {
         current.host?.dispatchEvent(new CustomEvent(SESSION_LINK, { detail: { sessionId } }));
       }
@@ -15105,7 +15152,7 @@ var start = async () => {
     connection.set("disconnected");
     boardHost.append(createSignInNotice());
     const check2 = async () => {
-      if (Array.isArray(await fetchList())) {
+      if (Array.isArray(await source.repositories())) {
         window.location.reload();
         return;
       }
@@ -15120,4 +15167,56 @@ var start = async () => {
   }
   requestAnimationFrame(tick);
 };
-void start();
+
+// src/ui/source.ts
+var repoQuery = (id) => id === void 0 ? "" : `?repo=${encodeURIComponent(id)}`;
+var eventsQuery = (id, view) => {
+  const params = new URLSearchParams();
+  if (id !== void 0) {
+    params.set("repo", id);
+  }
+  params.set("view", view);
+  return `?${params.toString()}`;
+};
+var sessionPath = (repositoryId, sessionId) => `/api/session?repo=${encodeURIComponent(repositoryId)}&id=${encodeURIComponent(sessionId)}`;
+var fixturePath = (repositoryId, sessionId) => `/api/fixture?repo=${encodeURIComponent(repositoryId)}&session=${encodeURIComponent(sessionId)}`;
+var getJson = async (path, signal) => {
+  try {
+    const response = await fetch(path, { headers: { accept: "application/json" }, signal });
+    return response.ok ? await response.json() : void 0;
+  } catch {
+    return void 0;
+  }
+};
+var serverSource = () => ({
+  label: "Nurselog",
+  health: async () => await getJson("/api/health"),
+  async repositories() {
+    try {
+      const response = await fetch("/api/repositories", { headers: { accept: "application/json" } });
+      if (response.status === UNAUTHORIZED) {
+        return SIGNED_OUT;
+      }
+      return response.ok ? await response.json() : void 0;
+    } catch {
+      return void 0;
+    }
+  },
+  config: async (repositoryId) => await getJson(`/api/config${repoQuery(repositoryId)}`),
+  openStream(repositoryId, view, handlers) {
+    const stream = new EventSource(`/api/events${eventsQuery(repositoryId, view)}`);
+    stream.addEventListener("open", () => handlers.open());
+    stream.addEventListener("message", (message) => handlers.message(String(message.data)));
+    stream.addEventListener("error", () => handlers.error(stream.readyState === EventSource.CLOSED));
+    return { close: () => stream.close() };
+  },
+  session: (repositoryId, sessionId, signal) => getJson(sessionPath(repositoryId, sessionId), signal),
+  agent: (repositoryId, sessionId, agentId, signal) => getJson(`${sessionPath(repositoryId, sessionId)}&agent=${encodeURIComponent(agentId)}`, signal),
+  fixture: {
+    url: fixturePath,
+    read: (repositoryId, sessionId) => fetch(fixturePath(repositoryId, sessionId))
+  }
+});
+
+// src/ui/board.ts
+void startBoard(serverSource());

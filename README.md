@@ -1,10 +1,13 @@
 # Nurselog
 
 A live, local board of your Claude Code sessions. It runs on `127.0.0.1` next to your terminal and shows, per session
-and branch, which agents are running, where the work is in the loop (Plan, Build, Join, Review, Fix, PR, Merge,
+and branch, which agents are running, where the work is in the loop (Plan, Implement, Join, Review, Fix, PR, Merge,
 Promote, Docs), what waits for you and what it costs. Named after the nurse log, the fallen tree that feeds new growth.
 
-![The Nurselog board replaying three sample sessions](docs/board.png)
+**[Live demo](https://petterikorpimaa.github.io/nurselog/)**: the board replaying three sample sessions in your
+browser, with nothing to install.
+
+[![The Nurselog board replaying three sample sessions](docs/board.png)](https://petterikorpimaa.github.io/nurselog/)
 
 - **Live**: the plugin's hook records every Claude Code event, and the board updates as the events arrive.
 - **What waits for you**: plan approvals, questions, open PRs and promotions stand out on the card, the tab and the app's Dock badge.
@@ -74,7 +77,7 @@ copy in the sessions that load it. `/plugin` in a session lists `nurselog` when 
 
 A set-up repository is one with a config ([Configuration](#configuration)). Nothing is added to `CLAUDE.md` or to the
 agent files: the instructions are injected at SessionStart (main thread) and SubagentStart (agents whose role stage is
-build, review or pr).
+implement, review or pr).
 
 <details>
 <summary>From a clone</summary>
@@ -213,7 +216,7 @@ alias nurselog='node ~/github/nurselog/bin/nurselog'
 | Token use by ticket | Tokens and cost per ticket key (else branch), split by stage. |
 | Session card | One per session that runs a subagent, edits files or opens a PR. Hovering a lane or ranking row lights its card. |
 | Card header | Ticket key and title, a progress chip (what works or waits), elapsed time, cost, model, session id (click to copy for `claude --resume`), fixture download, Summary. |
-| Graph | Plan, then per branch the Build streams, Join, Review, Fix, PR, Merge, Promote and Docs, with "You" gates and question bubbles. Each `plan` starts a new pipeline. |
+| Graph | Plan, then per branch the Implement streams, Join, Review, Fix, PR, Merge, Promote and Docs, with "You" gates and question bubbles. Each `plan` starts a new pipeline. |
 | Questions | Questions waiting for you, blocking ones marked, with their options. |
 | Follow-ups | Open issues, improvements and fix suggestions from the agents' reports. |
 | Agent table | One row per agent: state, current tool, calls against budget, verification passes and fails, context, cost, time. A row expands to its recent calls and report. |
@@ -257,7 +260,7 @@ Claude Code --hook--> spool (NDJSON day files) --read--> board server (reducer) 
 | Stage | Starts when |
 | --- | --- |
 | Plan | The main thread gets its first prompt. Waits on a `gate plan`, AskUserQuestion or a blocking question. |
-| Build | An agent with a build role (`implementer`) makes its first call. One stream per package or planned stream. |
+| Implement | An agent with an implement role (`implementer`) makes its first call. One stream per package or planned stream. |
 | Join | The main thread writes the branch diff for the reviewers (`join.pattern`, default `git diff <trunk>...HEAD >`). |
 | Review | An agent with a review role starts. A `fix` follow-up in its report means changes, otherwise approved. |
 | Fix | After a review asked for changes: an implementer or a main-thread edit. The same reviewer again is a re-review. |
@@ -271,7 +274,7 @@ Claude Code --hook--> spool (NDJSON day files) --read--> board server (reducer) 
 | You get | With |
 | --- | --- |
 | Session cards, agent table, tokens and cost, Summary, questions from AskUserQuestion and permission prompts, branch lanes, insights | The plugin and a config |
-| Build streams, Review and Fix stages, follow-ups, reviewer verdicts | Agent roles: the default agent names (`implementer`, `code-reviewer`, `pr-shepherd` ...) or the config `roles`, which `init` fills from `.claude/agents` |
+| Implement streams, Review and Fix stages, follow-ups, reviewer verdicts | Agent roles: the default agent names (`implementer`, `code-reviewer`, `pr-shepherd` ...) or the config `roles`, which `init` fills from `.claude/agents` |
 | Stream order, the plan note as title, plan and docs gates, prose questions | Markers (the injected instructions tell the main thread to add them) |
 | PR titles and states, Merge and Promote stages | `gh` logged in and `github.repo` set |
 | Ticket keys from prompts as well as branch names | `keyPattern` |
@@ -283,14 +286,14 @@ Claude Code --hook--> spool (NDJSON day files) --read--> board server (reducer) 
 When a repository's loop differs, the board draws what it can derive and leaves out the rest:
 
 - No Bash call matches `join.pattern`: no Join node. A reviewer that starts anyway still gets its node.
-- The main thread works without implementer subagents: no Build streams, and its edits show as Fix nodes of the agent
-  `main`.
+- The main thread works without implementer subagents: no Implement streams, and its edits show as Fix nodes of the
+  agent `main`.
 - No pull requests, or no `github.repo`: no Merge gate, because Merge and Promote come from `gh`.
 - A subagent that works in its own worktree (a `pr-shepherd` that checks out an existing branch) begins a run there
-  that starts at its stage, PR or Build, and has no Plan.
+  that starts at its stage, PR or Implement, and has no Plan.
 - A role that `roles` maps to `other` (the `*` fallback, the built-in `general-purpose` among them) gets no reviewer
-  node. It becomes a Build stream of the branch at its first file edit in a feature worktree, or in the main checkout on
-  a feature branch, but without the report block below; one that only reads stays under the Plan node.
+  node. It becomes an Implement stream of the branch at its first file edit in a feature worktree, or in the main
+  checkout on a feature branch, but without the report block below; one that only reads stays under the Plan node.
 - A reviewer that reads several branches (their files by path, or `git diff main...<branch>`) is a reviewer node on
   each of their rows.
 - The stages above are fixed: a workflow with other stages cannot be drawn.
@@ -298,19 +301,21 @@ When a repository's loop differs, the board draws what it can derive and leaves 
 <details>
 <summary>Roles and the report block</summary>
 
-- The config `roles` maps an agent type to `{ "stage": "build" | "review" | "pr" | "other", "short"?: "<label>" }`;
-  the fallback `*` is required and is `other` by default. An `other` agent appears in the agent table and under the
-  Plan node, until its first file edit on a branch makes it a Build stream there.
-- Default roles: `implementer` builds; `conventions-checker`, `code-reviewer`, `spec-reviewer`, `typescript-reviewer`,
-  `security-reviewer`, `design-reviewer`, `database-reviewer`, `silent-failure-hunter` and `pr-test-analyzer` review;
-  `pr-shepherd` opens the PR. Any other agent type needs its own entry in `roles`; `nurselog init` writes one for each
-  agent in `.claude/agents` whose name is `implementer`, `builder`, `developer`, `coder` or `engineer` or ends in `-`
-  plus one of them or in `-dev` (build), is `reviewer`, `qa` or `tester` or ends in `-reviewer`, `-checker`,
-  `-analyzer`, `-hunter`, `-qa` or `-tester` (review) or ends in `shepherd` (pr). A build name whose `tools` list has
-  none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` is read-only and gets none. Any other agent gets a
-  build role when its `tools` key lists `Edit`, `Write`, `MultiEdit` or `NotebookEdit`, except the names in
-  `docs.roles` (default `doc-updater`); an agent without a `tools` key inherits every tool and gets no role from them.
-- Agents with a build, review or pr role get an injected instruction to end their report with a fenced `nurselog`
+- The config `roles` maps an agent type to `{ "stage": "implement" | "review" | "pr" | "other", "short"?: "<label>" }`;
+  the fallback `*` is required and is `other` by default. A stage `build`, the old name of `implement`, is still
+  read as `implement`. An `other` agent appears in the agent table and under the Plan node, until its first file edit
+  on a branch makes it an Implement stream there.
+- Default roles: `implementer` implements; `conventions-checker`, `code-reviewer`, `spec-reviewer`,
+  `typescript-reviewer`, `security-reviewer`, `design-reviewer`, `database-reviewer`, `silent-failure-hunter` and
+  `pr-test-analyzer` review; `pr-shepherd` opens the PR. Any other agent type needs its own entry in `roles`;
+  `nurselog init` writes one for each agent in `.claude/agents` whose name is `implementer`, `builder`, `developer`,
+  `coder` or `engineer` or ends in `-` plus one of them or in `-dev` (implement), is `reviewer`, `qa` or `tester` or
+  ends in `-reviewer`, `-checker`, `-analyzer`, `-hunter`, `-qa` or `-tester` (review) or ends in `shepherd` (pr). An
+  implement name whose `tools` list has none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` is read-only
+  and gets none. Any other agent gets an implement role when its `tools` key lists `Edit`, `Write`, `MultiEdit` or
+  `NotebookEdit`, except the names in `docs.roles` (default `doc-updater`); an agent without a `tools` key inherits
+  every tool and gets no role from them.
+- Agents with an implement, review or pr role get an injected instruction to end their report with a fenced `nurselog`
   YAML block: `decisions`, `followups` (`issue`, `improve` or `fix`, with text and an optional file), `questions` and
   `files`. It feeds the follow-ups, the reviewer verdicts and the questions with the main thread.
 
@@ -534,9 +539,9 @@ repository off the board with a warning; a bad value of a known key falls back t
 - `packages` from `pnpm-workspace.yaml` or the `workspaces` of `package.json` (`dir/*` expands one level to the
   directories with a `package.json`; the id is the directory name; colours from a fixed palette).
 - `roles` from `.claude/agents/*.md`: `implementer`, `builder`, `developer`, `coder`, `engineer`, `*-` plus one of
-  them and `*-dev` build, unless an explicit `tools` list has no file-writing tool and no `Bash` (read-only);
+  them and `*-dev` implement, unless an explicit `tools` list has no file-writing tool and no `Bash` (read-only);
   `reviewer`, `qa`, `tester`, `*-reviewer`, `*-checker`, `*-analyzer`, `*-hunter`, `*-qa` and `*-tester` review;
-  `*shepherd` opens the PR. Any other agent whose `tools` list `Edit`, `Write`, `MultiEdit` or `NotebookEdit` builds
+  `*shepherd` opens the PR. Any other agent whose `tools` list `Edit`, `Write`, `MultiEdit` or `NotebookEdit` implements
   too, except the exact names in `docs.roles` (default `doc-updater`); an agent without a `tools` key is left to its
   name.
 - `keyPattern` as `<PREFIX>-\d+` when at least 3 of the 50 most recent branches carry a ticket key with one shared
@@ -572,7 +577,7 @@ Arrays such as `packages` replace the default list whole.
 | `github.mergeBy` | `"developer"` | `agent`: an open PR does not wait for you. |
 | `github.promoteTitlePrefix` | `{}` | PR title prefix per promote target; required for each target. |
 | `packages` | `[]` | `{ id, color, paths[], label? }`, up to 50. An implementer with no package is in the stream `repo`. |
-| `stageColors` | built in | Hex colour per `plan`, `build`, `review`, `fix`, `pr`, `docs`, `wait`. |
+| `stageColors` | built in | Hex colour per `plan`, `implement`, `review`, `fix`, `pr`, `docs`, `wait`; the old key `build` is still read as `implement`. |
 | `roles` | see "Roles and the report block" | Agent type to `{ stage, short? }`; `*` required. |
 | `docs.roles` | `["doc-updater"]` | Agents that put a run in Docs. |
 | `docs.tools` | `[]` | Tool names that put a run in Docs. |
@@ -718,7 +723,7 @@ Questions and waits): the last 5 work sessions against the up to 20 before them.
 so it needs no running board.
 
 ```markdown
-- ! Implementers: 6 of the last 9 build runs reached their tool-call budget by their first stop (67 %; the rule flags 30 % or more; before: 9 of 31).
+- ! Implementers: 6 of the last 9 implement runs reached their tool-call budget by their first stop (67 %; the rule flags 30 % or more; before: 9 of 31).
 - Review: 2 of the last 5 branches ran a second review round (before: 6 of 20).
 - Verification: not measured: no command matched verification.kinds in the last 5 work sessions.
 ```
@@ -726,17 +731,17 @@ so it needs no running board.
 <details>
 <summary>How the report is counted</summary>
 
-- A flagged line (`!`) is a standing rule (such as 30 % or more build runs at their budget) or a comparison
+- A flagged line (`!`) is a standing rule (such as 30 % or more implement runs at their budget) or a comparison
   worse than before by a fixed rule (a rate 1.5 times the earlier one, a median above the earlier 75th percentile).
   Every line carries its numbers and the earlier ones; there is no score.
 - A work session is a session card with at least 5 main-thread tool calls. The board writes one aggregate per session
   it has seen finish; its first start backfills `spool.readDays` days.
 - The first comparison comes after 10 earlier work sessions; until then a line reads `(before: fewer than 10 work
   sessions)`.
-- A build run is a subagent of a build-stage role (`roles`), or any other subagent from its first file edit on a branch;
-  the main thread's own verification commands are not one.
-- A signal whose input your workflow lacks (no build budget, no review roles or report blocks, no command matching
-  `verification.kinds`) reads "not measured" with the reason and never flags.
+- An implement run is a subagent of an implement-stage role (`roles`), or any other subagent from its first file edit on
+  a branch; the main thread's own verification commands are not one.
+- A signal whose input your workflow lacks (no budget for the implement runs, no review roles or report blocks, no
+  command matching `verification.kinds`) reads "not measured" with the reason and never flags.
 - Failed runs are a non-zero exit or a fail pattern matching the stdout tail; with other runners than the defaults
   only exit codes count.
 - `--json` prints the same lines with their numbers.
@@ -770,4 +775,5 @@ merged.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). The board ships the fonts Inter and JetBrains Mono under the SIL Open Font License 1.1, with their
+license texts in `src/ui/fonts/`.

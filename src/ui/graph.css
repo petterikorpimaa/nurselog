@@ -43,6 +43,11 @@
 .node.done .node-icon { stroke: var(--c); }
 .node.approved .node-icon { stroke: var(--ink); }
 .node.changes .node-icon { stroke: var(--warm); }
+/* the changes node's wrench, the follow-ups' fix icon at 1.5, and the reviewer's fix count in its place (decision 151),
+   in the node letter's font, three digits and more at 8 px */
+.node .node-wrench { stroke-width: 1.5; }
+.node .node-count { font: 700 10px var(--f-mono); fill: var(--warm); text-anchor: middle; }
+.node .node-count.long { font-size: 8px; }
 .node.waiting .node-icon { stroke: var(--you); }
 .node .node-letter { font: 700 10px var(--f-mono); fill: var(--ink); text-anchor: middle; }
 /* a running node's model icon (model-icons.ts): its glyph follows `color`; its strokes scale with the graph like the
@@ -69,7 +74,7 @@
 .join-bar.partial { fill: var(--fg-2); }
 .join-bar.done { fill: var(--shared); }
 
-/* texts: notes, the Join count, reviewer labels, stage labels, "+ added during build" */
+/* texts: notes, the Join count, reviewer labels, stage labels, "+ added during Implement" */
 .graph-text.note { font: 500 10px var(--f-mono); fill: var(--fg-3); }
 .graph-text.join-count { font: 600 10px var(--f-mono); fill: var(--fg-2); }
 .graph-text.reviewer { font: 500 10.5px var(--f-mono); fill: var(--fg-2); }

@@ -1,4 +1,6 @@
 import {
+  DEFAULT_CONFIG,
+  PACKAGE_ROOT,
   WorkerMissingError,
   WorkerTimeoutError,
   appendEvent,
@@ -8,19 +10,18 @@ import {
   createUsageFacts,
   describeError,
   diffTargetOf,
+  loadConfig,
   loadPrices,
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-OMBC2G6E.js";
+} from "./chunk-4VI3FZIO.js";
 import {
-  DEFAULT_CONFIG,
   FIELD_NAMES,
   HOOK_DEFAULTS,
   MAIN_AGENT,
   MAX_READ_DAYS,
   NONCE,
-  PACKAGE_ROOT,
   RUNNING_CHECK_MS,
   STREAM_ID,
   TOKEN_CHANGED,
@@ -46,7 +47,6 @@ import {
   findConfig,
   gitCommonDir,
   listSpoolFiles,
-  loadConfig,
   localDay,
   loopbackJson,
   newLineId,
@@ -81,13 +81,104 @@ import {
   userConfigPath,
   validateMarkerInput,
   writePrivate
-} from "./chunk-OHFJPS3R.js";
+} from "./chunk-KSQVLKAZ.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
 import { readFileSync as readFileSync2 } from "fs";
 import { createServer } from "http";
 import { join } from "path";
+
+// src/model/payloads.ts
+var mostRecentlyActive = (repositories) => {
+  let newest;
+  for (const repository of repositories) {
+    if (!newest || (repository.lastLineAt() ?? "") > (newest.lastLineAt() ?? "")) {
+      newest = repository;
+    }
+  }
+  return newest;
+};
+var countsOf = (board) => {
+  let running = 0;
+  let waiting = 0;
+  for (const id of board.order) {
+    const run = board.runs[id];
+    if (!run) {
+      continue;
+    }
+    running += Object.values(run.agents).filter((agent) => displayState(run, agent) === "running").length;
+    const open = run.questions.filter((question) => question.state === "open" && question.audience === "user");
+    const asked = new Set(open.filter((question) => question.node.kind === "gate").map((question) => question.node.id));
+    const gates = Object.entries(run.gates).filter(([gate, entry]) => entry.state === "waiting" && !asked.has(gate));
+    waiting += open.length + gates.length;
+  }
+  return { running, waiting };
+};
+var SUMMARY_AFTER_MS = 30 * 60 * 1e3;
+var sessionSummary = (session) => {
+  const { id, key, title, kind, startedAt, endedAt, finishedAt, lastActiveAt, outcome, costUsd } = session;
+  const branches = session.rows.map((row) => row.branch);
+  return { id, key, title, kind, startedAt, endedAt, finishedAt, lastActiveAt, outcome, branches, tokens: processedTokens(session.tokens.total), costUsd };
+};
+var rowCalls = (agent) => {
+  const last = agent.recent.length - 1;
+  return agent.recent.filter((call, index) => index === last || call.permission === "waiting" && !call.endedAt);
+};
+var trimAgent = (agent) => {
+  const { report, ...rest } = agent;
+  const trimmed = { ...rest, recent: rowCalls(agent), trimmed: true };
+  if (report) {
+    trimmed.report = { text: reportLine(report.text), via: report.via };
+  }
+  return trimmed;
+};
+var trimSession = (session) => {
+  const agents = Object.fromEntries(Object.entries(session.agents).map(([id, agent]) => [id, trimAgent(agent)]));
+  return { ...session, agents };
+};
+var sessionView = (view, now) => {
+  const nowMs = Date.parse(now ?? "");
+  const gateWaits = (session) => session.promote?.state === "waiting" || session.docs?.state === "waiting";
+  const waits = (session) => session.chip.tone === "you" || gateWaits(session) || session.questions.some(blockingForYou);
+  const past = (session) => session.finishedAt !== void 0 && nowMs - Date.parse(session.finishedAt) > SUMMARY_AFTER_MS;
+  const entries = Object.entries(view.sessions);
+  const summarised = new Set(entries.filter(([, session]) => past(session) && !waits(session)).map(([id]) => id));
+  const sessions = Object.fromEntries(entries.filter(([id]) => !summarised.has(id)).map(([id, session]) => [id, trimSession(session)]));
+  const summaries = view.sessionOrder.filter((id) => summarised.has(id)).map((id) => sessionSummary(view.sessions[id]));
+  summaries.sort((a, b) => Date.parse(b.finishedAt ?? "") - Date.parse(a.finishedAt ?? "") || compareText(a.id, b.id));
+  return { ...view, sessions, sessionOrder: view.sessionOrder.filter((id) => !summarised.has(id)), summaries };
+};
+var withList = (body, listText, typicalText = "") => `${body.slice(0, -1)},"repositories":${listText}${typicalText === "" ? "" : `,"typical":${typicalText}`}}`;
+var typicalTextOf = (repository, view) => {
+  const typical = view === "sessions" ? repository.typical?.() : void 0;
+  return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
+};
+var repositorySummary = (repository, counts = countsOf(repository.store.state().board)) => {
+  const { id, name } = repository;
+  return { id, name, lastLineAt: repository.lastLineAt(), ...counts };
+};
+var viewBody = (store, view) => view === "runs" ? JSON.stringify(store.snapshot()) : JSON.stringify(sessionView(store.sessions(), store.state().index.now));
+var snapshotText = (repository, view, listText, body) => {
+  const list = listText ?? JSON.stringify([repositorySummary(repository)]);
+  const viewText = body ?? viewBody(repository.store, view);
+  return withList(viewText, list, typicalTextOf(repository, view));
+};
+var sessionBody = (store, id, agentId = null) => {
+  const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
+  if (agentId === null) {
+    const session = store.session(id);
+    return session === void 0 ? { status: 404, body: unknownSession } : { status: 200, body: session };
+  }
+  const found = store.sessionAgent(id, agentId);
+  if ("agent" in found) {
+    return { status: 200, body: found.agent };
+  }
+  if (found.missing === "session") {
+    return { status: 404, body: unknownSession };
+  }
+  return { status: 404, body: { error: "unknown-agent", message: "This session has no agent with this id." } };
+};
 
 // src/spool/fixture-job.ts
 var FIXTURE_TIMEOUT_MS = 120 * 1e3;
@@ -212,65 +303,6 @@ var SECURITY_HEADERS = {
   "Cross-Origin-Resource-Policy": "same-origin"
 };
 var UNAUTHORIZED_HEADERS = { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "WWW-Authenticate": 'Bearer realm="nurselog"' };
-var mostRecentlyActive = (repositories) => {
-  let newest;
-  for (const repository of repositories) {
-    if (!newest || (repository.lastLineAt() ?? "") > (newest.lastLineAt() ?? "")) {
-      newest = repository;
-    }
-  }
-  return newest;
-};
-var countsOf = (board) => {
-  let running = 0;
-  let waiting = 0;
-  for (const id of board.order) {
-    const run = board.runs[id];
-    if (!run) {
-      continue;
-    }
-    running += Object.values(run.agents).filter((agent) => displayState(run, agent) === "running").length;
-    const open = run.questions.filter((question) => question.state === "open" && question.audience === "user");
-    const asked = new Set(open.filter((question) => question.node.kind === "gate").map((question) => question.node.id));
-    const gates = Object.entries(run.gates).filter(([gate, entry]) => entry.state === "waiting" && !asked.has(gate));
-    waiting += open.length + gates.length;
-  }
-  return { running, waiting };
-};
-var SUMMARY_AFTER_MS = 30 * 60 * 1e3;
-var sessionSummary = (session) => {
-  const { id, key, title, kind, startedAt, endedAt, finishedAt, lastActiveAt, outcome, costUsd } = session;
-  const branches = session.rows.map((row) => row.branch);
-  return { id, key, title, kind, startedAt, endedAt, finishedAt, lastActiveAt, outcome, branches, tokens: processedTokens(session.tokens.total), costUsd };
-};
-var rowCalls = (agent) => {
-  const last = agent.recent.length - 1;
-  return agent.recent.filter((call, index) => index === last || call.permission === "waiting" && !call.endedAt);
-};
-var trimAgent = (agent) => {
-  const { report, ...rest } = agent;
-  const trimmed = { ...rest, recent: rowCalls(agent), trimmed: true };
-  if (report) {
-    trimmed.report = { text: reportLine(report.text), via: report.via };
-  }
-  return trimmed;
-};
-var trimSession = (session) => {
-  const agents = Object.fromEntries(Object.entries(session.agents).map(([id, agent]) => [id, trimAgent(agent)]));
-  return { ...session, agents };
-};
-var sessionView = (view, now) => {
-  const nowMs = Date.parse(now ?? "");
-  const gateWaits = (session) => session.promote?.state === "waiting" || session.docs?.state === "waiting";
-  const waits = (session) => session.chip.tone === "you" || gateWaits(session) || session.questions.some(blockingForYou);
-  const past = (session) => session.finishedAt !== void 0 && nowMs - Date.parse(session.finishedAt) > SUMMARY_AFTER_MS;
-  const entries = Object.entries(view.sessions);
-  const summarised = new Set(entries.filter(([, session]) => past(session) && !waits(session)).map(([id]) => id));
-  const sessions = Object.fromEntries(entries.filter(([id]) => !summarised.has(id)).map(([id, session]) => [id, trimSession(session)]));
-  const summaries = view.sessionOrder.filter((id) => summarised.has(id)).map((id) => sessionSummary(view.sessions[id]));
-  summaries.sort((a, b) => Date.parse(b.finishedAt ?? "") - Date.parse(a.finishedAt ?? "") || compareText(a.id, b.id));
-  return { ...view, sessions, sessionOrder: view.sessionOrder.filter((id) => !summarised.has(id)), summaries };
-};
 var REPOSITORY_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/config", "GET /api/events", "GET /api/session", "GET /api/fixture"]);
 var VIEW_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/events"]);
 var VIEWS = /* @__PURE__ */ new Set(["runs", "sessions"]);
@@ -282,6 +314,8 @@ var SCRIPT = "text/javascript; charset=utf-8";
 var MANIFEST = "application/manifest+json; charset=utf-8";
 var PNG = "image/png";
 var SVG = "image/svg+xml";
+var FONT_WOFF2 = "font/woff2";
+var FONT_TTF = "font/ttf";
 var UI_ASSETS = /* @__PURE__ */ new Map([
   ["/", { file: "index.html", type: HTML }],
   ["/manifest.webmanifest", { file: "manifest.webmanifest", type: MANIFEST }],
@@ -296,7 +330,9 @@ var UI_ASSETS = /* @__PURE__ */ new Map([
   ["/ui/icon-192.png", { file: "icon-192.png", type: PNG }],
   ["/ui/icon-512.png", { file: "icon-512.png", type: PNG }],
   ["/ui/icon-maskable-512.png", { file: "icon-maskable-512.png", type: PNG }],
-  ["/ui/apple-touch-icon.png", { file: "apple-touch-icon.png", type: PNG }]
+  ["/ui/apple-touch-icon.png", { file: "apple-touch-icon.png", type: PNG }],
+  ["/ui/fonts/InterVariable.woff2", { file: "fonts/InterVariable.woff2", type: FONT_WOFF2 }],
+  ["/ui/fonts/JetBrainsMono-Variable.ttf", { file: "fonts/JetBrainsMono-Variable.ttf", type: FONT_TTF }]
 ]);
 var readAsset = (path) => {
   try {
@@ -363,11 +399,6 @@ var withoutTicket = (target) => {
   url.searchParams.delete("ticket");
   return `${url.pathname}${url.search}`;
 };
-var withList = (body, listText, typicalText = "") => `${body.slice(0, -1)},"repositories":${listText}${typicalText === "" ? "" : `,"typical":${typicalText}`}}`;
-var typicalTextOf = (repository, view) => {
-  const typical = view === "sessions" ? repository.typical?.() : void 0;
-  return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
-};
 var createBoardServer = (options) => {
   const uiDir = options.uiDir ?? join(PACKAGE_ROOT, "src", "ui");
   const builtUiDir = options.builtUiDir ?? join(PACKAGE_ROOT, "dist", "ui");
@@ -407,10 +438,7 @@ var createBoardServer = (options) => {
     }
     return fresh;
   };
-  const summaryOf = (repository) => {
-    const { id, name } = repository;
-    return { id, name, lastLineAt: repository.lastLineAt(), ...countsFor(repository) };
-  };
+  const summaryOf = (repository) => repositorySummary(repository, countsFor(repository));
   const summaries = () => options.repositories().map(summaryOf);
   const bodyOf = (repository, view) => {
     const cached = bodies.get(repository.id)?.[view];
@@ -418,13 +446,13 @@ var createBoardServer = (options) => {
       return cached;
     }
     const { store } = repository;
-    const fresh = view === "runs" ? JSON.stringify(store.snapshot()) : JSON.stringify(sessionView(store.sessions(), store.state().index.now));
+    const fresh = viewBody(store, view);
     if (followed.get(repository.id)?.store === store) {
       bodies.set(repository.id, { ...bodies.get(repository.id), [view]: fresh });
     }
     return fresh;
   };
-  const snapshotText = (repository, view, listText = JSON.stringify(summaries())) => withList(bodyOf(repository, view), listText, typicalTextOf(repository, view));
+  const snapshotText2 = (repository, view, listText = JSON.stringify(summaries())) => snapshotText(repository, view, listText, bodyOf(repository, view));
   const broadcast = () => {
     pending = void 0;
     sentAt = Date.now();
@@ -440,7 +468,7 @@ var createBoardServer = (options) => {
           continue;
         }
         const name = `${shown.view} ${shown.id}`;
-        const message = messages.get(name) ?? `data: ${snapshotText(repository, shown.view, listText)}
+        const message = messages.get(name) ?? `data: ${snapshotText2(repository, shown.view, listText)}
 
 `;
         messages.set(name, message);
@@ -506,7 +534,7 @@ var createBoardServer = (options) => {
       sendJson(response, 503, { error: "too-many-clients", message: `Nurselog serves at most ${maxClients} event streams.` });
       return;
     }
-    const message = repository.loading?.() ? "" : `data: ${snapshotText(repository, view)}
+    const message = repository.loading?.() ? "" : `data: ${snapshotText2(repository, view)}
 
 `;
     response.writeHead(200, { ...SECURITY_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
@@ -554,20 +582,8 @@ ${message}`);
     });
   };
   const sendSession = (response, repository, id, agentId) => {
-    const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
-    if (agentId === null) {
-      const session = repository.store.session(id);
-      sendJson(response, session === void 0 ? 404 : 200, session ?? unknownSession);
-      return;
-    }
-    const found = repository.store.sessionAgent(id, agentId);
-    if ("agent" in found) {
-      sendJson(response, 200, found.agent);
-    } else if (found.missing === "session") {
-      sendJson(response, 404, unknownSession);
-    } else {
-      sendJson(response, 404, { error: "unknown-agent", message: "This session has no agent with this id." });
-    }
+    const { status, body } = sessionBody(repository.store, id, agentId);
+    sendJson(response, status, body);
   };
   let slicing;
   const sliceFailure = (error) => {
@@ -767,7 +783,7 @@ ${message}`);
     } else if (key === "GET /api/repositories") {
       sendJson(response, 200, summaries());
     } else if (key === "GET /api/state" && repository) {
-      whenReady(request, response, repository, () => sendJsonText(response, 200, snapshotText(repository, view)));
+      whenReady(request, response, repository, () => sendJsonText(response, 200, snapshotText2(repository, view)));
     } else if (key === "GET /api/session" && repository) {
       whenReady(request, response, repository, () => sendSession(response, repository, target.id ?? "", target.agent));
     } else if (key === "GET /api/fixture" && repository) {
@@ -837,10 +853,9 @@ ${message}`);
   };
 };
 
-// src/server/replay.ts
-import { readFileSync as readFileSync3 } from "fs";
+// src/spool/fixture-replay.ts
 var ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
-var readLines = (path) => readFileSync3(path, "utf8").split("\n").filter((line) => line.trim());
+var fixtureLines = (text) => text.split("\n").filter((line) => line.trim());
 var parse = (text) => {
   try {
     return JSON.parse(text);
@@ -906,8 +921,8 @@ var mergeFixtures = (fixtures) => {
     next[pick] += 1;
   }
 };
-var replayFixtures = (paths, speed, onLine) => {
-  const contents = paths.map(readLines);
+var replayFixtureTexts = (texts, speed, onLine) => {
+  const contents = texts.map(fixtureLines);
   const lines = contents.length === 1 ? contents[0].map((text) => ({ text, time: timeOf(text) })) : mergeFixtures(contents);
   let timer;
   let finish = () => {
@@ -940,6 +955,10 @@ var replayFixtures = (paths, speed, onLine) => {
     }
   };
 };
+
+// src/server/replay.ts
+import { readFileSync as readFileSync3 } from "fs";
+var replayFixtures = (paths, speed, onLine) => replayFixtureTexts(paths.map((path) => readFileSync3(path, "utf8")), speed, onLine);
 
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
@@ -1019,7 +1038,7 @@ var DIALOG_ORIGINS = /* @__PURE__ */ new Set(["marker", "ask-tool", "permission"
 var isDialog = (question) => question.audience === "user" && DIALOG_ORIGINS.has(question.origin);
 var allSubagents = (session) => Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT).sort(byStart);
 var subagentsOf = (session, stage) => allSubagents(session).filter((agent) => agent.stage === stage);
-var buildOf = (agent) => {
+var implementOf = (agent) => {
   const { toolCalls, verifyRounds } = agent.budget;
   const commands = VERIFY_KINDS.reduce((sum, kind) => sum + verifyRounds.commands[kind], 0);
   const failed = VERIFY_KINDS.reduce((sum, kind) => sum + verifyRounds.results[kind].filter((result) => result === "fail").length, 0);
@@ -1080,7 +1099,7 @@ var sessionAggregate = (session) => {
     work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
     metrics: { ...metrics, branches, resumes: { count, expired, cacheWriteUsd } },
     main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit },
-    builds: subagentsOf(session, "build").map(buildOf),
+    builds: subagentsOf(session, "implement").map(implementOf),
     reviews: subagentsOf(session, "review").map(reviewOf),
     agents: allSubagents(session).map(agentOf),
     rows: session.rows.map(rowOf),

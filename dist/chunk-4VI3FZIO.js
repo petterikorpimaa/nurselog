@@ -1,21 +1,31 @@
 import {
+  CONFIG_NOT_OBJECT,
   DEFAULT_CONFIG,
   MAX_CONFIG_BYTES,
   MAX_POLL_SECONDS,
   MIN_POLL_SECONDS,
   PROGRESS_ITEMS_CAP,
+  SERVER_PORT_WARNING,
   STALE_AGENT_MS,
+  STATE_FILE_WARNING,
   appendSpoolLine,
   cdTarget,
+  configOf,
+  configProblems,
   createHistoryHandler,
   createSpoolReader,
   createStore,
+  dropUserOnlyKeys,
   expandHome,
   firstWorkedCopy,
   githubRepoOfRemote,
+  hookConfigProblems,
   isBranchName,
+  isPlainObject,
+  linearEngine,
   linearRegExp,
   literalWord,
+  mergeOverDefaults,
   newLineId,
   normalizePath,
   ownEntry,
@@ -28,8 +38,55 @@ import {
   stripControl,
   tildeHome,
   time,
+  userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-OHFJPS3R.js";
+} from "./chunk-KSQVLKAZ.js";
+
+// src/config.ts
+import { existsSync } from "fs";
+import { dirname, join, resolve } from "path";
+import { fileURLToPath } from "url";
+var PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+var DEFAULT_CONFIG2 = { ...structuredClone(DEFAULT_CONFIG), pricesFrom: join(PACKAGE_ROOT, "prices.json") };
+var mergeOverDefaults2 = (parsed) => mergeOverDefaults(parsed, DEFAULT_CONFIG2);
+var configOf2 = (parsed, warn) => configOf(parsed, warn, DEFAULT_CONFIG2);
+var validateConfig = (config, root, linear = linearEngine()) => [...hookConfigProblems(config, root).map(stripControl), ...configProblems(config, linear)];
+var loadConfig = (found, root, warn = () => {
+}) => {
+  if (found === void 0 || !existsSync(found.path)) {
+    return structuredClone(DEFAULT_CONFIG2);
+  }
+  const { path } = found;
+  const shown = stripControl(path);
+  let parsed;
+  try {
+    parsed = JSON.parse(readSmallFile(path, MAX_CONFIG_BYTES));
+  } catch (error) {
+    throw new Error(`${shown}: ${stripControl(error.message)}`);
+  }
+  if (!isPlainObject(parsed)) {
+    throw new Error(`${shown}: ${CONFIG_NOT_OBJECT}`);
+  }
+  if (isPlainObject(parsed.server) && "stateFile" in parsed.server) {
+    warn(`${shown}: ${STATE_FILE_WARNING}`);
+    delete parsed.server.stateFile;
+  }
+  if (isPlainObject(parsed.server) && "port" in parsed.server) {
+    warn(`${shown}: ${SERVER_PORT_WARNING}`);
+    delete parsed.server.port;
+  }
+  if (found.kind !== "user") {
+    for (const key of dropUserOnlyKeys(parsed)) {
+      warn(`${shown}: ${userOnlyWarning(key)}`);
+    }
+  }
+  const config = configOf2(parsed, (warning) => warn(`${shown}: ${warning}`));
+  const problems = validateConfig(config, root);
+  if (problems.length > 0) {
+    throw new Error(`${shown}: ${problems.join("; ")}`);
+  }
+  return config;
+};
 
 // src/spool/writer.ts
 var createLine = (src, event, data, envelope = {}) => {
@@ -45,13 +102,13 @@ var appendEvent = (dir, event, maxLineBytes) => appendSpoolLine(dir, event, "dat
 // src/facts/shared.ts
 import { execFile } from "child_process";
 var COMMAND_TIMEOUT_MS = 15e3;
-var runCommand = (command, args, cwd, env) => new Promise((resolve3, reject) => {
+var runCommand = (command, args, cwd, env) => new Promise((resolve4, reject) => {
   const childEnv = env ? { ...process.env, ...env } : void 0;
   execFile(command, args, { cwd, env: childEnv, timeout: COMMAND_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, encoding: "utf8" }, (error, stdout) => {
     if (error) {
       reject(error);
     } else {
-      resolve3(stdout.trim());
+      resolve4(stdout.trim());
     }
   });
 });
@@ -110,9 +167,9 @@ var createBashTracker = () => {
 };
 
 // src/facts/git.ts
-import { existsSync, readFileSync, realpathSync } from "fs";
+import { existsSync as existsSync2, readFileSync, realpathSync } from "fs";
 import { realpath, stat } from "fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "path";
+import { basename, dirname as dirname2, isAbsolute, join as join2, resolve as resolve2 } from "path";
 var REMOVAL_SWEEP_MS = 5 * 60 * 1e3;
 var STAT_TIMEOUT_MS = 5e3;
 var MAX_HUNG_STATS = 2;
@@ -147,14 +204,14 @@ var lastGroup = (command, match) => {
   return group === void 0 ? void 0 : command.slice(end - group.length, end);
 };
 var realPath = (path) => {
-  const full = resolve(expandHome(path));
+  const full = resolve2(expandHome(path));
   const rest = [];
   let existing = full;
   for (; ; ) {
     try {
-      return join(realpathSync(existing), ...rest);
+      return join2(realpathSync(existing), ...rest);
     } catch {
-      const parent = dirname(existing);
+      const parent = dirname2(existing);
       if (parent === existing) {
         return full;
       }
@@ -163,16 +220,16 @@ var realPath = (path) => {
     }
   }
 };
-var fullPath = (path) => resolve(expandHome(path));
+var fullPath = (path) => resolve2(expandHome(path));
 var resolveIn = (base, word) => {
   if (word === void 0) {
     return void 0;
   }
   const path = expandHome(word);
   if (isAbsolute(path)) {
-    return resolve(path);
+    return resolve2(path);
   }
-  return base === void 0 ? void 0 : resolve(base, path);
+  return base === void 0 ? void 0 : resolve2(base, path);
 };
 var createGitFacts = (options) => {
   const { config, write } = options;
@@ -189,7 +246,7 @@ var createGitFacts = (options) => {
   const eventDirs = /* @__PURE__ */ new Set();
   const bashCalls = createBashTracker();
   const common = options.repoCommonDir;
-  const mainCheckout = common && basename(common) === ".git" ? dirname(common) : void 0;
+  const mainCheckout = common && basename(common) === ".git" ? dirname2(common) : void 0;
   let live = false;
   let stopped = false;
   let queue = Promise.resolve();
@@ -221,7 +278,7 @@ var createGitFacts = (options) => {
       return "this";
     }
     const common2 = await git(["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(quiet(`git rev-parse in ${path}`));
-    if (common2 === "" || !existsSync(common2)) {
+    if (common2 === "" || !existsSync2(common2)) {
       return "unknown";
     }
     return realpathSync(common2) === options.repoCommonDir ? "this" : "other";
@@ -351,14 +408,14 @@ var createGitFacts = (options) => {
     }
     return false;
   };
-  const within = (call) => new Promise((resolve3, reject) => {
+  const within = (call) => new Promise((resolve4, reject) => {
     const { operation, kind, target, what } = call;
     const started = Date.now();
     const pending = call.run();
     const timer = setTimeout(() => {
       hungStats.set(target, { started, kind });
       logStat("warning", `${what}: ${operation} did not answer within ${STAT_TIMEOUT_MS / 1e3} s`);
-      resolve3(TIMED_OUT);
+      resolve4(TIMED_OUT);
     }, STAT_TIMEOUT_MS);
     timer.unref();
     const settled = (outcome) => {
@@ -371,14 +428,14 @@ var createGitFacts = (options) => {
     };
     pending.then((value) => {
       settled(operation === "stat" ? "present" : "resolved");
-      resolve3(value);
+      resolve4(value);
     }, (error) => {
       settled(error.code === "ENOENT" ? "gone" : error.message);
       reject(error);
     });
   });
   const statEntry = async (path, check, counted) => {
-    const target = check === "removal" ? join(path, ".git") : path;
+    const target = check === "removal" ? join2(path, ".git") : path;
     const subjects2 = { removal: `whether the worktree ${path} was removed`, add: `the worktree add at ${path}`, lookup: `the directory ${path}` };
     const what = `could not check ${subjects2[check]}`;
     const outside = check === "lookup" && !inWorktrees(path);
@@ -415,10 +472,10 @@ var createGitFacts = (options) => {
       const target = existing;
       try {
         const real = await within({ operation: "realpath", kind: "worktree", target, what, run: () => realpathOf(target) });
-        return real === TIMED_OUT ? void 0 : join(real, ...rest);
+        return real === TIMED_OUT ? void 0 : join2(real, ...rest);
       } catch (error) {
         const failure = error;
-        const parent = dirname(existing);
+        const parent = dirname2(existing);
         if (failure.code !== "ENOENT" && failure.code !== "ENOTDIR") {
           if (!stopped) {
             warnOnce(`${what}: ${failure.message}`, addCheck(path));
@@ -452,7 +509,7 @@ var createGitFacts = (options) => {
     branches.delete(worktree);
     settleAdds(worktree, branch);
     clearWarnings(fullPath(worktree));
-    clearWarnings(join(fullPath(worktree), ".git"));
+    clearWarnings(join2(fullPath(worktree), ".git"));
     clearWarnings(addCheck(worktree));
     forks.delete(branch);
     subjects.delete(branch);
@@ -500,8 +557,8 @@ var createGitFacts = (options) => {
   };
   const gitdirOf = (path) => {
     try {
-      const named = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(path, ".git"), "utf8"))?.[1];
-      return named === void 0 ? void 0 : realPath(resolve(path, named.trim()));
+      const named = /^gitdir:\s*(.+)$/m.exec(readFileSync(join2(path, ".git"), "utf8"))?.[1];
+      return named === void 0 ? void 0 : realPath(resolve2(path, named.trim()));
     } catch {
       return void 0;
     }
@@ -512,7 +569,7 @@ var createGitFacts = (options) => {
   };
   const namesPrunedGitdir = (path) => {
     const gitdir = gitdirOf(path);
-    return gitdir !== void 0 && common !== void 0 && gitdir.startsWith(`${common}/`) && !existsSync(gitdir);
+    return gitdir !== void 0 && common !== void 0 && gitdir.startsWith(`${common}/`) && !existsSync2(gitdir);
   };
   const checkAdd = async (path) => {
     const found = await statEntry(path, "add");
@@ -871,7 +928,7 @@ var createGitFacts = (options) => {
 
 // src/facts/gh.ts
 var pollIntervalMs = (seconds) => {
-  const value = typeof seconds === "number" && Number.isFinite(seconds) ? seconds : DEFAULT_CONFIG.github.pollSeconds;
+  const value = typeof seconds === "number" && Number.isFinite(seconds) ? seconds : DEFAULT_CONFIG2.github.pollSeconds;
   return Math.min(MAX_POLL_SECONDS, Math.max(MIN_POLL_SECONDS, value)) * 1e3;
 };
 var PR_FIELDS = "number,title,url,state,headRefName,baseRefName,createdAt,mergedAt,closedAt";
@@ -1202,7 +1259,7 @@ var createGhFacts = (options) => {
 // src/facts/usage.ts
 import { createHash } from "crypto";
 import { closeSync, constants, fstatSync, openSync, readSync } from "fs";
-import { dirname as dirname2, join as join2, resolve as resolve2, sep } from "path";
+import { dirname as dirname3, join as join3, resolve as resolve3, sep } from "path";
 var SYNTHETIC_MODEL = "<synthetic>";
 var CHUNK_BYTES = 1 << 20;
 var TOKEN_FIELDS = ["input", "cacheWrite", "cacheWrite1h", "cacheRead", "output"];
@@ -1279,7 +1336,7 @@ var createUsageFacts = (options) => {
   const known = /* @__PURE__ */ new Map();
   const unpriced = /* @__PURE__ */ new Set();
   const reported = /* @__PURE__ */ new Set();
-  const projectsDir = resolve2(expandHome(options.projectsDir ?? "~/.claude/projects"));
+  const projectsDir = resolve3(expandHome(options.projectsDir ?? "~/.claude/projects"));
   let live = false;
   const warnOnce = (path, message) => {
     if (!reported.has(path)) {
@@ -1398,7 +1455,7 @@ var createUsageFacts = (options) => {
     }, delayMs));
   };
   const follow = (path, sessionId, cwd, agentId) => {
-    if (!files.has(path) && !(resolve2(path).startsWith(`${projectsDir}${sep}`) && path.endsWith(".jsonl"))) {
+    if (!files.has(path) && !(resolve3(path).startsWith(`${projectsDir}${sep}`) && path.endsWith(".jsonl"))) {
       warnOnce(path, `transcript ${path} is outside ${projectsDir}; not read`);
       return;
     }
@@ -1434,7 +1491,7 @@ var createUsageFacts = (options) => {
       if (agentPath) {
         follow(expandHome(agentPath), event.sessionId, event.cwd, event.agentId);
       } else if (main && AGENT_ID.test(event.agentId)) {
-        follow(join2(dirname2(main), event.sessionId, "subagents", `agent-${event.agentId}.jsonl`), event.sessionId, event.cwd, event.agentId);
+        follow(join3(dirname3(main), event.sessionId, "subagents", `agent-${event.agentId}.jsonl`), event.sessionId, event.cwd, event.agentId);
       }
     },
     historyView: () => ({
@@ -1498,14 +1555,14 @@ var diffTargetOf = (state, agentId) => {
 };
 
 // src/spool/worker-job.ts
-import { existsSync as existsSync2 } from "fs";
+import { existsSync as existsSync3 } from "fs";
 import { Worker } from "worker_threads";
 var WorkerMissingError = class extends Error {
 };
 var WorkerTimeoutError = class extends Error {
 };
-var runWorkerJob = (workerFile, job, what, options = {}) => new Promise((resolve3, reject) => {
-  if (!existsSync2(workerFile)) {
+var runWorkerJob = (workerFile, job, what, options = {}) => new Promise((resolve4, reject) => {
+  if (!existsSync3(workerFile)) {
     reject(new WorkerMissingError(`${workerFile} is not built yet; run pnpm build in the Nurselog package`));
     return;
   }
@@ -1530,7 +1587,7 @@ var runWorkerJob = (workerFile, job, what, options = {}) => new Promise((resolve
   const timer = timeoutMs === void 0 ? void 0 : setTimeout(() => timedOut(timeoutMs), timeoutMs);
   const cancel = () => finish(() => reject(new Error(`the ${what} was cancelled`)));
   options.signal?.addEventListener("abort", cancel, { once: true });
-  worker.once("message", (answer) => finish(() => resolve3(answer)));
+  worker.once("message", (answer) => finish(() => resolve4(answer)));
   worker.once("error", (error) => finish(() => reject(error)));
   worker.once("messageerror", (error) => finish(() => reject(error)));
   worker.once("exit", (code) => finish(() => reject(new Error(`the ${what} worker exited with code ${code} before it answered`))));
@@ -1628,6 +1685,11 @@ var readReplayAnswer = (value, producers) => {
 var runReplayJob = (workerFile, job, signal) => runWorkerJob(workerFile, job, "replay", { signal });
 
 export {
+  PACKAGE_ROOT,
+  DEFAULT_CONFIG2 as DEFAULT_CONFIG,
+  mergeOverDefaults2 as mergeOverDefaults,
+  validateConfig,
+  loadConfig,
   createLine,
   appendEvent,
   runCommand,

@@ -290,9 +290,10 @@ import { connect } from "net";
 import { homedir } from "os";
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-var HOOK_DEFAULTS = { spool: { dir: "~/.local/share/nurselog", maxLineBytes: 65536, keepDays: 14 } };
+
+// hooks/browser-safe.mjs
 var DEFAULT_ROLES = {
-  implementer: { stage: "build" },
+  implementer: { stage: "implement" },
   "conventions-checker": { stage: "review", short: "conv" },
   "code-reviewer": { stage: "review", short: "code" },
   "spec-reviewer": { stage: "review", short: "spec" },
@@ -305,6 +306,12 @@ var DEFAULT_ROLES = {
   "pr-shepherd": { stage: "pr" },
   "*": { stage: "other" }
 };
+var LEGACY_ROLE_STAGE = "build";
+var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// hooks/lib.mjs
+var HOOK_DEFAULTS = { spool: { dir: "~/.local/share/nurselog", maxLineBytes: 65536, keepDays: 14 } };
 var CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "bin", "nurselog");
 var UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\\]/;
 var HIDDEN_PATH = "path hidden: it holds a control character or a backslash";
@@ -363,11 +370,9 @@ var notSetUpMessage = (cli = CLI_PATH, short = shortCommandWorks(cli)) => {
   }
   return `Nurselog is not set up for this repository; run: ${cliCommand(void 0, "init", cli, short)}`;
 };
-var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 var stripControlLines = (text) => text.split("\n").map(stripControl).join("\n  ");
 var STATE_FILE_WARNING = "server.stateFile is no longer used and is ignored; the board writes ~/.local/share/nurselog/server.json";
 var SERVER_PORT_WARNING = "server.port is ignored: one board serves every repository, on 6767 or --port";
-var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var expandHome = (path) => path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path;
 var tildeHome = (text) => {
   const home = homedir();
@@ -565,7 +570,8 @@ var parseObject = (text) => {
 };
 var mergeRoles = (roles) => {
   const merged = Object.assign(/* @__PURE__ */ Object.create(null), DEFAULT_ROLES);
-  for (const [type, role] of Object.entries(isObject(roles) ? roles : {})) {
+  for (const [type, given] of Object.entries(isObject(roles) ? roles : {})) {
+    const role = isObject(given) && given.stage === LEGACY_ROLE_STAGE ? { ...given, stage: "implement" } : given;
     merged[type] = isObject(role) && isObject(merged[type]) ? { ...merged[type], ...role } : role;
   }
   return merged;
@@ -1728,20 +1734,7 @@ var openAppWindow = async (url, deps = {}) => {
   return void 0;
 };
 
-// src/config.ts
-import { existsSync as existsSync2 } from "fs";
-import { basename as basename2, dirname as dirname2, join as join2, resolve as resolve2 } from "path";
-import { fileURLToPath as fileURLToPath2 } from "url";
-
 // src/linear-regexp.ts
-import { setFlagsFromString } from "v8";
-var flagsFrozen = (execArgv, nodeOptions = "") => {
-  const args = [...execArgv, ...nodeOptions.split(/\s+/)];
-  return args.some((arg) => arg.replaceAll("_", "-") === "--freeze-flags-after-init");
-};
-if (!flagsFrozen(process.execArgv, process.env.NODE_OPTIONS)) {
-  setFlagsFromString("--enable-experimental-regexp-engine");
-}
 var probeLinearEngine = () => {
   try {
     new RegExp("a", "l");
@@ -1750,11 +1743,12 @@ var probeLinearEngine = () => {
     return false;
   }
 };
-var LINEAR_ENGINE = probeLinearEngine();
+var probed;
+var linearEngine = () => probed ??= probeLinearEngine();
 var PATTERN_INPUT_CHARS = 16384;
 var FALLBACK_INPUT_CHARS = 400;
-var patternInput = (text, linear = LINEAR_ENGINE) => text.slice(0, linear ? PATTERN_INPUT_CHARS : FALLBACK_INPUT_CHARS);
-var linearRegExp = (source, flags = "", linear = LINEAR_ENGINE) => new RegExp(source, linear ? `${flags}l` : flags);
+var patternInput = (text, linear = linearEngine()) => text.slice(0, linear ? PATTERN_INPUT_CHARS : FALLBACK_INPUT_CHARS);
+var linearRegExp = (source, flags = "", linear = linearEngine()) => new RegExp(source, linear ? `${flags}l` : flags);
 
 // src/model/keys.ts
 var BRANCH_KEY_PATTERN = "[A-Z][A-Z0-9]+-\\d+";
@@ -1816,8 +1810,7 @@ var branchKey = (branch, key, ignoreCase) => {
   return void 0;
 };
 
-// src/config.ts
-var PACKAGE_ROOT = resolve2(dirname2(fileURLToPath2(import.meta.url)), "..");
+// src/config-core.ts
 var defaultJoinPattern = (trunk) => `git diff (?:origin/)?${escapeRegExp(trunk)}\\.\\.\\.[^\\s>]+\\s*>`;
 var trunkJoinPattern = (config) => {
   const branches2 = config.branches;
@@ -1831,7 +1824,7 @@ var DEFAULT_CONFIG = {
   branches: { trunk: "main", promote: [] },
   github: { repo: "", accountPattern: "", pollSeconds: 60, mergeBy: "developer", promoteTitlePrefix: {} },
   packages: [],
-  stageColors: { plan: "#aeb4bf", build: "#8fa6cc", review: "#7dd8d0", fix: "#ff9a7a", pr: "#e8eaef", docs: "#e9d28c", wait: "#ffffff" },
+  stageColors: { plan: "#aeb4bf", implement: "#8fa6cc", review: "#7dd8d0", fix: "#ff9a7a", pr: "#e8eaef", docs: "#e9d28c", wait: "#ffffff" },
   roles: structuredClone(DEFAULT_ROLES),
   docs: { roles: ["doc-updater"], tools: [] },
   modelLetters: { "claude-haiku": "H", "claude-sonnet": "S", "claude-opus": "O", "claude-fable": "F" },
@@ -1844,7 +1837,8 @@ var DEFAULT_CONFIG = {
   },
   verification: { runners: [...VERIFICATION_RUNNERS], kinds: { ...VERIFICATION_KINDS }, failPatterns: { ...VERIFICATION_FAIL_PATTERNS }, fullRunOnly: true },
   join: { pattern: defaultJoinPattern("main") },
-  pricesFrom: join2(PACKAGE_ROOT, "prices.json"),
+  // The Node config (`src/config.ts`) gives `prices.json` of this package; the browser-safe core reads no file.
+  pricesFrom: "",
   spool: { dir: "~/.local/share/nurselog", readDays: 7, keepDays: 14, maxLineBytes: 65536 },
   insights: { window: 5, baseline: 20, minBaseline: 10, keepDays: 365 },
   retention: { indexHours: 6 },
@@ -1863,15 +1857,36 @@ var mergeConfig = (base, override) => {
   }
   return merged;
 };
+var LEGACY_STAGE_COLORS = [["brief", "plan"], ["build", "implement"]];
 var readLegacyStageColor = (parsed) => {
   const colors = parsed.stageColors;
-  if (!isPlainObject(colors) || !Object.hasOwn(colors, "brief")) {
+  if (!isPlainObject(colors)) {
     return;
   }
-  if (!Object.hasOwn(colors, "plan")) {
-    colors.plan = colors.brief;
+  for (const [old, current] of LEGACY_STAGE_COLORS) {
+    if (!Object.hasOwn(colors, old)) {
+      continue;
+    }
+    if (!Object.hasOwn(colors, current)) {
+      colors[current] = colors[old];
+    }
+    delete colors[old];
   }
-  delete colors.brief;
+};
+var readLegacyRoleStages = (parsed) => {
+  const roles = parsed.roles;
+  if (!isPlainObject(roles)) {
+    return;
+  }
+  for (const role of Object.values(roles)) {
+    if (isPlainObject(role) && role.stage === LEGACY_ROLE_STAGE) {
+      role.stage = "implement";
+    }
+  }
+};
+var readLegacyNames = (parsed) => {
+  readLegacyStageColor(parsed);
+  readLegacyRoleStages(parsed);
 };
 var REPO_PART = /^(?!-)(?!\.{1,2}$)[\w.-]+$/;
 var MAX_PATTERN = 200;
@@ -1967,7 +1982,7 @@ var packagePathProblems = (packages) => {
 };
 var MIN_POLL_SECONDS = 10;
 var MAX_POLL_SECONDS = 3600;
-var ROLE_STAGES = ["build", "review", "pr", "other"];
+var ROLE_STAGES = ["implement", "review", "pr", "other"];
 var OBJECT = "an object";
 var STRING_LIST = "a list of strings";
 var LIMIT = "null or an integer of 0 or more";
@@ -1998,7 +2013,7 @@ var DEFAULTED_KEYS = [
   ["github.pollSeconds", `an integer from ${MIN_POLL_SECONDS} to ${MAX_POLL_SECONDS}`, isPollSeconds],
   ["github.mergeBy", "developer or agent", isMergeBy],
   ["roles", OBJECT, isPlainObject],
-  ["roles.*", "an object with a stage of build, review, pr or other and an optional string short", isRole],
+  ["roles.*", "an object with a stage of implement, review, pr or other and an optional string short", isRole],
   ["docs", OBJECT, isPlainObject],
   ["docs.roles", STRING_LIST, isStringList],
   ["docs.tools", STRING_LIST, isStringList],
@@ -2170,8 +2185,8 @@ var keyCaseWarnings = (config) => {
   }
   return [`keyPattern holds the lower-case letter ${letter}, which matches nothing with keyIgnoreCase (the text is upper-cased first); write the pattern in upper case`];
 };
-var validateConfig = (config, root, linear = LINEAR_ENGINE) => {
-  const problems = hookConfigProblems(config, root);
+var configProblems = (config, linear = linearEngine()) => {
+  const problems = [];
   if (config.github.repo !== "" && !isGithubRepo(config.github.repo)) {
     problems.push("github.repo must be empty or owner/name");
   }
@@ -2212,62 +2227,36 @@ var validateConfig = (config, root, linear = LINEAR_ENGINE) => {
   }
   return problems.map(stripControl);
 };
-var mergeOverDefaults = (parsed) => {
-  const config = mergeConfig(structuredClone(DEFAULT_CONFIG), parsed);
-  const join4 = config.join;
+var mergeOverDefaults = (parsed, defaults2 = DEFAULT_CONFIG) => {
+  const config = mergeConfig(structuredClone(defaults2), parsed);
+  const join3 = config.join;
   const configured = isPlainObject(parsed.join) && parsed.join.pattern !== void 0;
-  if (isPlainObject(join4) && !configured) {
-    join4.pattern = trunkJoinPattern(config);
+  if (isPlainObject(join3) && !configured) {
+    join3.pattern = trunkJoinPattern(config);
   }
   return config;
 };
-var loadConfig = (found, root, warn2 = () => {
-}) => {
-  if (found === void 0 || !existsSync2(found.path)) {
-    return structuredClone(DEFAULT_CONFIG);
-  }
-  const { path } = found;
-  const shown = stripControl(path);
-  let parsed;
-  try {
-    parsed = JSON.parse(readSmallFile(path, MAX_CONFIG_BYTES));
-  } catch (error) {
-    throw new Error(`${shown}: ${stripControl(error.message)}`);
-  }
+var CONFIG_NOT_OBJECT = "the config must be a JSON object";
+var configOf = (parsed, warn2 = () => {
+}, defaults2 = DEFAULT_CONFIG) => {
   if (!isPlainObject(parsed)) {
-    throw new Error(`${shown}: the config must be a JSON object`);
+    throw new Error(CONFIG_NOT_OBJECT);
   }
-  if (isPlainObject(parsed.server) && "stateFile" in parsed.server) {
-    warn2(`${shown}: ${STATE_FILE_WARNING}`);
-    delete parsed.server.stateFile;
-  }
-  if (isPlainObject(parsed.server) && "port" in parsed.server) {
-    warn2(`${shown}: ${SERVER_PORT_WARNING}`);
-    delete parsed.server.port;
-  }
-  if (found.kind !== "user") {
-    for (const key of dropUserOnlyKeys(parsed)) {
-      warn2(`${shown}: ${userOnlyWarning(key)}`);
-    }
-  }
-  readLegacyStageColor(parsed);
-  const config = mergeOverDefaults(parsed);
+  readLegacyNames(parsed);
+  const config = mergeOverDefaults(parsed, defaults2);
   const warnings = [...restoreBadKeys(config), ...keyCaseWarnings(config)];
   for (const warning of warnings) {
-    warn2(`${shown}: ${warning}`);
-  }
-  const problems = validateConfig(config, root);
-  if (problems.length > 0) {
-    throw new Error(`${shown}: ${problems.join("; ")}`);
+    warn2(warning);
   }
   return config;
 };
+var lastSegment = (path) => path.replace(/\/+$/, "").split("/").pop() ?? "";
 var uiConfig = (config, root) => {
   const packages = config.packages.map((pkg) => ({ id: pkg.id, label: pkg.label ?? pkg.id, color: pkg.color }));
   const roleShorts = Object.fromEntries(Object.entries(config.roles).flatMap(([type, role]) => role.short ? [[type, role.short]] : []));
   const docs = config.docs.roles.length > 0 || config.docs.tools.length > 0;
   return {
-    repo: root ? basename2(root) : "",
+    repo: root ? lastSegment(root) : "",
     packages,
     stageColors: { ...config.stageColors },
     modelLetters: { ...config.modelLetters },
@@ -2280,6 +2269,16 @@ var uiConfig = (config, root) => {
     sessionFixtures: false
   };
 };
+
+// src/linear-flag.ts
+import { setFlagsFromString } from "v8";
+var flagsFrozen = (execArgv, nodeOptions = "") => {
+  const args = [...execArgv, ...nodeOptions.split(/\s+/)];
+  return args.some((arg) => arg.replaceAll("_", "-") === "--freeze-flags-after-init");
+};
+if (!flagsFrozen(process.execArgv, process.env.NODE_OPTIONS)) {
+  setFlagsFromString("--enable-experimental-regexp-engine");
+}
 
 // src/model/counts.ts
 var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -3438,8 +3437,8 @@ var compile = (config) => {
     const promptKey = config.keyPattern === "" ? void 0 : keyRegExp(config.keyPattern);
     const branchKey2 = branchKeyRegExp(config.keyPattern || BRANCH_KEY_PATTERN);
     const keyIgnoreCase = config.keyIgnoreCase === true && promptKey !== void 0;
-    const join4 = linearRegExp(config.join.pattern);
-    compiled = { branchKey: branchKey2, promptKey, keyIgnoreCase, join: join4, kinds, failPatterns: new Map(failEntries), packagePaths, runners: new Set(config.verification.runners) };
+    const join3 = linearRegExp(config.join.pattern);
+    compiled = { branchKey: branchKey2, promptKey, keyIgnoreCase, join: join3, kinds, failPatterns: new Map(failEntries), packagePaths, runners: new Set(config.verification.runners) };
     compiledConfigs.set(config, compiled);
   }
   return compiled;
@@ -3462,7 +3461,7 @@ var roleConfig = (role, config) => {
 var isModelAlias = (model) => !model.includes("-");
 
 // src/model/factories.ts
-var STAGE_ORDER = ["plan", "build", "join", "review", "fix", "pr", "merge", "promote", "docs"];
+var STAGE_ORDER = ["plan", "implement", "join", "review", "fix", "pr", "merge", "promote", "docs"];
 var GATE_IDS = ["plan", "merge", "promote", "docs"];
 var LOG_CAP = 200;
 var JOINS_CAP = 20;
@@ -3552,12 +3551,12 @@ var ensureAgent = (run, agentKey, event, config) => {
 
 // src/model/stages.ts
 var GATE_STAGE = { plan: "plan", merge: "merge", promote: "promote", docs: "docs" };
-var STAGE_LABELS = { plan: "Plan", build: "Build", join: "Join", review: "Review", fix: "Fix", pr: "PR", merge: "Merge", promote: "Promote", docs: "Docs" };
+var STAGE_LABELS = { plan: "Plan", implement: "Implement", join: "Join", review: "Review", fix: "Fix", pr: "PR", merge: "Merge", promote: "Promote", docs: "Docs" };
 var FINAL_STATES = /* @__PURE__ */ new Set(["done", "approved", "changes", "handed", "failed", "skipped"]);
 var ACTIVE_STATES = /* @__PURE__ */ new Set(["running", "waiting"]);
-var PAST_BUILD = ["join", "review", "pr", "merge"];
+var PAST_IMPLEMENT = ["join", "review", "pr", "merge"];
 var SETTLED = /* @__PURE__ */ new Set(["done", "failed", "skipped"]);
-var SETTLED_PAST_BUILD = /* @__PURE__ */ new Set([...SETTLED, "handed"]);
+var SETTLED_PAST_IMPLEMENT = /* @__PURE__ */ new Set([...SETTLED, "handed"]);
 var setStage = (run, id, state, at) => {
   const stage = run.stages[id];
   if (stage.state === state) {
@@ -3576,8 +3575,8 @@ var setStage = (run, id, state, at) => {
     delete stage.endedAt;
   }
   stage.state = state;
-  if (started && PAST_BUILD.includes(id)) {
-    passBuild(run, at);
+  if (started && PAST_IMPLEMENT.includes(id)) {
+    passImplement(run, at);
   }
 };
 var setGate = (run, id, state, line, source, note) => {
@@ -3604,7 +3603,7 @@ var setGate = (run, id, state, line, source, note) => {
 };
 var nodeStage = (node) => {
   if (node.kind === "stream") {
-    return "build";
+    return "implement";
   }
   if (node.kind === "reviewer") {
     return "review";
@@ -3697,32 +3696,32 @@ var endPlan = (run, line) => {
     setGate(run, "plan", "done", line, run.gates.plan.source);
   }
 };
-var pastBuild = (run) => PAST_BUILD.some((id) => run.stages[id].startedAt !== void 0);
-var checkBuild = (run, at) => {
+var pastImplement = (run) => PAST_IMPLEMENT.some((id) => run.stages[id].startedAt !== void 0);
+var checkImplement = (run, at) => {
   if (run.streams.length === 0) {
     return;
   }
-  const settled = pastBuild(run) ? SETTLED_PAST_BUILD : SETTLED;
+  const settled = pastImplement(run) ? SETTLED_PAST_IMPLEMENT : SETTLED;
   const settledAll = run.streams.every((stream) => settled.has(stream.state));
   if (settledAll) {
     let end = "done";
     if (run.streams.some((stream) => stream.state === "failed")) {
       end = "failed";
-    } else if (!run.stages.build.startedAt && run.streams.every((stream) => stream.state === "skipped")) {
+    } else if (!run.stages.implement.startedAt && run.streams.every((stream) => stream.state === "skipped")) {
       end = "skipped";
     }
-    setStage(run, "build", end, at);
-  } else if (!ACTIVE_STATES.has(run.stages.build.state)) {
-    setStage(run, "build", "running", at);
+    setStage(run, "implement", end, at);
+  } else if (!ACTIVE_STATES.has(run.stages.implement.state)) {
+    setStage(run, "implement", "running", at);
   }
 };
-var passBuild = (run, at) => {
+var passImplement = (run, at) => {
   for (const stream of run.streams) {
     if (stream.planned && stream.state === "pending" && stream.agentIds.length === 0) {
       stream.state = "skipped";
     }
   }
-  checkBuild(run, at);
+  checkImplement(run, at);
 };
 var checkReview = (run, at) => {
   if (run.reviewers.length === 0) {
@@ -4774,8 +4773,8 @@ var mergeRun = (target, run) => {
     }
   }
   target.costUsd += run.costUsd;
-  if (pastBuild(target)) {
-    passBuild(target, time(run.lastEventAt) > time(target.lastEventAt) ? run.lastEventAt : target.lastEventAt);
+  if (pastImplement(target)) {
+    passImplement(target, time(run.lastEventAt) > time(target.lastEventAt) ? run.lastEventAt : target.lastEventAt);
   }
 };
 var remapRunKeys = (entries, oldId, newId) => {
@@ -5257,8 +5256,8 @@ var diffPathRun = (state, event) => {
     const absolute = path !== void 0 && isAbsolute2(path);
     return absolute && (paths.some((entry) => namesPath(entry, path)) || mentionsPath(prompt, path));
   };
-  const ownJoins = (run) => run.joins.filter((join4) => join4.sessionId === event.sessionId && named(join4.diffPath));
-  const candidates = Object.values(state.board.runs).flatMap((run) => ownJoins(run).map((join4) => ({ run, at: time(join4.at) })));
+  const ownJoins = (run) => run.joins.filter((join3) => join3.sessionId === event.sessionId && named(join3.diffPath));
+  const candidates = Object.values(state.board.runs).flatMap((run) => ownJoins(run).map((join3) => ({ run, at: time(join3.at) })));
   candidates.sort((a, b) => b.at - a.at || compareText(a.run.id, b.run.id));
   const live = (run) => !ownValue(state.index.worktrees, run.worktree)?.removedAt && runIdFor(state, run.worktree) === run.id;
   return candidates.find((candidate) => live(candidate.run))?.run;
@@ -5500,14 +5499,14 @@ var onWorktreeRemoved = (state, data, at) => {
 var PROGRESS_SEGMENTS = 12;
 var PROGRESS_ITEMS_CAP = 200;
 var PROGRESS_SEEN_CAP = 400;
-var PHASE_SHARES = { build: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
+var PHASE_SHARES = { implement: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
 var READ = 0;
 var EDIT = 1;
 var VERIFY = 2;
 var PUSH = 0;
 var PR_OPEN = 1;
 var FINISHING = 2;
-var PROGRESS_STAGES = /* @__PURE__ */ new Set(["build", "review", "pr"]);
+var PROGRESS_STAGES = /* @__PURE__ */ new Set(["implement", "review", "pr"]);
 var REDACTED2 = "[redacted]";
 var itemsProgress = (kind, matched) => {
   const progress = { kind, total: matched.length, done: matched.filter(Boolean).length };
@@ -5663,8 +5662,8 @@ var matchesOf = (worktree, items, paths, aliases) => {
 var setFixItems = (entry, agent, target, aliases) => {
   if (!target) {
     clearItems(entry);
-    if (agent.progress?.kind !== "build") {
-      agent.progress = phaseProgress("build", READ);
+    if (agent.progress?.kind !== "implement") {
+      agent.progress = phaseProgress("implement", READ);
     }
     return;
   }
@@ -5691,7 +5690,7 @@ var beginLeg = (state, run, agentId, at, config) => {
   }
   const entry = ownEntry(state.index.agentProgress, agentId, () => ({ legAt, at, atMs: time(at) }));
   delete agent.progress;
-  if (agent.stage === "build") {
+  if (agent.stage === "implement") {
     const aliases = state.index.worktreeAliases;
     setFixItems(entry, agent, fixTarget(run, home.run, agentId, config, aliases), aliases);
   } else if (agent.stage === "pr") {
@@ -5700,7 +5699,7 @@ var beginLeg = (state, run, agentId, at, config) => {
   }
 };
 var refreshFixItems = (state, run, agentId, at, config) => {
-  const found = runningEntry(state, agentId, "build");
+  const found = runningEntry(state, agentId, "implement");
   if (!found) {
     return;
   }
@@ -5730,7 +5729,7 @@ var noteRead = (state, agentId, filePath, at) => {
   entry.seen = seen;
 };
 var noteEdit = (state, agentId, filePath, at) => {
-  const found = runningEntry(state, agentId, "build");
+  const found = runningEntry(state, agentId, "implement");
   if (!found || !isAbsolute2(filePath)) {
     return;
   }
@@ -5743,18 +5742,18 @@ var noteEdit = (state, agentId, filePath, at) => {
     }
     return;
   }
-  if (agent.progress?.kind === "build" && agent.progress.current !== EDIT) {
-    agent.progress = phaseProgress("build", EDIT);
+  if (agent.progress?.kind === "implement" && agent.progress.current !== EDIT) {
+    agent.progress = phaseProgress("implement", EDIT);
   }
 };
 var noteVerification = (state, agentId, at) => {
-  const found = runningEntry(state, agentId, "build");
+  const found = runningEntry(state, agentId, "implement");
   if (!found) {
     return;
   }
   touch(found.entry, at);
-  if (found.agent.progress?.kind === "build" && found.agent.progress.current === EDIT) {
-    found.agent.progress = phaseProgress("build", VERIFY);
+  if (found.agent.progress?.kind === "implement" && found.agent.progress.current === EDIT) {
+    found.agent.progress = phaseProgress("implement", VERIFY);
   }
 };
 var movePrPhase = (state, agentId, phase, at) => {
@@ -6039,6 +6038,7 @@ var onGhFact = (state, event, config) => {
 };
 
 // src/model/markers.ts
+var OLD_STAGE_NAMES = { brief: "plan", build: "implement" };
 var newestLine = (session) => time(session.lastEventAt ?? session.startedAt);
 var markerStamp = (state, event, run) => {
   if (event.src === "hook") {
@@ -6123,7 +6123,7 @@ var onPlan = (state, event, config) => {
     }
   }
   if (run.streams.some((stream) => stream.agentIds.length > 0)) {
-    checkBuild(run, event.at);
+    checkImplement(run, event.at);
   }
   const describe = streams.map((stream) => stream.after?.length ? `${stream.id} after ${stream.after.join(", ")}` : stream.id).join("; ");
   const line = markerStamp(state, event, run);
@@ -6170,7 +6170,7 @@ var questionNode = (run, ref) => {
   if (run.fixes.some((fix) => fix.id === ref)) {
     return { kind: "fix", id: ref };
   }
-  const id = ref === "brief" ? "plan" : ref;
+  const id = Object.hasOwn(OLD_STAGE_NAMES, ref) ? OLD_STAGE_NAMES[ref] : ref;
   if (GATE_IDS.includes(id)) {
     return { kind: "gate", id };
   }
@@ -6315,7 +6315,7 @@ var addDeveloperAnswers = (session, event) => {
 var OVERHEAD_CHARS_PER_TOKEN = 3;
 var LISTING_CHARS = 513;
 var TOOL_DEFINITION_CHARS = { plan: 1088, gate: 644, question: 1071 };
-var SKILL_BODY_CHARS = 8278;
+var SKILL_BODY_CHARS = 8347;
 var SKILL_NAMES = /* @__PURE__ */ new Set(["nurselog", "nurselog:nurselog"]);
 var MAIN = "main";
 var OVERHEAD_PART_KEYS = ["markers", "reportParagraph", "listing", "toolDefinitions", "markerCalls", "reportBlocks", "skill"];
@@ -6536,10 +6536,10 @@ var attachStream = (run, agent, target, line, sessions) => {
   const { at } = line;
   let stream = run.streams.find((item) => item.id === target.id);
   if (!stream) {
-    const midBuild = run.streams.length > 0 || run.plan !== void 0;
+    const midImplement = run.streams.length > 0 || run.plan !== void 0;
     stream = { id: target.id, package: target.package, state: "running", after: [], planned: false, addedAt: at, agentIds: [] };
     run.streams.push(stream);
-    logRun(run, line, midBuild ? "added (not in the plan)" : "stream started", "normal", agent.id);
+    logRun(run, line, midImplement ? "added (not in the plan)" : "stream started", "normal", agent.id);
   }
   const previousId = stream.agentIds[stream.agentIds.length - 1];
   const previous = previousId ? run.agents[previousId] : void 0;
@@ -6553,7 +6553,7 @@ var attachStream = (run, agent, target, line, sessions) => {
   stream.state = "running";
   stream.model = agent.model ?? stream.model;
   agent.streamId = stream.id;
-  setStage(run, "build", "running", at);
+  setStage(run, "implement", "running", at);
 };
 var reopenStream = (run, agent, at) => {
   const stream = run.streams.find((item) => item.id === agent.streamId);
@@ -6561,7 +6561,7 @@ var reopenStream = (run, agent, at) => {
     return;
   }
   stream.state = "running";
-  checkBuild(run, at);
+  checkImplement(run, at);
 };
 var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
   let linked = false;
@@ -6599,7 +6599,7 @@ var startImplementer = (run, agent, target, line, sessions) => {
   if (target) {
     attachStream(run, agent, target, line, sessions);
   } else {
-    setStage(run, "build", "running", line.at);
+    setStage(run, "implement", "running", line.at);
   }
 };
 var reviewSession = (run, line, config) => isTrunkLike(run.branch, config) ? line.sessionId : void 0;
@@ -6638,9 +6638,9 @@ var resumeRoleStage = (run, agent, line, config) => {
     checkFix(run, at);
   } else if (fix && changes) {
     startFix(run, changes, fix.streamId, agent.id, line);
-  } else if (agent.stage === "build" && agent.streamId !== void 0 && changes) {
+  } else if (agent.stage === "implement" && agent.streamId !== void 0 && changes) {
     startFix(run, changes, fixStreamFor(run, { id: agent.streamId }), agent.id, line);
-  } else if (agent.stage === "build" && agent.streamId !== void 0) {
+  } else if (agent.stage === "implement" && agent.streamId !== void 0) {
     reopenStream(run, agent, at);
   } else if (reviewer && reviewer.agentId === agent.id) {
     reviewer.state = "running";
@@ -6649,7 +6649,7 @@ var resumeRoleStage = (run, agent, line, config) => {
   }
 };
 var startRoleStage = (state, run, agent, target, line, config) => {
-  if (agent.stage === "build") {
+  if (agent.stage === "implement") {
     startImplementer(run, agent, target, line, state.index.agentSessions);
   } else if (agent.stage === "review") {
     startReviewer(run, agent, line, config);
@@ -6658,7 +6658,7 @@ var startRoleStage = (state, run, agent, target, line, config) => {
   }
 };
 var roleStageStarted = (run, agent) => {
-  if (agent.stage === "build") {
+  if (agent.stage === "implement") {
     return agent.streamId !== void 0 || run.fixes.some((fix) => fix.agentId === agent.id);
   }
   if (agent.stage === "review") {
@@ -6708,7 +6708,7 @@ var detachStream = (run, agent) => {
     }
     stream.state = newest2.state;
   } else if (stream.planned) {
-    stream.state = pastBuild(run) ? "skipped" : "pending";
+    stream.state = pastImplement(run) ? "skipped" : "pending";
   } else {
     run.streams = run.streams.filter((item) => item !== stream);
   }
@@ -6736,7 +6736,7 @@ var rederiveImplementer = (state, run, agent, spawn2, line, config) => {
       stream.state = agent.state;
     }
   }
-  checkBuild(run, line.at);
+  checkImplement(run, line.at);
 };
 var swapId = (id, a, b) => {
   if (id === a) {
@@ -6772,7 +6772,7 @@ var swapBindings = (run, a, b, at) => {
     [a.streamId, b.streamId] = [b.streamId, a.streamId];
   }
   [a.reviewerId, b.reviewerId] = [b.reviewerId, a.reviewerId];
-  checkBuild(run, at);
+  checkImplement(run, at);
   checkReview(run, at);
   checkFix(run, at);
 };
@@ -6834,7 +6834,7 @@ var finalizeWorker = (run, agent, at, config) => {
     checkFix(run, at);
     return;
   }
-  if (agent.stage === "build") {
+  if (agent.stage === "implement") {
     if (agent.state !== "handed") {
       agent.state = hasReport ? atBudget(agent) ? "handed" : "done" : "failed";
     }
@@ -6842,7 +6842,7 @@ var finalizeWorker = (run, agent, at, config) => {
     if (stream && stream.agentIds[stream.agentIds.length - 1] === agent.id) {
       stream.state = agent.state;
     }
-    checkBuild(run, at);
+    checkImplement(run, at);
     return;
   }
   agent.state = hasReport ? "done" : "failed";
@@ -6864,7 +6864,7 @@ var finalLogLine = (run, agent) => {
     const text = agent.state === "changes" ? "changes requested" : agent.state;
     return { text, tone: agent.state === "changes" || failed ? "warn" : "done" };
   }
-  if (agent.stage === "build") {
+  if (agent.stage === "implement") {
     const text = agent.state === "handed" ? `handed back at ${agent.budget.toolCalls.used} calls` : agent.state;
     return { text, tone: failed ? "failed" : "normal" };
   }
@@ -7075,12 +7075,12 @@ var onAgentPre = (state, run, parentAgent, event, config) => {
   if (key) {
     run.key = key;
   }
-  if (roleConfig(subagentType, config).stage === "build") {
+  if (roleConfig(subagentType, config).stage === "implement") {
     endPlan(run, event);
   }
 };
 var keepSpawnStream = (state, run, agentId, spawn2, config) => {
-  const target = roleConfig(spawn2.subagentType, config).stage === "build" ? streamFor(state, run, spawn2, config) : void 0;
+  const target = roleConfig(spawn2.subagentType, config).stage === "implement" ? streamFor(state, run, spawn2, config) : void 0;
   if (target) {
     state.index.agentStreams[agentId] = { id: target.id, package: target.package, at: spawn2.at, atMs: spawn2.atMs };
   }
@@ -7139,14 +7139,14 @@ var rebindSpawn = (state, run, spawn2, data, line, config) => {
     previous.background = other?.background ?? previous.background;
     keepDescription(previous, other);
   } else {
-    if (previous && previous.stage === "build" && !previous.fromBehaviour && !run.fixes.some((fix) => fix.agentId === previous.id)) {
+    if (previous && previous.stage === "implement" && !previous.fromBehaviour && !run.fixes.some((fix) => fix.agentId === previous.id)) {
       detachStream(run, previous);
     }
     if (previous) {
       delete previous.spawnToolUseId;
       delete previous.description;
     }
-    if (agent && agent.stage === "build" && !agent.fromBehaviour && roleStageStarted(run, agent)) {
+    if (agent && agent.stage === "implement" && !agent.fromBehaviour && roleStageStarted(run, agent)) {
       rederiveImplementer(state, run, agent, spawn2, line, config);
     }
   }
@@ -7210,7 +7210,7 @@ var onAgentStart = (state, event, config) => {
   if (copies.some((copy) => copy?.fromBehaviour)) {
     agent.fromBehaviour = true;
   }
-  agent.stage = agent.fromBehaviour ? "build" : roleConfig(agent.role, config).stage;
+  agent.stage = agent.fromBehaviour ? "implement" : roleConfig(agent.role, config).stage;
   if (agent.budget.toolCalls.used === 0) {
     const firstStop = agent.budget.toolCallsAtFirstStop;
     agent.budget = newBudget(agent.role, config);
@@ -7527,12 +7527,12 @@ var tokenStage = (state, run, agent, sessionId, config) => {
   if (run.fixes.some((fix) => fix.agentId === agent.id && agent.id !== "main")) {
     return "fix";
   }
-  if (agent.stage === "build" && !roleStageStarted(run, agent) && reviewerWithChanges(run)) {
+  if (agent.stage === "implement" && !roleStageStarted(run, agent) && reviewerWithChanges(run)) {
     return "fix";
   }
-  if (agent.stage === "build") {
+  if (agent.stage === "implement") {
     const stream = run.streams.find((item) => item.id === agent.streamId);
-    return `build:${stream?.package ?? state.index.agentStreams[agent.id]?.package ?? "main"}`;
+    return `implement:${stream?.package ?? state.index.agentStreams[agent.id]?.package ?? "main"}`;
   }
   if (agent.stage === "review") {
     return "review";
@@ -7551,8 +7551,8 @@ var tokenStage = (state, run, agent, sessionId, config) => {
   if (stage === "plan" || stage === "fix" || stage === "docs") {
     return stage;
   }
-  if (stage === "build") {
-    return "build:main";
+  if (stage === "implement") {
+    return "implement:main";
   }
   return stage === "join" || stage === "review" ? "review" : "pr";
 };
@@ -7865,7 +7865,7 @@ var reviewReadBranches = (state, run, agent, event, config, touched) => {
     }
   }
 };
-var buildFromBehaviour = (state, run, agent, filePath, line, config, touched) => {
+var implementFromBehaviour = (state, run, agent, filePath, line, config, touched) => {
   const aliases = state.index.worktreeAliases;
   if (agent.id === "main" || agent.stage !== "other" || run.branch === "?" || isTrunkLike(run.branch, config) || !inWorktree(run, filePath, aliases)) {
     return;
@@ -7880,7 +7880,7 @@ var buildFromBehaviour = (state, run, agent, filePath, line, config, touched) =>
   for (const other of Object.values(state.board.runs)) {
     const copy = ownValue(other.agents, agent.id);
     if (copy) {
-      copy.stage = "build";
+      copy.stage = "implement";
       copy.fromBehaviour = true;
     }
     if (copy && other !== run) {
@@ -7924,7 +7924,7 @@ var onToolPre2 = (state, event, config, touched) => {
     onBashPre(state, run, agent, event, config, touched);
   }
   if (EDIT_TOOLS.has(tool) && input.filePath) {
-    buildFromBehaviour(state, run, agent, input.filePath, event, config, touched);
+    implementFromBehaviour(state, run, agent, input.filePath, event, config, touched);
     onEditPre(state, run, agent, input.filePath, event, config);
     noteEdit(state, agentKey, input.filePath, event.at);
   }
@@ -8006,11 +8006,11 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   if (worktreeAdd) {
     callIndex.worktreeAdd = worktreeAdd;
   }
-  const join4 = compile(config).join.exec(patternInput(command));
-  if (join4 && agent.id === "main") {
-    const redirect = /^\s*(\S+)/.exec(command.slice(join4.index + join4[0].length))?.[1];
+  const join3 = compile(config).join.exec(patternInput(command));
+  if (join3 && agent.id === "main") {
+    const redirect = /^\s*(\S+)/.exec(command.slice(join3.index + join3[0].length))?.[1];
     const diffPath = redirect?.startsWith("/dev/") ? void 0 : redirect;
-    const branch = joinBranch(join4[0]);
+    const branch = joinBranch(join3[0]);
     const target = (branch ? branchRun(state, branch) : void 0) ?? run;
     target.join = diffPath ? { at: event.at, state: "running", diffPath } : { at: event.at, state: "running" };
     target.joins.push({ ...target.join, sessionId: event.sessionId });
@@ -8064,7 +8064,7 @@ var onEditPre = (state, run, agent, filePath, line, config) => {
   }
   const pkg = packageOf(relative, config);
   const unset = !agent.streamId || isFallbackStream(run, agent.streamId);
-  if (agent.stage === "build" && unset && pkg && !run.fixes.some((fix) => fix.agentId === agent.id)) {
+  if (agent.stage === "implement" && unset && pkg && !run.fixes.some((fix) => fix.agentId === agent.id)) {
     const target = packageStream(run, pkg);
     if (target.id !== agent.streamId) {
       detachStream(run, agent);
@@ -8297,13 +8297,13 @@ var isVisible = (run, config) => {
   return subagents || mainEdits || keyed || prompted || run.pr !== void 0 || run.plan !== void 0;
 };
 var stageLabel = (run, stage) => {
-  if (stage === "build") {
+  if (stage === "implement") {
     const counted = run.streams.filter((stream) => stream.state !== "skipped");
     if (counted.length > 1) {
-      return `Build \xB7 ${counted.filter((stream) => stream.state === "done").length}/${counted.length} at join`;
+      return `Implement \xB7 ${counted.filter((stream) => stream.state === "done").length}/${counted.length} at join`;
     }
     if (counted.length === 1) {
-      return `Build \xB7 ${counted[0].id}`;
+      return `Implement \xB7 ${counted[0].id}`;
     }
   }
   if (stage === "review" && run.reviewers.length > 0) {
@@ -8339,7 +8339,7 @@ var chipTone = (run) => {
     return "done";
   }
   const warm = ACTIVE_STATES.has(run.stages.fix.state) || run.reviewers.some((reviewer) => reviewer.state === "changes");
-  const handed = !pastBuild(run) && run.streams.some((stream) => stream.state === "handed");
+  const handed = !pastImplement(run) && run.streams.some((stream) => stream.state === "handed");
   const rules = [
     ["failed", run.agents.main?.state === "failed"],
     ["you", waitText(run) !== void 0],
@@ -8946,9 +8946,9 @@ var rowFixes = (ctx, fixes, reviewers) => fixes.map((fix) => {
 });
 var rowJoin = (ctx, runs) => {
   let found;
-  for (const join4 of runs.flatMap((run) => run.joins)) {
-    if (join4.sessionId === ctx.sessionId && (found === void 0 || time(join4.at) >= time(found.at))) {
-      found = join4;
+  for (const join3 of runs.flatMap((run) => run.joins)) {
+    if (join3.sessionId === ctx.sessionId && (found === void 0 || time(join3.at) >= time(found.at))) {
+      found = join3;
     }
   }
   return found === void 0 ? void 0 : { state: found.state, at: found.at };
@@ -9005,14 +9005,14 @@ var settleTime = (row, pr, continuedAt) => {
   return at;
 };
 var latestReviewers = (reviewers) => [...new Map(reviewers.map((reviewer) => [reviewer.reviewerId, reviewer])).values()];
-var building = (stream, past) => {
+var implementing = (stream, past) => {
   const latest = stream.runs.at(-1);
   return latest !== void 0 && (ACTIVE_STATES.has(latest.state) || latest.state === "handed" && !past);
 };
 var activeStage = (row, past) => {
   const reviewing = latestReviewers(row.reviewers).some((reviewer) => ACTIVE_STATES.has(reviewer.state) || reviewer.state === "changes");
   const columns = [
-    ["build", row.streams.some((stream) => building(stream, past))],
+    ["implement", row.streams.some((stream) => implementing(stream, past))],
     ["join", row.join !== void 0 && ACTIVE_STATES.has(row.join.state)],
     ["review", reviewing],
     ["fix", row.fixes.some((fix) => ACTIVE_STATES.has(fix.state))],
@@ -9041,7 +9041,7 @@ var reachedStage = (row) => {
   if (row.join) {
     return "join";
   }
-  return row.streams.length > 0 ? "built" : "worktree";
+  return row.streams.length > 0 ? "implemented" : "worktree";
 };
 var settledStage = (row, removed) => {
   const pr = row.pr?.pr;
@@ -9058,10 +9058,10 @@ var stageText = (row, stage, inPlace = false) => {
   switch (stage) {
     case "worktree":
       return inPlace ? "Branch created" : "Worktree created";
-    case "build":
-      return "Build";
-    case "built":
-      return "Built";
+    case "implement":
+      return "Implement";
+    case "implemented":
+      return "Implemented";
     case "join":
       return "Join";
     case "review": {
@@ -9164,7 +9164,7 @@ var buildRow = (ctx, row) => {
   const reviewers = rowReviewers(ctx, row.runs, fixes);
   const pr = branchPr(ctx.state, row);
   const pkg = rowPackage(ctx, row.branch);
-  const join4 = rowJoin(ctx, row.runs);
+  const join3 = rowJoin(ctx, row.runs);
   const prNode = rowPr(ctx, row.branch, pr);
   const merge = owner && pr ? rowMerge(ctx, row, pr) : void 0;
   const label = branchLabel(ctx.state, row.branch);
@@ -9179,7 +9179,7 @@ var buildRow = (ctx, row) => {
     stage: "worktree",
     stageText: "",
     streams,
-    ...join4 === void 0 ? {} : { join: join4 },
+    ...join3 === void 0 ? {} : { join: join3 },
     reviewers,
     fixes: rowFixes(ctx, fixes, reviewers),
     ...prNode === void 0 ? {} : { pr: prNode },
@@ -9197,7 +9197,7 @@ var buildRow = (ctx, row) => {
     built.stage = continued.stage;
     built.stageText = continued.text;
   } else {
-    built.stage = settled ?? activeStage(built, row.runs.some(pastBuild)) ?? reachedStage(built);
+    built.stage = settled ?? activeStage(built, row.runs.some(pastImplement)) ?? reachedStage(built);
     built.stageText = stageText(built, built.stage, built.stage === "worktree" && madeInPlace(ctx.state, row));
   }
   built.live = isLiveRow(built);
@@ -9282,7 +9282,7 @@ var idNode = (row, node) => {
 };
 var stageNode = (row, stage) => {
   switch (stage) {
-    case "build":
+    case "implement":
       return agentRef(row.streams[0]?.runs.at(-1));
     case "join":
       return row.join ? { kind: "join", branch: row.branch } : void 0;
@@ -9673,7 +9673,7 @@ var isExplorer = (agent) => {
 };
 var agentColumn = (agentId, rows, docs) => {
   if (rows.some((row) => row.streams.some((stream) => stream.runs.some((node) => node.agentId === agentId)))) {
-    return "build";
+    return "implement";
   }
   if (rows.some((row) => row.reviewers.some((node) => node.agentId === agentId))) {
     return "review";
@@ -9698,9 +9698,9 @@ var placeColumn = (place, rows, docs) => {
       return place.kind;
   }
 };
-var rowPastBuild = (state, row) => {
+var rowPastImplement = (state, row) => {
   const runs = row.runIds.map((id) => ownValue(state.board.runs, id));
-  return runs.some((run) => run !== void 0 && pastBuild(run));
+  return runs.some((run) => run !== void 0 && pastImplement(run));
 };
 var handedOpen = (stream) => {
   const unfinished = (index) => stream.runs.slice(index + 1).every((node) => ACTIVE_STATES.has(node.state));
@@ -9711,13 +9711,13 @@ var fixing = (row) => {
   return row.stage === "fix" || row.fixes.some((fix) => ACTIVE_STATES.has(fix.state)) || latest.some((reviewer) => reviewer.state === "changes");
 };
 var branches = (count) => `${count} ${count === 1 ? "branch" : "branches"}`;
-var CHIP_STAGES = { worktree: "build", build: "build", built: "build", join: "join", review: "review", fix: "fix", pr: "pr", merge: "merge" };
+var CHIP_STAGES = { worktree: "implement", implement: "implement", implemented: "implement", join: "join", review: "review", fix: "fix", pr: "pr", merge: "merge" };
 var stageChip = (state, rows, open) => {
-  const amber = open.some((row) => !rowPastBuild(state, row) && row.streams.some(handedOpen));
+  const amber = open.some((row) => !rowPastImplement(state, row) && row.streams.some(handedOpen));
   const tone = amber ? "amber" : open.some(fixing) ? "warm" : "normal";
   const at = (stage) => open.filter((row) => CHIP_STAGES[row.stage] === stage);
   const texts = [
-    ["build", (list) => `Build \xB7 ${list.length} of ${branches(rows.length)}`],
+    ["implement", (list) => `Implement \xB7 ${list.length} of ${branches(rows.length)}`],
     ["fix", (list) => `Fix \xB7 ${list.map((row) => shortBranch(row.branch)).join(", ")}`],
     ["join", () => "Join \xB7 writing the diff"],
     ["review", (list) => `Review \xB7 ${branches(list.length)}`],
@@ -9729,7 +9729,7 @@ var stageChip = (state, rows, open) => {
       return { text: text(list), tone };
     }
   }
-  return at("merge").length > 0 ? { text: "Merge \xB7 waiting for you", tone: "you" } : { text: "Build", tone };
+  return at("merge").length > 0 ? { text: "Merge \xB7 waiting for you", tone: "you" } : { text: "Implement", tone };
 };
 var mainThreadChip = (main) => {
   const words = sessionMainWords(main);
@@ -10314,8 +10314,58 @@ var createStore = (config, options = {}) => {
   };
 };
 
+// src/spool/sha1.ts
+var ROUND_CONSTANTS = [1518500249, 1859775393, 2400959708, 3395469782];
+var INITIAL_STATE = [1732584193, 4023233417, 2562383102, 271733878, 3285377520];
+var BLOCK_BYTES = 64;
+var rotateLeft = (word, bits) => (word << bits | word >>> 32 - bits) >>> 0;
+var roundFunction = (round, b, c, d) => {
+  if (round < 20) {
+    return b & c | ~b & d;
+  }
+  if (round >= 40 && round < 60) {
+    return b & c | b & d | c & d;
+  }
+  return b ^ c ^ d;
+};
+var padded = (bytes) => {
+  const blocks = new Uint8Array(Math.ceil((bytes.length + 9) / BLOCK_BYTES) * BLOCK_BYTES);
+  blocks.set(bytes);
+  blocks[bytes.length] = 128;
+  const view = new DataView(blocks.buffer);
+  const bits = bytes.length * 8;
+  view.setUint32(blocks.length - 8, Math.floor(bits / 2 ** 32));
+  view.setUint32(blocks.length - 4, bits >>> 0);
+  return view;
+};
+var sha1Hex = (text) => {
+  const view = padded(new TextEncoder().encode(text));
+  const state = [...INITIAL_STATE];
+  const words = new Uint32Array(80);
+  for (let offset = 0; offset < view.byteLength; offset += BLOCK_BYTES) {
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + index * 4);
+    }
+    for (let index = 16; index < 80; index += 1) {
+      words[index] = rotateLeft(words[index - 3] ^ words[index - 8] ^ words[index - 14] ^ words[index - 16], 1);
+    }
+    let [a, b, c, d, e] = state;
+    for (let round = 0; round < 80; round += 1) {
+      const next = rotateLeft(a, 5) + roundFunction(round, b, c, d) + e + ROUND_CONSTANTS[Math.floor(round / 20)] + words[round] >>> 0;
+      e = d;
+      d = c;
+      c = rotateLeft(b, 30);
+      b = a;
+      a = next;
+    }
+    for (const [index, word] of [a, b, c, d, e].entries()) {
+      state[index] = state[index] + word >>> 0;
+    }
+  }
+  return state.map((word) => word.toString(16).padStart(8, "0")).join("");
+};
+
 // src/spool/decode.ts
-import { createHash as createHash2 } from "crypto";
 var ignoreErrors = () => void 0;
 var isObject4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var eventsOf = (line) => line.marker ? [line.event, line.marker] : [line.event];
@@ -10333,7 +10383,7 @@ var decodeLine = (text, keyConfig) => {
     return { error: `not JSON: ${error.message}` };
   }
   if (isObject4(record) && isObject4(record.payload) && record.event === void 0) {
-    const id = typeof record.id === "string" ? record.id : `r-${createHash2("sha1").update(text).digest("hex").slice(0, 12)}`;
+    const id = typeof record.id === "string" ? record.id : `r-${sha1Hex(text).slice(0, 12)}`;
     const injectedChars = isCount(record.injectedChars) ? record.injectedChars : void 0;
     const { keyPattern, keyIgnoreCase } = keyConfig;
     const options = { at: timeOf(record), id, keyPattern, keyIgnoreCase, truncated: record.truncated === true, injectedChars };
@@ -10408,7 +10458,7 @@ var createHistoryHandler = (store, keyConfig, observers = [], onError = ignoreEr
 
 // src/spool/reader.ts
 import { closeSync as closeSync2, constants as constants2, fstatSync as fstatSync2, lstatSync as lstatSync2, openSync as openSync2, readdirSync as readdirSync2, readFileSync, readSync as readSync2, watch } from "fs";
-import { join as join3 } from "path";
+import { join as join2 } from "path";
 var FILE_NAME = /^events-(\d{4}-\d{2}-\d{2})\.ndjson$/;
 var CHUNK_BYTES = 1 << 20;
 var NEWLINE = 10;
@@ -10456,7 +10506,7 @@ var listSpoolFiles = (dir) => {
   for (const name of readdirSync2(dir)) {
     const day = FILE_NAME.exec(name)?.[1];
     if (day) {
-      files.push({ day, path: join3(dir, name) });
+      files.push({ day, path: join2(dir, name) });
     }
   }
   return files.sort((a, b) => a.day.localeCompare(b.day));
@@ -10732,6 +10782,8 @@ var createSpoolReader = (options) => {
 };
 
 export {
+  stripControl,
+  escapeRegExp,
   stripPrefix,
   HOOK_DEFAULTS,
   shellWord,
@@ -10742,9 +10794,9 @@ export {
   cliCommand,
   startCommand,
   notSetUpMessage,
-  stripControl,
   stripControlLines,
-  escapeRegExp,
+  STATE_FILE_WARNING,
+  SERVER_PORT_WARNING,
   expandHome,
   tildeHome,
   repositoryRoot,
@@ -10756,8 +10808,10 @@ export {
   userConfigPath,
   serverStatePath,
   findConfig,
+  userOnlyWarning,
   dropUserOnlyKeys,
   MAX_READ_DAYS,
+  hookConfigProblems,
   readHookConfig,
   configKeepDays,
   spoolDirFor,
@@ -10803,21 +10857,24 @@ export {
   writeSignInFile,
   SignInFileError,
   openAppWindow,
+  linearEngine,
   patternInput,
   linearRegExp,
   BRANCH_KEY_PATTERN,
   branchKeyRegExp,
   branchKey,
-  PACKAGE_ROOT,
   DEFAULT_CONFIG,
+  isPlainObject,
   mergeConfig,
+  readLegacyNames,
   isBranchName,
   githubRepoOfRemote,
   MIN_POLL_SECONDS,
   MAX_POLL_SECONDS,
-  validateConfig,
+  configProblems,
   mergeOverDefaults,
-  loadConfig,
+  CONFIG_NOT_OBJECT,
+  configOf,
   uiConfig,
   SPOOL_EVENT_NAMES,
   checkEvent,

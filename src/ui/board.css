@@ -3,6 +3,17 @@
    One dark theme. The tokens follow reference/demo.html. Package colours come from the config as --pkg-<id> and stage
    colours as --st-<key>, set on the root by src/ui/context.ts; the stage values below are the defaults until then.
    The graph styles are in graph.css, the agent table and log line styles in table.css. */
+/* the bundled fonts, served same-origin from src/ui/fonts (design section 15, "Fonts") */
+@font-face {
+  font-family: Inter; src: url("fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Variable.ttf") format("truetype");
+  font-weight: 100 800; font-style: normal; font-display: swap;
+}
+/* no ligatures: commands and paths read as typed ("!=" stays "!="); important because each font shorthand resets it */
+* { font-variant-ligatures: none !important; }
 :root {
   --page: #08090b; --card: #111318; --card-2: #171a20; --card-3: #1f232a;
   --border: rgba(255, 255, 255, .075); --border-2: rgba(255, 255, 255, .14);
@@ -10,7 +21,7 @@
   --shared: #d3d7df; --focus: #8cb4ff;
   --rev: #7dd8d0; --warm: #ff9a7a; --amber: #f5c26b; --red: #ff6b6b; --you: #ffffff;
   --ink: #0b0c0f;
-  --st-plan: #aeb4bf; --st-build: #8fa6cc; --st-review: #7dd8d0; --st-fix: #ff9a7a; --st-pr: #e8eaef;
+  --st-plan: #aeb4bf; --st-implement: #8fa6cc; --st-review: #7dd8d0; --st-fix: #ff9a7a; --st-pr: #e8eaef;
   --st-docs: #e9d28c; --st-wait: #ffffff;
   --f-ui: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -141,7 +152,7 @@ p { margin: 0; }
 .topbar-connection { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px var(--f-mono); white-space: nowrap; }
 .topbar-connection i { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); flex: none; }
 .topbar-connection[data-state="live"] i { background: var(--rev); }
-.topbar-connection[data-state="replay"] i { background: var(--st-build); }
+.topbar-connection[data-state="replay"] i { background: var(--st-implement); }
 .topbar-connection[data-state="reconnecting"] { color: var(--amber); }
 .topbar-connection[data-state="reconnecting"] i { background: var(--amber); }
 .topbar-connection[data-state="disconnected"] { color: var(--red); }
@@ -162,7 +173,7 @@ p { margin: 0; }
 .warning-time { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
 .warning-text { overflow-wrap: anywhere; }
 
-/* board: one stack per repository (board.ts); on a tab switch the previous one stays at the top, without its empty
+/* board: one stack per repository (board-page.ts); on a tab switch the previous one stays at the top, without its empty
    note, footnote or finished bar, while it slides out, and the next one slides in on top of it (later in the DOM) */
 .board { position: relative; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .board-repository { position: relative; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
@@ -322,7 +333,7 @@ p { margin: 0; }
 }
 .toast-progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--fg-3); transform-origin: left; }
 
-/* a lost event stream (board.ts sets data-connection): the board panels, the cards, the conversations and the Finished
+/* a lost event stream (board-page.ts sets data-connection): the board panels, the cards, the conversations and the Finished
    runs panel dim and their CSS animations hold still, so a stale board shows no motion that looks live; the next
    snapshot brings both back */
 .board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .cards, .conversations, .finished-panel) { opacity: .6; }

@@ -18,11 +18,11 @@
     { "id": "email", "color": "#c4b0ff", "paths": ["libs/email"] }
   ],
   "stageColors": {
-    "plan": "#aeb4bf", "build": "#8fa6cc", "review": "#7dd8d0", "fix": "#ff9a7a",
+    "plan": "#aeb4bf", "implement": "#8fa6cc", "review": "#7dd8d0", "fix": "#ff9a7a",
     "pr": "#e8eaef", "docs": "#e9d28c", "wait": "#ffffff"
   },
   "roles": {
-    "implementer": { "stage": "build" },
+    "implementer": { "stage": "implement" },
     "conventions-checker": { "stage": "review", "short": "conv" },
     "code-reviewer": { "stage": "review", "short": "code" },
     "spec-reviewer": { "stage": "review", "short": "spec" },
