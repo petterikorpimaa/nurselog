@@ -2,7 +2,8 @@
    progress chip, collapse, the conversations, the Finished runs panel, the toast and the questions section.
    One dark theme. The tokens follow reference/demo.html. Package colours come from the config as --pkg-<id> and stage
    colours as --st-<key>, set on the root by src/ui/context.ts; the stage values below are the defaults until then.
-   The graph styles are in graph.css, the agent table and log line styles in table.css. */
+   The graph styles are in graph.css, the agent table and log line styles in table.css, the workflow health strip's
+   in health.css. */
 /* the bundled fonts, served same-origin from src/ui/fonts (design section 15, "Fonts") */
 @font-face {
   font-family: Inter; src: url("fonts/InterVariable.woff2") format("woff2");
@@ -23,6 +24,9 @@
   --ink: #0b0c0f;
   --st-plan: #aeb4bf; --st-implement: #8fa6cc; --st-review: #7dd8d0; --st-fix: #ff9a7a; --st-pr: #e8eaef;
   --st-docs: #e9d28c; --st-wait: #ffffff;
+  --imp-cost: #c4b0ff; --imp-time: #8cb4ff; --imp-quality: var(--rev);
+  /* what a suggested change gains: its effect and its added lines (the demo's --web green) */
+  --gain: #8fe3b8;
   --f-ui: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -64,7 +68,8 @@ p { margin: 0; }
 /* top bar: sticky on the page colour, so the tabs stay in view on a long board, with a hairline under it only while it
    is stuck (topbar.ts sets data-stuck when the sentinel, out of the flow on the line where the bar sticks, leaves the
    view; its bottom edge is the bar's top edge, 10 px above the page's content). Above 760 px it keeps one row: the
-   brand block takes the free width, its strip scrolls inside it and the status block stays at the right. */
+   brand block takes the free width, its strip scrolls inside it and the status block stays at the right; the brand
+   block keeps at least 240 px (40 % of the bar on a narrower one), so a long status block wraps its items instead. */
 .topbar {
   position: sticky; top: 0; z-index: 40; display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
   gap: 8px 18px; margin-block: -10px; padding-block: 10px; background: var(--page); font-size: 12.5px; color: var(--fg-2);
@@ -72,7 +77,7 @@ p { margin: 0; }
 }
 .topbar[data-stuck="true"] { box-shadow: 0 1px 0 var(--border); }
 .topbar-sentinel { position: absolute; width: 1px; height: 1px; margin-top: -11px; pointer-events: none; }
-.topbar-brand { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 0; }
+.topbar-brand { display: flex; align-items: center; gap: 12px; min-width: min(240px, 40%); flex: 1 1 0; }
 .topbar-name { font-size: 15px; font-weight: 600; color: var(--fg); letter-spacing: -.01em; flex: none; }
 
 /* repository tabs (topbar.ts): borderless 34 px tabs in a tablist; one shared raised indicator sits under the selected
@@ -172,6 +177,64 @@ p { margin: 0; }
 .warnings-list li + li { border-top: 1px solid var(--border); }
 .warning-time { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
 .warning-text { overflow-wrap: anywhere; }
+
+/* the update button (update.ts; design section 15, "Update button"): the status block's last item while the source
+   reports a newer Nurselog, a pill of the button look in the --rev tone with a dot, "Update available" and the version
+   ("Update" alone at 760 px and narrower, the rest kept for assistive technology). The item is hidden without a notice,
+   so the status block keeps its gaps. Its popover opens under it, anchored right, above the board like the warnings
+   list; at 760 px and narrower, where the status block wraps, under the top bar at its right edge. The notes scroll
+   inside it past 40 % of the window, and update.ts ends it above the window's foot on open, where the notes list (a
+   scroll container, so its flex minimum is 0) gives up its height first; the command and the actions stay in reach.
+   The command wraps in its box, and the text actions and Copy have a 24 px hit area. */
+.topbar-update { position: relative; flex: none; }
+.update-button {
+  display: inline-flex; align-items: center; gap: 8px; padding-inline: 12px; border-radius: 999px; white-space: nowrap;
+  border-color: color-mix(in srgb, var(--rev) 40%, transparent); background: color-mix(in srgb, var(--rev) 8%, var(--card));
+  transition: background-color .2s, border-color .2s;
+}
+.button.update-button:is(:hover, [aria-expanded="true"]) {
+  color: var(--fg); background: color-mix(in srgb, var(--rev) 14%, var(--card));
+  border-color: color-mix(in srgb, var(--rev) 60%, transparent);
+}
+.update-button i { width: 7px; height: 7px; border-radius: 50%; background: var(--rev); flex: none; }
+.update-version { font: 600 11px var(--f-mono); color: var(--rev); }
+.update-popover {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 20; display: flex; flex-direction: column; gap: 10px;
+  width: min(380px, calc(100vw - 32px)); padding: 14px 16px; color: var(--fg); background: var(--card);
+  border: 1px solid var(--border-2); border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); transform-origin: top right;
+  overflow-y: auto; overscroll-behavior: contain;
+}
+.update-head { display: flex; flex-direction: column; gap: 2px; }
+.update-title { margin: 0; font-size: 14.5px; font-weight: 600; outline: none; }
+.update-current { font: 500 11px var(--f-mono); color: var(--fg-3); }
+.update-heading {
+  margin: 4px 0 -4px; font: 600 10px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.update-notes {
+  display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.45;
+  color: var(--fg-2); overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
+}
+.update-notes li::marker { color: var(--fg-3); }
+.update-all { position: relative; align-self: flex-start; font-size: 12px; color: var(--fg-2); text-underline-offset: 3px; border-radius: 4px; }
+.update-all:hover { color: var(--fg); }
+.update-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.update-all::before, .update-skip::before { content: ""; position: absolute; inset: -4px 0; }
+.update-command {
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; background: var(--page);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.update-command code { flex: 1; min-width: 0; font: 500 11.5px var(--f-mono); color: var(--fg); white-space: normal; overflow-wrap: anywhere; }
+.update-copy { flex: none; min-height: 24px; padding: 2px 9px; border-radius: 6px; font-size: 11.5px; color: var(--fg-2); }
+.update-copy:hover { color: var(--fg); }
+.update-restart { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3); }
+.update-restart code { font: 500 11.5px var(--f-mono); color: var(--fg-2); }
+.update-actions { display: flex; align-items: center; gap: 14px; margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--border); }
+.update-skip {
+  position: relative; border: 0; background: transparent; padding: 0; font-size: 12px; color: var(--fg-3); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.update-skip:hover { color: var(--fg-2); }
 
 /* board: one stack per repository (board-page.ts); on a tab switch the previous one stays at the top, without its empty
    note, footnote or finished bar, while it slides out, and the next one slides in on top of it (later in the DOM) */
@@ -333,11 +396,11 @@ p { margin: 0; }
 }
 .toast-progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--fg-3); transform-origin: left; }
 
-/* a lost event stream (board-page.ts sets data-connection): the board panels, the cards, the conversations and the Finished
-   runs panel dim and their CSS animations hold still, so a stale board shows no motion that looks live; the next
-   snapshot brings both back */
-.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .cards, .conversations, .finished-panel) { opacity: .6; }
-.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .cards, .conversations, .finished-panel) :is(*, *::before, *::after) {
+/* a lost event stream (board-page.ts sets data-connection): the board panels, the workflow health strip, the cards, the
+   conversations and the Finished runs panel dim and their CSS animations hold still, so a stale board shows no motion
+   that looks live; the next snapshot brings both back */
+.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .hstrip, .cards, .conversations, .finished-panel) { opacity: .6; }
+.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .hstrip, .cards, .conversations, .finished-panel) :is(*, *::before, *::after) {
   animation-play-state: paused !important;
 }
 
@@ -627,7 +690,15 @@ p { margin: 0; }
   .topbar-github { max-width: 100%; }
   /* the top bar wraps: the brand block takes its tabs' width and moves to a row of its own when they do not fit */
   .topbar { flex-wrap: wrap; }
-  .topbar-brand { flex: 0 1 auto; }
+  .topbar-brand { flex: 0 1 auto; min-width: 0; }
+  /* the update button reads "Update" alone, its name stays "Update available <version>"; its popover hangs from the top
+     bar's right edge, as the wrapped status block may start anywhere */
+  .update-button { padding-inline: 11px; }
+  .update-more, .update-version {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+  .topbar-update { position: static; }
+  .update-popover { top: calc(100% + 6px); width: min(380px, 100%); }
 }
 @media (max-width: 480px) {
   .repo-tab-name { max-width: 16ch; }
@@ -648,3 +719,11 @@ p { margin: 0; }
 
 /* the sign-in notice (sign-in.ts): the board note in place of the cards while this browser holds no board token */
 .sign-in-note code { color: var(--fg); }
+
+/* the line of a tab that handed its link to an app window (board-page.ts): the board note, "Show here" a text action
+   like the questions' .question-link; its focus ring is the button rule's, clear of the full stop */
+.hand-off-show {
+  border: 0; background: transparent; padding: 0; margin-left: 2px; cursor: pointer; white-space: nowrap;
+  color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px;
+}
+.hand-off-show:hover { color: var(--fg); }

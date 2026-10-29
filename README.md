@@ -12,7 +12,7 @@ browser, with nothing to install.
 - **Live**: the plugin's hook records every Claude Code event, and the board updates as the events arrive.
 - **What waits for you**: plan approvals, questions, open PRs and promotions stand out on the card, the tab and the app's Dock badge.
 - **Cost**: tokens and USD per agent, stage, session and ticket, read from the session transcripts.
-- **Local only**: no telemetry, no account, no runtime dependencies. The only network calls are the `gh` polls you turn on.
+- **Local only**: no telemetry, no account, no runtime dependencies. The only network calls are the `gh` polls you turn on and, from a marketplace install, the update check (`NURSELOG_UPDATE_CHECK=0` turns it off).
 - **Nothing to commit**: a Claude Code plugin with its config outside the repository.
 - **Any workflow**: a plain session already shows up; subagents, markers and `gh` fill in the rest.
 
@@ -114,6 +114,11 @@ board running from the old copy closes itself within 10 seconds, and the next se
 run `nurselog open`). To update without asking, choose Enable auto-update for `nurselog` in `/plugin` > Marketplaces;
 it is off for marketplaces outside Anthropic's. From a clone: `git pull`, then restart the board.
 
+A board from a marketplace install shows an Update button in its top bar when a newer version is out, with what is new
+and the command above. It checks the marketplace's GitHub repository a few seconds after it starts and every 6 hours,
+reading only the version and the changelog; `NURSELOG_UPDATE_CHECK=0` turns the check off. A board from a clone never
+checks.
+
 </details>
 
 <details>
@@ -214,6 +219,7 @@ alias nurselog='node ~/github/nurselog/bin/nurselog'
 | Top bar | Connection (`live`, `replay x50`), gh status, warnings, legend. |
 | Branches | Trunk and promote lines, one lane per work branch coloured by stage, merges and promotions, a time axis up to 24 h. |
 | Token use by ticket | Tokens and cost per ticket key (else branch), split by stage. |
+| Workflow health | The workflow health report as a folded strip with its count of findings to change and to consider; it opens to a map of seven steps from Main thread to Your answers, each with its setup and verdict, and its report opens from a step or "Open report". |
 | Session card | One per session that runs a subagent, edits files or opens a PR. Hovering a lane or ranking row lights its card. |
 | Card header | Ticket key and title, a progress chip (what works or waits), elapsed time, cost, model, session id (click to copy for `claude --resume`), fixture download, Summary. |
 | Graph | Plan, then per branch the Implement streams, Join, Review, Fix, PR, Merge, Promote and Docs, with "You" gates and question bubbles. Each `plan` starts a new pipeline. |
@@ -351,6 +357,7 @@ started it is removed; the next session start starts a new one.
 | --- | --- |
 | `NURSELOG_AUTO_START=0` | No auto-start; sessions get the start command instead. |
 | `NURSELOG_AUTO_OPEN=app` | The session that started the board also opens it in an app window, once (macOS and Linux). |
+| `NURSELOG_UPDATE_CHECK=0` | The board does not check the marketplace for a newer version ("Update the plugin" above). |
 
 Set them where Claude Code reads its environment: the shell profile, the `env` block of `~/.claude/settings.json`
 (which also reaches IDE and desktop sessions), or a project's `.claude/settings.json` for one repository. When no
@@ -419,6 +426,10 @@ link=$(~/.local/bin/nurselog link --session "$id" --osc8 2>/dev/null)
 printf '%s %s\n' "$model" "$link"
 ```
 
+A click on the link opens a browser tab at the session. When the board is open in an app window of the same browser,
+the tab hands the session to that window, which switches to it, and closes itself; otherwise the board opens at the
+session in the new tab.
+
 </details>
 
 <details>
@@ -485,7 +496,7 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | Command | Does |
 | --- | --- |
 | `nurselog start [--port <n>]` | Runs the board in this terminal (the default command). |
-| `nurselog start --replay <a,b> [--speed <n>]` | Replays fixtures; needs no config. |
+| `nurselog start --replay <a,b> [--speed <n>]` | Replays fixtures with a sample workflow health report; needs no config. |
 | `nurselog open [--app]` | Starts the board when needed and opens it, signed in. |
 | `nurselog status` | Board pid and URL, spool directory, lines today, this repository's tab. |
 | `nurselog link [--session <id>] [--osc8]` | This repository's board URL, for a status line. |
@@ -598,6 +609,9 @@ Arrays such as `packages` replace the default list whole.
 | `spool.maxLineBytes` `*` | `65536` | Longest spool line. |
 | `insights.window` / `baseline` / `minBaseline` | `5` / `20` / `10` | Work sessions compared by `insights`. |
 | `insights.keepDays` `*` | `365` | Days the session aggregates are kept. |
+| `insights.guidelines.budgetFirstStop` / `quietReviewer` / `overheadShare` | `0.3` / `0.3` / `0.01` | Guideline shares: implement runs at their budget by the first stop (flags at or above), a review role's last 10 runs with a fix (flags below), Nurselog's share of the cost (flags above). `null` turns one off. |
+| `insights.guidelines.mainPeakContext` / `mainLargeOutputs` | `0.4` / `2` | Guidelines of the main thread: the median peak context as a share of the context limit, the median count of outputs over 20,000 characters per session. |
+| `insights.guidelines.cachePerOutput.main` / `agents` | `350` / `100` | Guideline of cache-read tokens per output token, for the main thread and for each subagent role. |
 | `retention.indexHours` | `6` | In-memory index retention of the reducer. |
 | `features.answerFromUi` | `false` | Answering from the board is not built yet. |
 
@@ -615,7 +629,9 @@ board.
 - **Minimal recording**: the hook drops file contents, edit bodies and tool output, and redacts secrets before
   anything is written.
 - **Private files**: directories 0700, files 0600, opened without following symlinks.
-- **No telemetry**: nothing leaves the machine except the `gh` calls of a repository whose config sets `github.repo`.
+- **No telemetry**: nothing leaves the machine except the `gh` calls of a repository whose config sets `github.repo`
+  and the update check of a board from a marketplace install, which reads two files of the marketplace and sends
+  nothing of yours ("Update the plugin").
 - **No runtime dependencies**: Node built-ins only; the hook and the marker tool server are plain ESM.
 
 <details>
@@ -718,12 +734,25 @@ nurselog purge --all --yes             # every repository and orphaned spool dir
 
 ## Workflow health
 
-`nurselog insights` shows where your workflow sticks, per area (Implementers, Review, Verification, Token economy,
-Questions and waits): the last 5 work sessions against the up to 20 before them. It reads only the session aggregates,
-so it needs no running board.
+`nurselog insights` shows where your workflow sticks, per area (Delivery, Implementers, Review, Verification, Token
+economy, Questions and waits): the last 5 work sessions against the up to 20 before them and against a guideline. It
+reads only the session aggregates, so it needs no running board. The board shows the same report as a folded strip
+between the panels and the session cards, which opens to a map of seven workflow steps, each with its setup and
+verdict. A step is a button that opens the workflow health report filtered to that step, and "Open report" in the
+strip's header opens it whole.
+
+The report groups its findings as Worth changing, Worth considering, Working well, For reference and Not measured, and
+a Step filter and an Impact filter (cost, time, quality) narrow them. A finding opens its evidence: the step's setup
+line, the last sessions against the ones before and the guideline, a sparkline of the recorded sessions and the
+sessions themselves, each with "Show card" to open it on the board. A finding to change or to consider also
+suggests one fix with its effect, a measured target such as "back within the guideline", and "Show the change"
+shows the lines to add to `CLAUDE.md`, with "Copy added lines"; the board never changes a file. The token ranking
+links to the report with "N workflow changes would cut token use", and a finished session's Summary panel ends with
+"In workflow health", the findings its numbers fed.
 
 ```markdown
-- ! Implementers: 6 of the last 9 implement runs reached their tool-call budget by their first stop (67 %; the rule flags 30 % or more; before: 9 of 31).
+- ! Implementers: 6 of the last 9 implement runs reached their tool-call budget by their first stop (67%; before: 9 of 31; guideline: under 30%).
+- Delivery: the last 5 work sessions cost $126.40 for 14 PRs, $9.03 per PR (before: $8.10).
 - Review: 2 of the last 5 branches ran a second review round (before: 6 of 20).
 - Verification: not measured: no command matched verification.kinds in the last 5 work sessions.
 ```
@@ -731,9 +760,12 @@ so it needs no running board.
 <details>
 <summary>How the report is counted</summary>
 
-- A flagged line (`!`) is a standing rule (such as 30 % or more implement runs at their budget) or a comparison
-  worse than before by a fixed rule (a rate 1.5 times the earlier one, a median above the earlier 75th percentile).
-  Every line carries its numbers and the earlier ones; there is no score.
+- A flagged line (`!`) is worse than its guideline (such as 30% or more implement runs at their budget;
+  `insights.guidelines`, which flags even without earlier sessions) or worse than before by a fixed rule (a rate 1.5
+  times the earlier one, a median above the earlier 75th percentile). Every line carries its numbers, the earlier ones
+  and its guideline; there is no score.
+- Delivery counts the PRs of the work sessions: their cost per PR and per 100 changed lines (the PR size comes from
+  the gh poll), and the time from the first work on a branch to its PR. Without PRs it reads not measured.
 - A work session is a session card with at least 5 main-thread tool calls. The board writes one aggregate per session
   it has seen finish; its first start backfills `spool.readDays` days.
 - The first comparison comes after 10 earlier work sessions; until then a line reads `(before: fewer than 10 work

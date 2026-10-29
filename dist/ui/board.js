@@ -175,6 +175,18 @@ var tokens = (count) => {
   }
   return String(Math.round(value2));
 };
+var duration = (ms) => {
+  const seconds = Math.round(Math.max(0, ms) / 1e3);
+  if (seconds < 60) {
+    return `${seconds} s`;
+  }
+  const tenthMinutes = Math.round(seconds / 6);
+  if (tenthMinutes < 100) {
+    return `${(tenthMinutes / 10).toFixed(1)} min`;
+  }
+  const minutes = Math.round(seconds / 60);
+  return minutes < 120 ? `${minutes} min` : `${(Math.round(seconds / 360) / 10).toFixed(1)} h`;
+};
 var ago = (ms) => {
   const seconds = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1e3)) : 0;
   if (seconds < 5) {
@@ -205,7 +217,7 @@ var streamCount = (count) => {
   }
   return count === 1 ? "1 stream" : `${count} streams`;
 };
-var plural = (count, noun2) => `${count} ${noun2}${count === 1 ? "" : "s"}`;
+var plural = (count, noun3) => `${count} ${noun3}${count === 1 ? "" : "s"}`;
 var githubStatus = (github) => {
   const checked = github.polling || github.checkedAt !== void 0;
   if (github.error) {
@@ -690,6 +702,7 @@ var createContext = (config, now, source, root = document.documentElement) => {
     runs: {},
     sessions: {},
     typical: {},
+    health: void 0,
     repositoryId: "",
     source
   };
@@ -2765,7 +2778,7 @@ var edgePieces = (item2, a, b) => {
 var pathData = (pieces) => {
   const [x, y] = pieces[0][0];
   const steps = pieces.map((piece) => {
-    const points = piece.slice(1).map(([px3, py]) => `${fixed(px3)} ${fixed(py)}`);
+    const points = piece.slice(1).map(([px4, py]) => `${fixed(px4)} ${fixed(py)}`);
     return piece.length === 2 ? `L${points[0]}` : `C${points.join(" ")}`;
   });
   return `M${fixed(x)} ${fixed(y)} ${steps.join(" ")}`;
@@ -2887,7 +2900,7 @@ var typicalText = (used, length) => {
     return `${calls}, longer than all ${length.runs} earlier runs (the longest ${length.p90})`;
   }
   if (used > length.p90) {
-    return `${calls}, longer than usual: at least 90\xA0% of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
+    return `${calls}, longer than usual: at least 90% of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
   }
   const range = length.p25 === length.p75 ? `${length.p25}` : `${length.p25} to ${length.p75}`;
   return `${calls}, usually ${range} (${length.runs} earlier runs)`;
@@ -3392,12 +3405,12 @@ var placeSession = (session, options, room) => {
     groups2.push(newGroup(0, void 0, false, false));
   }
   const current = groups2[groups2.length - 1];
-  const groupOf = (index) => groups2.find((group) => group.index === index) ?? current;
+  const groupOf2 = (index) => groups2.find((group) => group.index === index) ?? current;
   for (const row2 of session.rows) {
-    groupOf(row2.pipeline).rows.push(row2);
+    groupOf2(row2.pipeline).rows.push(row2);
   }
   for (const agentId of session.planAgents.filter((id) => id !== docs?.agentId && session.agents[id] !== void 0)) {
-    groupOf(session.agents[agentId].pipeline).agents.push(agentId);
+    groupOf2(session.agents[agentId].pipeline).agents.push(agentId);
   }
   const planAgents = groups2.filter((group) => !group.folded).flatMap((group) => group.agents);
   const shown = {
@@ -3440,7 +3453,7 @@ var placeSession = (session, options, room) => {
     plan.forkLane = plan.fromText !== void 0 && from?.kind === "branch" && planOf.has(from.branch);
   }
   for (const plan of plans) {
-    groupOf(plan.row.pipeline).plans.push(plan);
+    groupOf2(plan.row.pipeline).plans.push(plan);
   }
   const carries = new Set(session.promote?.state === "waiting" ? session.promote.carries ?? [] : []);
   const promoted = rows.filter((row2) => promoteFeeder(row2, carries));
@@ -3545,7 +3558,7 @@ var placeSession = (session, options, room) => {
   const fixRight = Math.max(fixLeft, ...besideLabels.map((width2) => NODE_R + LABEL_GAP + width2 + 12));
   const mergeLabels = rows.filter(mergeDrawn).map((row2) => textWidth(mergeText(session, row2)));
   const mergeRowsDrawn = rows.filter(mergeDrawn);
-  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf(row2.pipeline) === current) ?? mergeRowsDrawn[0];
+  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf2(row2.pipeline) === current) ?? mergeRowsDrawn[0];
   const gateTarget = mergeRowsDrawn.find((row2) => row2.merge?.state === "waiting") ?? gateRowDrawn;
   const gateOnPromote = wrap && joined && gateTarget !== void 0 && planOf.get(gateTarget.branch) === promoteHost;
   const natural = {
@@ -3571,8 +3584,8 @@ var placeSession = (session, options, room) => {
   items.push(...columnAnchors(setA, natural, midY), ...columnAnchors(setB, natural, midY, lineBAfter));
   let extent = Math.max(setA.end, setB.end);
   const planColumn = setA.byId.plan;
-  const px3 = planColumn.start + planReach;
-  const planAt = { x: px3, y: midY };
+  const px4 = planColumn.start + planReach;
+  const planAt = { x: px4, y: midY };
   const planState = session.plan.state === "idle" ? "running" : session.plan.state;
   const idle = session.plan.state === "idle" ? { idle: true } : {};
   add({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R, agentId: "main", ...idle, ...slide2("plan", planAt) });
@@ -3583,7 +3596,7 @@ var placeSession = (session, options, room) => {
     for (const group of groups2) {
       const base = { pipeline: group.index };
       const header = headerText(group.index, group.title);
-      const headerAt = { x: px3 + HEADER_TEXT.dx, y: group.top + HEADER_TEXT.dy };
+      const headerAt = { x: px4 + HEADER_TEXT.dx, y: group.top + HEADER_TEXT.dy };
       const foldable = foldablePipeline(session, group.index);
       if (foldable) {
         const hitAt = { x: headerAt.x - HEADER_HIT_PAD, y: headerAt.y - 3.5 - HEADER_HIT / 2 };
@@ -3597,7 +3610,7 @@ var placeSession = (session, options, room) => {
         const label = group.title ? `${pipelineLabel(group.index)}: ${group.title}` : pipelineLabel(group.index);
         const tip = group.folded ? {} : { tip: foldable ? `${label}
 ${FOLD_HINT}` : label };
-        const at = { x: px3, y: group.mid };
+        const at = { x: px4, y: group.mid };
         add({ kind: "node", key: sessionKeys.pipelineDot(group.index), at, state: "done", color: "shared", mark: "", radius: DOT_R, ...tip, ...base, from: { key: sessionKeys.plan } });
       }
     }
@@ -3609,7 +3622,7 @@ ${FOLD_HINT}` : label };
     group.agents.forEach((agentId, index) => {
       const agent = session.agents[agentId];
       const key = sessionKeys.agent(agentId);
-      const at = { x: px3 - side, y: group.mid + AGENT_TOP + index * AGENT_STEP };
+      const at = { x: px4 - side, y: group.mid + AGENT_TOP + index * AGENT_STEP };
       const stale = agent.state === "running" && agent.staleSince !== void 0;
       const base = { agentId, pipeline: agent.pipeline };
       const flow = flowOf({ state: agent.state, stale });
@@ -3673,7 +3686,7 @@ ${FOLD_HINT}` : label };
         endColumnA = id;
       }
     };
-    const group = groupOf(row2.pipeline);
+    const group = groupOf2(row2.pipeline);
     const earlier = group !== current;
     const unfolds = earlier && group.settled;
     const forked = plan.fromText !== void 0;
@@ -4014,7 +4027,7 @@ ${FOLD_HINT}` : label };
       }
     }
     const hitKey = sessionKeys.compactHit(index);
-    const hitAt = { x: px3 - HIT_LEFT, y: cy - HIT_HALF };
+    const hitAt = { x: px4 - HIT_LEFT, y: cy - HIT_HALF };
     const hitIndex = items.length;
     let x = pillsLeft;
     group.rows.slice(0, shown2).forEach((row2, slot) => {
@@ -4200,7 +4213,7 @@ ${FOLD_HINT}` : label };
       state = "done";
     }
     planGate = true;
-    add({ kind: "gate", key: sessionKeys.planGate, gate: "plan", at: { x: px3, y: GATE_Y }, state, agentId: "main", from: { key: sessionKeys.plan } });
+    add({ kind: "gate", key: sessionKeys.planGate, gate: "plan", at: { x: px4, y: GATE_Y }, state, agentId: "main", from: { key: sessionKeys.plan } });
     const stem = state === "waiting" ? "gate-link-on" : "gate-link";
     edge("edge:gate:plan", { key: sessionKeys.planGate, dy: 9 }, { key: sessionKeys.plan, dy: -(NODE_R + 2) }, stem, "shared", "line", { agentId: "main" });
   }
@@ -4208,7 +4221,7 @@ ${FOLD_HINT}` : label };
   const mergeRows = rows.filter(mergeDrawn);
   const waitingRows = mergeRows.filter((row2) => row2.merge?.state === "waiting");
   const gateColumn = column("merge");
-  const gateRow = mergeRows.find((row2) => groupOf(row2.pipeline) === current) ?? mergeRows[0];
+  const gateRow = mergeRows.find((row2) => groupOf2(row2.pipeline) === current) ?? mergeRows[0];
   let mergeGate;
   let mergeWaits = false;
   if (gateColumn && gateRow) {
@@ -4325,7 +4338,7 @@ ${FOLD_HINT}` : label };
     }
     return now.has(id) ? "stage-active" : "stage";
   };
-  const labelX = (entry) => entry.id === "plan" ? px3 : entry.center;
+  const labelX = (entry) => entry.id === "plan" ? px4 : entry.center;
   const labelY = height - 7;
   items.push(...stageLabels(setA, wrap ? labelY - SECOND_LABEL_ROW : labelY, tone, labelX, midY), ...stageLabels(setB, labelY, tone, labelX, midY));
   for (const group of multi ? groups2.slice(1) : []) {
@@ -5594,7 +5607,7 @@ var sinceStart = (ms) => {
   const seconds = Number.isFinite(ms) ? Math.max(0, Math.round(ms / 1e3)) : 0;
   return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
 };
-var duration = (ms) => {
+var duration2 = (ms) => {
   if (ms < 1e4) {
     return `${(Math.max(0, ms) / 1e3).toFixed(1)}s`;
   }
@@ -5611,11 +5624,11 @@ var callMark = (call) => {
 };
 var callDuration = (call) => {
   if (call.durationMs !== void 0) {
-    return duration(call.durationMs);
+    return duration2(call.durationMs);
   }
   const start = parseTime(call.startedAt);
   const end = parseTime(call.endedAt);
-  return start === void 0 || end === void 0 ? "" : duration(end - start);
+  return start === void 0 || end === void 0 ? "" : duration2(end - start);
 };
 var recentCalls = (agent, limit = 9) => {
   const start = parseTime(agent.startedAt) ?? 0;
@@ -6609,8 +6622,8 @@ var holdsMessage = (session, messageId) => {
 var gateMessage = (session, questionIds2) => {
   const ids = new Set(questionIds2);
   const linked = session.questions.filter((question) => ids.has(question.id) && holdsMessage(session, question.messageId ?? ""));
-  const newestFirst2 = linked.sort((a, b) => (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0));
-  return (newestFirst2.find((question) => question.state === "open") ?? newestFirst2[0])?.messageId;
+  const newestFirst3 = linked.sort((a, b) => (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0));
+  return (newestFirst3.find((question) => question.state === "open") ?? newestFirst3[0])?.messageId;
 };
 var pad3 = (value2) => String(value2).padStart(2, "0");
 var timeOfDay = (at) => {
@@ -6722,9 +6735,9 @@ var turnsModel = (source) => {
   if (rest.length > 0) {
     turns.push(toTurn(rest, void 0, source));
   }
-  const newestFirst2 = turns.reverse();
+  const newestFirst3 = turns.reverse();
   const count = source.developerMessages === void 0 ? void 0 : developer.length;
-  return { latest: newestFirst2[0], pending, earlier: newestFirst2.slice(1), replies: replies.length, developer: count };
+  return { latest: newestFirst3[0], pending, earlier: newestFirst3.slice(1), replies: replies.length, developer: count };
 };
 var messagePlace = (model, messageId) => {
   if (messageId === void 0) {
@@ -6839,6 +6852,488 @@ var modalSubtitle = (repository, replies, developer) => {
   return parts.filter((part) => part !== "").join(" \xB7 ");
 };
 
+// src/ui/health-report-view.ts
+var SLOT_PX = 8;
+var SPARK_HEIGHT_PX = 34;
+var PLOT_PX = SPARK_HEIGHT_PX - 4;
+var MIN_BAR_PX = 1.5;
+var BAR_GAP_PX = 1.2;
+var SLIDE_MS = 700;
+var FADE_UP_MS = 260;
+var FADE_UP_STAGGER_MS = 25;
+var FADE_UP_MAX_DELAYED = 8;
+var FADE_UP = [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }];
+var SLIDE = [{ transform: `translateX(${SLOT_PX}px)` }, { transform: "none" }];
+var COPY_TEXT = "Copy added lines";
+var COPIED_TEXT = "Copied";
+var COPY_FAILED_TEXT = "Select and copy";
+var COPY_RESET_MS = 1600;
+var COPIED_STATUS = "Added lines copied.";
+var COPY_FAILED_STATUS = "Copy failed. Select and copy selects the lines.";
+var IMPACTS = ["cost", "time", "quality"];
+var IMPACT_NAMES = { cost: "Cost", time: "Time", quality: "Quality" };
+var GROUP_CLASSES = { change: "chg", consider: "con", ok: "okg", info: "ifg", unmeasured: "nmg" };
+var FINDING_CLASSES = { change: "change", consider: "consider", ok: "ok", info: "info", unmeasured: "nm" };
+var SUGGESTED = /* @__PURE__ */ new Set(["change", "consider"]);
+var stageHit = (finding, stage) => stage === "all" || finding.step === stage;
+var impactHit = (finding, impact) => impact === "all" || finding.impact === impact;
+var filterView = (report, filter) => {
+  const findings = report.groups.flatMap((group) => group.findings);
+  const passing = findings.filter((finding) => stageHit(finding, filter.stage) && impactHit(finding, filter.impact));
+  const shown = new Set(passing.map((finding) => finding.id));
+  const suggested = findings.filter((finding) => SUGGESTED.has(finding.group));
+  const byImpact = suggested.filter((finding) => impactHit(finding, filter.impact));
+  const byStage = suggested.filter((finding) => stageHit(finding, filter.stage));
+  const stageOptions = ["all", ...report.stages.map((stage) => stage.id)];
+  const impactOptions = ["all", ...IMPACTS];
+  const stageCounts = new Map(stageOptions.map((option) => [option, byImpact.filter((finding) => stageHit(finding, option)).length]));
+  const impactCounts = new Map(impactOptions.map((option) => [option, byStage.filter((finding) => impactHit(finding, option)).length]));
+  const filtered = filter.stage !== "all" || filter.impact !== "all";
+  const noun3 = findings.length === 1 ? "finding" : "findings";
+  const all = `${findings.length} ${noun3}`;
+  const summary = filtered ? `Showing ${shown.size} of ${all}` : `${all} \xB7 numbers count what is worth changing or considering`;
+  return { shown, stageCounts, impactCounts, filtered, summary };
+};
+var updatedText = (report, now) => {
+  const updated = report.updated;
+  if (updated === void 0) {
+    return "";
+  }
+  const at = Date.parse(updated.finishedAt);
+  return Number.isFinite(at) ? `updated after ${updated.name} finished, ${ago(now - at)}` : "";
+};
+var healthSubtitle = (report, now) => {
+  const updated = updatedText(report, now);
+  return updated === "" ? report.count : `${report.count} \xB7 ${updated}`;
+};
+var segFade = (seg) => {
+  seg.classList.toggle("ofl", seg.scrollLeft > 2);
+  seg.classList.toggle("ofr", seg.scrollLeft + seg.clientWidth < seg.scrollWidth - 2);
+};
+var plotY = (share2) => {
+  const clamped = Math.min(1, Math.max(0, share2));
+  return SPARK_HEIGHT_PX - Math.max(MIN_BAR_PX, clamped * PLOT_PX);
+};
+var px = (value2) => value2.toFixed(1);
+var sparkSvg = (spark) => {
+  const width = spark.bars.length * SLOT_PX;
+  const svg = svgEl("svg", { class: "hsp", viewBox: `0 0 ${width} ${SPARK_HEIGHT_PX}`, width, height: SPARK_HEIGHT_PX, role: "img" });
+  svg.setAttribute("aria-label", spark.label);
+  if (spark.windowStart > 0 && spark.windowStart < spark.bars.length) {
+    const x = spark.windowStart * SLOT_PX;
+    svg.append(svgEl("line", { class: "sep", x1: x, x2: x, y1: 0, y2: SPARK_HEIGHT_PX }));
+  }
+  const bars = svgEl("g", { class: "hbars" });
+  spark.bars.forEach((bar, index) => {
+    const left = index * SLOT_PX;
+    if (bar.height === null || !Number.isFinite(bar.height)) {
+      bars.append(svgEl("circle", { class: "hz", cx: left + SLOT_PX / 2, cy: SPARK_HEIGHT_PX - MIN_BAR_PX, r: 1.1 }));
+      return;
+    }
+    const top = plotY(bar.height);
+    const kind = bar.window ? "r" : "p";
+    const size = { width: px(SLOT_PX - 2 * BAR_GAP_PX), height: px(SPARK_HEIGHT_PX - top) };
+    const attributes = { x: px(left + BAR_GAP_PX), y: px(top), ...size, rx: 1 };
+    bars.append(svgEl("rect", { class: bar.worse ? `${kind} over` : kind, ...attributes }));
+  });
+  svg.append(bars);
+  if (spark.guide !== void 0 && Number.isFinite(spark.guide)) {
+    const y = px(plotY(spark.guide));
+    svg.append(svgEl("line", { class: "hgl", x1: 0, x2: width, y1: y, y2: y }));
+  }
+  return { svg, bars };
+};
+var viewCount = 0;
+var createHealthReportView = (hooks) => {
+  viewCount += 1;
+  const prefix = `health-${viewCount}`;
+  const element = el("div", "hrep");
+  let filter = { stage: "all", impact: "all" };
+  const open2 = /* @__PURE__ */ new Set();
+  const openChanges = /* @__PURE__ */ new Set();
+  let last;
+  let report;
+  let keyless = false;
+  let drawnParts = [];
+  let panelCount2 = 0;
+  let items = /* @__PURE__ */ new Map();
+  let groups2 = [];
+  let options = [];
+  let segs = [];
+  let focusables = /* @__PURE__ */ new Map();
+  let summary = el("p");
+  let summaryText = el("span");
+  let clear = el("button");
+  let none = el("p");
+  let barGroups = [];
+  const sizes = new ResizeObserver(() => segs.forEach(segFade));
+  const register = (key, control) => {
+    focusables.set(key, control);
+    return control;
+  };
+  const apply = () => {
+    if (!report) {
+      return;
+    }
+    const view = filterView(report, filter);
+    for (const [id, item2] of items) {
+      item2.hidden = !view.shown.has(id);
+    }
+    for (const group of groups2) {
+      const shown = group.ids.filter((id) => view.shown.has(id)).length;
+      group.section.hidden = shown === 0;
+      setText(group.count, String(shown));
+    }
+    for (const option of options) {
+      const counts = option.kind === "stage" ? view.stageCounts : view.impactCounts;
+      const count = counts.get(option.value) ?? 0;
+      option.button.setAttribute("aria-pressed", String(filter[option.kind] === option.value));
+      option.button.classList.toggle("z", count === 0 && option.value !== "all");
+      setText(option.count, count === 0 ? "" : String(count));
+    }
+    setText(summaryText, view.summary);
+    summary.classList.toggle("on", view.filtered);
+    clear.hidden = !view.filtered;
+    none.hidden = view.shown.size > 0 || items.size === 0;
+    segs.forEach(segFade);
+  };
+  const fadeUp = () => {
+    if (hooks.reducedMotion()) {
+      return;
+    }
+    const shown = [...items.values()].filter((item2) => !item2.hidden);
+    shown.forEach((item2, index) => {
+      const delay = Math.min(index, FADE_UP_MAX_DELAYED) * FADE_UP_STAGGER_MS;
+      item2.animate(FADE_UP, { duration: FADE_UP_MS, delay, easing: EASE3, fill: "backwards" });
+    });
+  };
+  const setFilter = (next) => {
+    filter = next;
+    apply();
+    fadeUp();
+  };
+  const segmented = (kind, label, values) => {
+    const row2 = el("div", "hfr");
+    const key = el("span", "hfk", label);
+    key.id = `${prefix}-${kind}`;
+    const seg = el("div", "hseg");
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-labelledby", key.id);
+    for (const { value: value2, name, dot } of values) {
+      const button = register(`${kind}:${value2}`, el("button"));
+      button.type = "button";
+      if (dot) {
+        const mark = el("i", value2);
+        mark.setAttribute("aria-hidden", "true");
+        button.append(mark);
+      }
+      const count = el("span", "n");
+      button.append(name, count);
+      button.addEventListener("click", () => {
+        const pressed = filter[kind] === value2;
+        setFilter({ ...filter, [kind]: pressed ? "all" : value2 });
+      });
+      options.push({ button, kind, value: value2, count });
+      seg.append(button);
+    }
+    seg.addEventListener("scroll", () => segFade(seg));
+    segs.push(seg);
+    row2.append(key, seg);
+    return row2;
+  };
+  const filters = (next) => {
+    const block = el("div", "hflt");
+    const stageValues = next.stages.map((stage2) => ({ value: stage2.id, name: stage2.name, dot: false }));
+    const impactValues = IMPACTS.map((impact2) => ({ value: impact2, name: IMPACT_NAMES[impact2], dot: true }));
+    summary = el("p", "hfsum");
+    summary.setAttribute("aria-live", "polite");
+    summaryText = el("span");
+    clear = register("clear", el("button", "hclr", "Clear filters"));
+    clear.type = "button";
+    clear.addEventListener("click", () => {
+      setFilter({ stage: "all", impact: "all" });
+      focusables.get("stage:all")?.focus({ preventScroll: true });
+    });
+    summary.append(summaryText, clear);
+    const stage = segmented("stage", "Step", [{ value: "all", name: "All", dot: false }, ...stageValues]);
+    const impact = segmented("impact", "Impact", [{ value: "all", name: "All", dot: false }, ...impactValues]);
+    block.append(stage, impact, summary);
+    return block;
+  };
+  const evidenceNumber = (number, kind) => {
+    const block = el("div", kind);
+    block.append(el("span", void 0, number.label), el("b", void 0, number.text));
+    return block;
+  };
+  const evidenceBlock = (finding, evidence) => {
+    const block = el("div", "evb");
+    if (evidence.setup !== "") {
+      const setup = el("p", "evs");
+      setup.append(el("span", void 0, "Setup"), evidence.setup);
+      block.append(setup);
+    }
+    const numbers = [
+      evidence.now ? evidenceNumber(evidence.now) : void 0,
+      evidence.before ? evidenceNumber(evidence.before, "was") : void 0,
+      evidence.guideline ? evidenceNumber(evidence.guideline, "gd") : void 0
+    ].filter((number) => number !== void 0);
+    const spark = evidence.spark && evidence.spark.bars.length > 0 ? sparkSvg(evidence.spark) : void 0;
+    if (numbers.length > 0 || spark) {
+      const figures = el("div", "evm");
+      figures.append(...numbers);
+      if (spark) {
+        figures.append(spark.svg);
+        barGroups.push(spark.bars);
+      }
+      block.append(figures);
+    }
+    if (evidence.rows.length > 0) {
+      const list = el("ol", keyless ? "hevl keyless" : "hevl");
+      for (const row2 of evidence.rows) {
+        const item2 = el("li", "hevr");
+        if (!keyless) {
+          item2.append(el("span", "k", row2.key));
+        }
+        const title = el("span", "t", row2.title);
+        title.title = row2.title;
+        item2.append(title, el("span", "v", row2.value));
+        if (hooks.opens(row2.session)) {
+          const go = register(`go:${finding.id}:${row2.session}`, el("button", "go", "Show card"));
+          go.type = "button";
+          go.addEventListener("click", () => hooks.show(row2.session));
+          item2.append(go);
+        } else {
+          item2.append(el("span", "go off", "record only"));
+        }
+        list.append(item2);
+      }
+      block.append(list);
+    }
+    return block;
+  };
+  const disclosure = (kind, finding, content, toggle, opened) => {
+    panelCount2 += 1;
+    const panel = el("div", "xp");
+    panel.id = `${prefix}-${kind}-${panelCount2}`;
+    const clip3 = el("div");
+    clip3.append(content);
+    panel.append(clip3);
+    toggle.setAttribute("aria-controls", panel.id);
+    const setOpen2 = (on) => {
+      toggle.setAttribute("aria-expanded", String(on));
+      panel.classList.toggle("open", on);
+      panel.inert = !on;
+    };
+    setOpen2(opened.has(finding.id));
+    toggle.addEventListener("click", () => {
+      const on = !opened.has(finding.id);
+      if (on) {
+        opened.add(finding.id);
+      } else {
+        opened.delete(finding.id);
+      }
+      setOpen2(on);
+    });
+    return panel;
+  };
+  const evidencePanel = (finding, evidence, toggle) => {
+    return disclosure("evidence", finding, evidenceBlock(finding, evidence), toggle, open2);
+  };
+  const copyControl = (finding, lines, block) => {
+    const button = register(`copy:${finding.id}`, el("button", "hcp", COPY_TEXT));
+    button.type = "button";
+    const status = el("span", "visually-hidden");
+    status.setAttribute("role", "status");
+    let failed = false;
+    let timer;
+    const done = (copied) => {
+      failed = !copied;
+      setText(button, copied ? COPIED_TEXT : COPY_FAILED_TEXT);
+      setText(status, copied ? COPIED_STATUS : COPY_FAILED_STATUS);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        failed = false;
+        setText(button, COPY_TEXT);
+        setText(status, "");
+      }, COPY_RESET_MS);
+    };
+    button.addEventListener("click", () => {
+      if (failed) {
+        getSelection()?.selectAllChildren(block);
+        return;
+      }
+      try {
+        void navigator.clipboard.writeText(lines.join("\n")).then(() => done(true), () => done(false));
+      } catch {
+        done(false);
+      }
+    });
+    return [button, status];
+  };
+  const fixBlock = (change) => {
+    const block = el("div", "fdx");
+    const fix = el("p", void 0, change.fix);
+    fix.append(el("span", "sav", `Effect: ${change.effect}`));
+    block.append(el("span", "ftag", "Fix"), fix);
+    return block;
+  };
+  const changeBlock = (finding, change) => {
+    const block = el("div", "diff");
+    const lines = el("pre");
+    for (const text2 of change.lines) {
+      const line = el("span", "dl add");
+      const mark = el("i", void 0, "+");
+      mark.setAttribute("aria-hidden", "true");
+      line.append(mark, text2);
+      lines.append(line);
+    }
+    const head = el("div", "dfh");
+    head.append(el("span", "dff", change.file), ...copyControl(finding, change.lines, lines));
+    block.append(head, lines);
+    return block;
+  };
+  const stepChip = (finding) => el("span", "stg", finding.stepName);
+  const actionToggle = (key, text2) => {
+    const toggle = register(key, el("button", "xb", text2));
+    toggle.type = "button";
+    toggle.append(chevronIcon());
+    return toggle;
+  };
+  const suggestionItem = (finding, item2) => {
+    const head = el("div", "fdh");
+    head.append(stepChip(finding), el("span", `imp ${finding.impact}`, finding.impact));
+    if (finding.basis) {
+      head.append(el("span", "bas", finding.basis));
+    }
+    item2.append(head, el("h4", "fdt", finding.headline), el("p", "fdl", finding.line));
+    const change = finding.change;
+    if (change) {
+      item2.append(fixBlock(change));
+    }
+    if (!change && !finding.evidence) {
+      return;
+    }
+    const actions = el("div", "fda");
+    const panels = [];
+    if (change) {
+      const toggle = actionToggle(`change:${finding.id}`, "Show the change");
+      actions.append(toggle);
+      panels.push(disclosure("change", finding, changeBlock(finding, change), toggle, openChanges));
+    }
+    if (finding.evidence) {
+      const toggle = actionToggle(`evidence:${finding.id}`, "Evidence");
+      actions.append(toggle);
+      panels.push(evidencePanel(finding, finding.evidence, toggle));
+    }
+    item2.append(actions, ...panels);
+  };
+  const quietItem = (finding, item2) => {
+    const parts = [stepChip(finding), el("span", "okt", finding.headline), el("span", "okv", finding.value ?? "")];
+    if (!finding.evidence) {
+      const row2 = el("div", "okr");
+      row2.append(...parts);
+      item2.append(row2);
+      return;
+    }
+    const toggle = register(`evidence:${finding.id}`, el("button", "okr"));
+    toggle.type = "button";
+    toggle.append(...parts, chevronIcon());
+    item2.append(toggle, evidencePanel(finding, finding.evidence, toggle));
+  };
+  const unmeasuredItem = (finding, item2) => {
+    const row2 = el("div", "okr");
+    const label = finding.absent ? "not in this workflow" : "not measured";
+    row2.append(stepChip(finding), el("span", "okt", finding.headline), el("span", "hnm", label));
+    item2.append(row2, el("p", "hreason", finding.line));
+  };
+  const findingItem = (finding) => {
+    const item2 = el("li", `hf ${FINDING_CLASSES[finding.group]}`);
+    item2.dataset.id = finding.id;
+    item2.addEventListener("animationend", () => item2.classList.remove("hflash"));
+    if (SUGGESTED.has(finding.group)) {
+      suggestionItem(finding, item2);
+    } else if (finding.group === "unmeasured") {
+      unmeasuredItem(finding, item2);
+    } else {
+      quietItem(finding, item2);
+    }
+    items.set(finding.id, item2);
+    return item2;
+  };
+  const groupSection = (group) => {
+    const section2 = el("section", `hg ${GROUP_CLASSES[group.group]}`);
+    const heading2 = el("h3", "hgh");
+    const count = el("span", "hgn");
+    heading2.append(group.label, " ", count);
+    const list = el("ol", "hfl");
+    list.append(...group.findings.map(findingItem));
+    section2.append(heading2, list);
+    groups2.push({ section: section2, count, ids: group.findings.map((finding) => finding.id) });
+    return section2;
+  };
+  const flash = (item2) => {
+    item2.classList.remove("hflash");
+    void item2.offsetWidth;
+    item2.classList.add("hflash");
+  };
+  const draw2 = (next, animate) => {
+    const active = document.activeElement;
+    const focused = [...focusables].find(([, control]) => control === active)?.[0];
+    const previous = last;
+    if (filter.stage !== "all" && !next.stages.some((stage) => stage.id === filter.stage)) {
+      filter = { ...filter, stage: "all" };
+    }
+    report = next;
+    last = next;
+    keyless = next.keyless;
+    items = /* @__PURE__ */ new Map();
+    groups2 = [];
+    options = [];
+    segs = [];
+    focusables = /* @__PURE__ */ new Map();
+    barGroups = [];
+    panelCount2 = 0;
+    const parts = [filters(next)];
+    if (next.note) {
+      parts.push(el("p", "hnote", next.note));
+    }
+    parts.push(...next.groups.map(groupSection));
+    none = el("p", "hnone", "Nothing matches these filters.");
+    const foot = [next.closing, next.footer].filter((text2) => text2 !== "").join(" ");
+    parts.push(none, el("p", "hfoot", foot));
+    element.replaceChildren(...parts);
+    drawnParts = parts;
+    sizes.disconnect();
+    segs.forEach((seg) => sizes.observe(seg));
+    apply();
+    const target = focused === void 0 ? void 0 : focusables.get(focused);
+    target?.focus({ preventScroll: true });
+    if (!animate || hooks.reducedMotion() || !previous || previous.newest === next.newest) {
+      return;
+    }
+    for (const group of barGroups) {
+      group.animate(SLIDE, { duration: SLIDE_MS, easing: EASE3 });
+    }
+    const before = new Map(previous.groups.flatMap((group) => group.findings.map((finding) => [finding.id, finding.group])));
+    for (const group of next.groups) {
+      for (const finding of group.findings) {
+        const was = before.get(finding.id);
+        const item2 = items.get(finding.id);
+        if (was !== void 0 && was !== finding.group && item2) {
+          flash(item2);
+        }
+      }
+    }
+  };
+  const reset = (next = {}) => {
+    filter = { stage: next.stage ?? "all", impact: next.impact ?? "all" };
+    open2.clear();
+    openChanges.clear();
+    last = void 0;
+  };
+  return { element, reset, draw: draw2, parts: () => drawnParts };
+};
+
 // src/ui/modal-motion.ts
 var OPEN_EASE = "cubic-bezier(.2,.8,.2,1)";
 var CLOSE_EASE = "cubic-bezier(.4,0,.2,1)";
@@ -6904,12 +7399,12 @@ var closePlan = (box, opener, inFlight, viewport2) => {
   }
   return { kind: "shell", from: box, to: opener, delay: CLOSE_MOVE_AT_MS, moveMs: CLOSE_MS, doneAt: CLOSE_MOVE_AT_MS + CLOSE_MS };
 };
-var px = (value2) => `${Math.round(value2 * 100) / 100}px`;
+var px2 = (value2) => `${Math.round(value2 * 100) / 100}px`;
 var lookFrame = (look) => ({
-  left: px(look.rect.left),
-  top: px(look.rect.top),
-  width: px(look.rect.width),
-  height: px(look.rect.height),
+  left: px2(look.rect.left),
+  top: px2(look.rect.top),
+  width: px2(look.rect.width),
+  height: px2(look.rect.height),
   borderRadius: look.radius,
   backgroundColor: look.background,
   borderColor: look.border,
@@ -6917,20 +7412,20 @@ var lookFrame = (look) => ({
 });
 var shellFrames = (from, to) => [lookFrame(from), lookFrame(to)];
 var tagFrames = (from, to) => {
-  const dx = px(to.left - from.left);
-  const dy = px(to.top - from.top);
+  const dx = px2(to.left - from.left);
+  const dy = px2(to.top - from.top);
   return [{ transform: "translate(0px, 0px)" }, { transform: `translate(${dx}, ${dy})` }];
 };
 var rideFrames = (from, box) => {
-  const dx = px(from.left - box.left);
-  const dy = px(from.top - box.top);
+  const dx = px2(from.left - box.left);
+  const dy = px2(from.top - box.top);
   return [{ translate: `${dx} ${dy}` }, { translate: "0px 0px" }];
 };
 var contentDelays = (contentAt) => {
   return Array.from({ length: CONTENT_GROUPS }, (_, group) => contentAt + group * CONTENT_STAGGER_MS);
 };
 var SWAP_MS = 550;
-var SLIDE_MS = 450;
+var SLIDE_MS2 = 450;
 var TURN_HEIGHT_MS = 450;
 var FOLD_FADE_MS = 160;
 var BUBBLE_MS = 450;
@@ -6942,8 +7437,8 @@ var TURN_TOGGLE_MS = 400;
 var LINES_FADE_MS = 160;
 var FULL_FADE_MS = 280;
 var CLAMP_MS = 350;
-var HOLD_MS = Math.max(TURN_HEIGHT_MS, SLIDE_MS) + 20;
-var heightFrames = (from, to) => [{ height: px(from) }, { height: px(to) }];
+var HOLD_MS = Math.max(TURN_HEIGHT_MS, SLIDE_MS2) + 20;
+var heightFrames = (from, to) => [{ height: px2(from) }, { height: px2(to) }];
 var dropFrames = () => [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
 var bubbleFrames = () => [{ opacity: 0, transform: `translateX(${BUBBLE_SHIFT_PX}px)` }, { opacity: 1, transform: "none" }];
 var riseFrames = () => [{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }];
@@ -7198,14 +7693,14 @@ var stopHeight = (element) => {
   element.classList.remove("sizing");
   return height;
 };
-var growFrom = (element, from, duration2, done = noop) => {
+var growFrom = (element, from, duration3, done = noop) => {
   const to = element.getBoundingClientRect().height;
   if (Math.abs(to - from) < 0.5) {
     done();
     return;
   }
   element.classList.add("sizing");
-  const animation = element.animate(heightFrames(from, to), { duration: duration2, easing: OPEN_EASE });
+  const animation = element.animate(heightFrames(from, to), { duration: duration3, easing: OPEN_EASE });
   heights.set(element, animation);
   const end = () => {
     if (heights.get(element) === animation) {
@@ -7217,14 +7712,14 @@ var growFrom = (element, from, duration2, done = noop) => {
   animation.finished.then(end, noop);
 };
 var opacityNow = (element) => Number(getComputedStyle(element).opacity);
-var fadeFrom = (element, from, duration2, delay = 0) => {
+var fadeFrom = (element, from, duration3, delay = 0) => {
   fades.get(element)?.cancel();
   const to = opacityNow(element);
   if (Math.abs(to - from) < 0.01 && delay === 0) {
     fades.delete(element);
     return;
   }
-  fades.set(element, element.animate([{ opacity: from }, { opacity: to }], { duration: duration2, delay, easing: OPEN_EASE, fill: "backwards" }));
+  fades.set(element, element.animate([{ opacity: from }, { opacity: to }], { duration: duration3, delay, easing: OPEN_EASE, fill: "backwards" }));
 };
 var play = (element, frames, options) => {
   fades.get(element)?.cancel();
@@ -7509,11 +8004,11 @@ var FLASH_LATEST = [
 ];
 var FLASH_ITEM = [{ backgroundColor: "rgba(255, 255, 255, .12)" }, { backgroundColor: "rgba(255, 255, 255, .12)", offset: 0.3 }];
 var FADE_IN = [{ opacity: 0 }, { opacity: 1 }];
-var mainTag = () => {
+var mainTag = (label = "main") => {
   const tag = el("span", "main-tag");
   const dot = el("i");
   dot.setAttribute("aria-hidden", "true");
-  tag.append(dot, "main");
+  tag.append(dot, label);
   return tag;
 };
 var drawModalTitle = (title, source, keyUrl) => {
@@ -7521,10 +8016,21 @@ var drawModalTitle = (title, source, keyUrl) => {
   setTicketKey(title, key, keyUrl, after, source.title);
   title.title = source.title;
 };
+var drawHealthTitle = (title, text2) => {
+  setTicketKey(title, void 0, "", "", text2);
+  title.title = text2;
+};
+var HEALTH_DELAYED_PARTS = 6;
+var HEALTH_CLOSE_STAGGER_MS = 20;
+var HEALTH_CLOSE_DELAYED = 3;
 var modal;
 var openMainThreadModal = (request) => {
   modal ??= createModal();
   modal.open(request);
+};
+var openHealthReport = (request) => {
+  modal ??= createModal();
+  modal.openHealth(request);
 };
 var mainThreadModalFrom = () => modal?.from();
 var rectOf = (element) => {
@@ -7620,7 +8126,12 @@ var createModal = () => {
   earlierClip.append(earlierList);
   earlierWrap.append(earlierClip);
   earlier.append(earlierToggle, earlierWrap);
-  scroll.append(empty, latestArea, earlier);
+  const reportView = createHealthReportView({
+    opens: (sessionId) => health?.opens(sessionId) ?? false,
+    show: (sessionId) => showSession(sessionId),
+    reducedMotion: () => reducedMotion()
+  });
+  scroll.append(empty, latestArea, earlier, reportView.element);
   box.append(header, rule, scroll);
   const riders = [header, rule, scroll];
   root.append(backdrop, box);
@@ -7628,6 +8139,12 @@ var createModal = () => {
   let phase = "closed";
   let token = 0;
   let request;
+  let health;
+  let opened;
+  let mode = "main";
+  let drawnReport;
+  let afterClose;
+  const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let home;
   let drawn;
   let drawnModel;
@@ -7660,8 +8177,8 @@ var createModal = () => {
   const liftParts = (current) => {
     return current.lift ?? [...fromOf(current).children].filter((child) => !child.classList.contains("main-tag"));
   };
-  const liftOff = (parts, duration2) => {
-    lifted = parts.map((part) => part.animate([{ opacity: 0 }], { duration: duration2, easing: "ease", fill: "forwards" }));
+  const liftOff = (parts, duration3) => {
+    lifted = parts.map((part) => part.animate([{ opacity: 0 }], { duration: duration3, easing: "ease", fill: "forwards" }));
   };
   const bringBack = (animate) => {
     for (const animation of lifted) {
@@ -7735,7 +8252,20 @@ var createModal = () => {
     earlierToggle.setAttribute("aria-expanded", String(open3));
     earlierWrap.inert = !open3;
   };
-  const reducedMotion = () => request?.context.reducedMotion() ?? true;
+  const reducedMotion = () => health ? motionQuery.matches : request?.context.reducedMotion() ?? true;
+  const setTagLabel = (label) => {
+    if (tag.textContent !== label) {
+      tag.replaceChildren(...mainTag(label).childNodes);
+    }
+  };
+  const setMode = (next) => {
+    mode = next;
+    const healthMode = next === "health";
+    box.classList.toggle("health-mode", healthMode);
+    setTagLabel(healthMode ? "health" : "main");
+    close.setAttribute("aria-label", healthMode ? "Close workflow health" : "Close messages");
+    scroll.setAttribute("aria-label", healthMode ? "Workflow health report" : "Messages");
+  };
   const drawnHeight = (element) => element.hidden ? 0 : element.getBoundingClientRect().height;
   const fadeOutPrevious = () => {
     ghost?.remove();
@@ -7843,8 +8373,8 @@ var createModal = () => {
     }
   };
   const slideIn = (item2) => {
-    growFrom(item2, 0, SLIDE_MS);
-    play(item2, dropFrames(), { duration: SLIDE_MS, easing: OPEN_EASE });
+    growFrom(item2, 0, SLIDE_MS2);
+    play(item2, dropFrames(), { duration: SLIDE_MS2, easing: OPEN_EASE });
   };
   const fillEarlier = (model, animate) => {
     const list = model.earlier;
@@ -8003,7 +8533,20 @@ var createModal = () => {
   };
   const contentGroups = (withTag) => {
     const head = withTag ? [tag, headText, close, rule] : [headText, close, rule];
+    if (mode === "health") {
+      return [head, ...reportView.parts().map((part) => [part])];
+    }
     return [head, [latestArea.hidden ? empty : latestArea], earlier.hidden ? [] : [earlier]];
+  };
+  const openDelays = (contentAt, count) => {
+    if (mode === "main") {
+      return contentDelays(contentAt);
+    }
+    return Array.from({ length: count }, (_, index) => contentAt + Math.min(index, HEALTH_DELAYED_PARTS) * CONTENT_STAGGER_MS);
+  };
+  const closeDelays = (count) => {
+    const reverse = (index) => Math.min(count - 1 - index, HEALTH_CLOSE_DELAYED) * HEALTH_CLOSE_STAGGER_MS;
+    return Array.from({ length: count }, (_, index) => mode === "health" ? reverse(index) : 0);
   };
   const focusTarget = (current) => {
     if (isShown(current.opener)) {
@@ -8023,7 +8566,13 @@ var createModal = () => {
     if (own !== token) {
       return;
     }
-    const current = request;
+    const after = afterClose;
+    afterClose = void 0;
+    land(animate, landing);
+    after?.();
+  };
+  const land = (animate, landing) => {
+    const current = opened;
     const active = document.activeElement;
     const focusInside = active === null || active === document.body || root.contains(active);
     stopMotion();
@@ -8031,6 +8580,9 @@ var createModal = () => {
     root.dataset.phase = "closed";
     phase = "closed";
     request = void 0;
+    health = void 0;
+    opened = void 0;
+    drawnReport = void 0;
     drawn = void 0;
     drawnModel = void 0;
     anchor = void 0;
@@ -8061,8 +8613,40 @@ var createModal = () => {
     token += 1;
     finish(token, false);
   };
+  const renderHealth = (next, animate) => {
+    drawnReport = next;
+    drawHealthTitle(title, next.title);
+    tickHealth();
+    reportView.draw(next, animate);
+    updateScrollStop();
+  };
+  const tickHealth = () => {
+    const sub = drawnReport ? healthSubtitle(drawnReport, Date.now()) : "";
+    setText(subtitle, sub);
+    subtitle.title = sub;
+  };
+  const followReport = (current) => {
+    if (!current.opener.isConnected || current.opener.closest(".leaving")) {
+      closeAtOnce();
+      return;
+    }
+    const next = current.report();
+    if (next !== void 0 && next !== drawnReport && phase === "open") {
+      renderHealth(next, !reducedMotion());
+    }
+    const second = Math.floor(Date.now() / 1e3);
+    if (second !== lastSecond) {
+      lastSecond = second;
+      tickHealth();
+      updateScrollStop();
+    }
+  };
   const loop = () => {
     frameId = requestAnimationFrame(loop);
+    if (health && phase !== "closed") {
+      followReport(health);
+      return;
+    }
     const current = request;
     if (!current || phase === "closed") {
       return;
@@ -8085,17 +8669,14 @@ var createModal = () => {
       updateScrollStop();
     }
   };
-  const open2 = (next) => {
-    const source = next.source();
-    if (!source || phase === "opening" || phase === "open") {
-      return;
-    }
+  const form = (next, nextMode, reduced, opening) => {
     const from = fromOf(next);
-    const continuing = phase === "closing" && request !== void 0 && fromOf(request) === from;
+    const continuing = phase === "closing" && opened !== void 0 && fromOf(opened) === from && mode === nextMode;
     const inFlight = continuing ? rectOf(shell ?? box) : void 0;
     const inFlightLook = shell && inFlight ? lookOf(shell, inFlight) : void 0;
     const tagFrom = continuing && clone ? rectOf(clone) : void 0;
     const backdropFrom = continuing ? opacityOf(backdrop) : 0;
+    afterClose = void 0;
     if (phase === "closing" && !continuing) {
       closeAtOnce();
     }
@@ -8104,21 +8685,13 @@ var createModal = () => {
     const own = token;
     phase = "opening";
     root.dataset.phase = phase;
-    request = next;
+    opened = next;
     home = homeOf(from);
     root.hidden = false;
     setPageInert(true);
     root.classList.add("instant");
-    if (!continuing) {
-      reset();
-    }
-    render(source, next.context, false);
-    const place2 = drawnModel ? messagePlace(drawnModel, next.messageId) : void 0;
-    const target = place2 === "earlier" && next.messageId !== void 0 ? turns.get(next.messageId) : void 0;
-    if (target) {
-      setEarlierOpen(true);
-      target.setOpen(true, false);
-    }
+    setMode(nextMode);
+    opening.prepare(continuing);
     const boxRect = rectOf(box);
     const boxLook = lookOf(box, boxRect);
     updateScrollStop();
@@ -8127,10 +8700,10 @@ var createModal = () => {
     if (frameId === 0) {
       frameId = requestAnimationFrame(loop);
     }
-    if (next.context.reducedMotion()) {
+    if (reduced) {
       phase = "open";
       root.dataset.phase = phase;
-      reveal(next.messageId, false);
+      opening.done(false);
       return;
     }
     const fromRect = from.isConnected ? rectOf(shapeOf2(from)) : void 0;
@@ -8152,7 +8725,7 @@ var createModal = () => {
     }
     const move = track(shell.animate(shellFrames(startLook, boxLook), { duration: plan.moveMs, easing: OPEN_EASE, fill: "forwards" }));
     box.classList.add("forming");
-    const handed = fromUsable && !continuing ? tagOf(from) : void 0;
+    const handed = fromUsable && !continuing && nextMode === "main" ? tagOf(from) : void 0;
     const tagStart = tagFrom ?? (handed ? rectOf(handed) : void 0);
     if (handed) {
       openerTag = handed;
@@ -8163,12 +8736,15 @@ var createModal = () => {
       clone = createClone(tagStart);
       track(clone.animate(tagFrames(tagStart, rectOf(tag)), { duration: plan.moveMs, easing: OPEN_EASE, fill: "forwards" }));
     }
-    const delays = contentDelays(plan.contentAt);
+    const groups2 = contentGroups(!tagStart);
+    const delays = openDelays(plan.contentAt, groups2.length);
+    const lastFade = (delays.at(-1) ?? 0) + CONTENT_MS;
+    const doneAt = Math.max(plan.doneAt, lastFade);
     const ride = rideFrames(plan.from, boxRect);
     for (const rider of riders) {
       track(rider.animate(ride, { duration: plan.moveMs, easing: OPEN_EASE }));
     }
-    contentGroups(!tagStart).forEach((group, index) => {
+    groups2.forEach((group, index) => {
       for (const part of group) {
         track(part.animate(FADE_IN, { duration: CONTENT_MS, delay: delays[index], easing: OPEN_EASE, fill: "backwards" }));
       }
@@ -8190,15 +8766,72 @@ var createModal = () => {
       }
       phase = "open";
       root.dataset.phase = phase;
-      const newest2 = next.source();
-      if (newest2 && newest2 !== drawn) {
-        render(newest2, next.context, true);
-      }
-      reveal(next.messageId, true);
-    }, plan.doneAt);
+      opening.done(true);
+    }, doneAt);
   };
-  const closeModal = () => {
-    const current = request;
+  const open2 = (next) => {
+    const source = next.source();
+    if (!source || phase === "opening" || phase === "open") {
+      return;
+    }
+    form(next, "main", next.context.reducedMotion(), {
+      prepare: (continuing) => {
+        request = next;
+        health = void 0;
+        if (!continuing) {
+          reset();
+        }
+        render(source, next.context, false);
+        const place2 = drawnModel ? messagePlace(drawnModel, next.messageId) : void 0;
+        const target = place2 === "earlier" && next.messageId !== void 0 ? turns.get(next.messageId) : void 0;
+        if (target) {
+          setEarlierOpen(true);
+          target.setOpen(true, false);
+        }
+      },
+      done: (animate) => {
+        const newest2 = next.source();
+        if (animate && newest2 && newest2 !== drawn) {
+          render(newest2, next.context, true);
+        }
+        reveal(next.messageId, animate);
+      }
+    });
+  };
+  const openHealth = (next) => {
+    const initial = next.report();
+    if (!initial || phase === "opening" || phase === "open") {
+      return;
+    }
+    form(next, "health", motionQuery.matches, {
+      prepare: (continuing) => {
+        health = next;
+        request = void 0;
+        if (!continuing) {
+          reportView.reset(next.filter);
+          drawnReport = void 0;
+        }
+        renderHealth(initial, false);
+        if (!continuing) {
+          scroll.scrollTop = 0;
+        }
+      },
+      done: (animate) => {
+        const newest2 = next.report();
+        if (animate && newest2 && newest2 !== drawnReport) {
+          renderHealth(newest2, true);
+        }
+      }
+    });
+  };
+  const showSession = (sessionId) => {
+    const current = health;
+    if (current) {
+      closeModal(() => current.open(sessionId));
+    }
+  };
+  const closeModal = (after) => {
+    const current = opened;
     if (!current || phase !== "opening" && phase !== "open") {
       return;
     }
@@ -8208,7 +8841,8 @@ var createModal = () => {
     phase = "closing";
     root.dataset.phase = phase;
     setPageInert(false);
-    if (current.context.reducedMotion()) {
+    afterClose = after;
+    if (reducedMotion()) {
       finish(own, false);
       return;
     }
@@ -8216,7 +8850,10 @@ var createModal = () => {
     const inFlightLook = shell && inFlight ? lookOf(shell, inFlight) : void 0;
     const tagFrom = clone ? rectOf(clone) : void 0;
     const backdropFrom = opacityOf(backdrop);
-    const parts = contentGroups(true).flat();
+    const groups2 = contentGroups(true);
+    const delays = closeDelays(groups2.length);
+    const parts = groups2.flat();
+    const partDelay = new Map(groups2.flatMap((group, index) => group.map((part) => [part, delays[index]])));
     const partOpacity = new Map(parts.map((part) => [part, opacityOf(part)]));
     const riding = riders.map((rider) => ({ rider, offset: getComputedStyle(rider).translate }));
     const boxRect = rectOf(box);
@@ -8243,7 +8880,8 @@ var createModal = () => {
     for (const part of parts) {
       if (part !== tag || !tagEnd) {
         const frames = [{ opacity: partOpacity.get(part) ?? 1 }, { opacity: 0 }];
-        track(part.animate(frames, { duration: CLOSE_CONTENT_MS, easing: "ease-in", fill: "forwards" }));
+        const delay = partDelay.get(part) ?? 0;
+        track(part.animate(frames, { duration: CLOSE_CONTENT_MS, delay, easing: "ease-in", fill: "both" }));
       }
     }
     const shellLook = inFlightLook ?? lookOf(box, boxRect);
@@ -8321,7 +8959,7 @@ var createModal = () => {
     }
   });
   setEarlierOpen(false);
-  return { open: open2, from: () => request ? fromOf(request) : void 0 };
+  return { open: open2, openHealth, from: () => opened ? fromOf(opened) : void 0 };
 };
 
 // src/ui/questions.ts
@@ -8497,7 +9135,7 @@ var flyFrames = (from, to, steps = 14) => {
   }
   return frames;
 };
-var EASE3 = "cubic-bezier(.2,.8,.2,1)";
+var EASE4 = "cubic-bezier(.2,.8,.2,1)";
 var FLY_EASE = "cubic-bezier(.45,.05,.3,1)";
 var FLY_DELAY_MS = 320;
 var FLY_MS = 900;
@@ -8509,7 +9147,7 @@ var slide = (element, open2, scale) => {
   const shown = { height: `${height}px`, opacity: 1, transform: "none" };
   element.classList.add("sliding");
   const frames = open2 ? [closed, shown] : [shown, closed];
-  const animation = element.animate(frames, { duration: open2 ? 550 : 400, easing: EASE3, fill: open2 ? "none" : "forwards" });
+  const animation = element.animate(frames, { duration: open2 ? 550 : 400, easing: EASE4, fill: open2 ? "none" : "forwards" });
   latestSlide.set(element, animation);
   const done = () => {
     if (latestSlide.get(element) === animation) {
@@ -8840,7 +9478,7 @@ var createSessionQuestionsView = (host, context, options = {}) => {
 };
 
 // src/ui/strip.ts
-var EASE4 = "cubic-bezier(.2,.8,.2,1)";
+var EASE5 = "cubic-bezier(.2,.8,.2,1)";
 var SWAP_MS2 = 500;
 var createStripCore = (host, context, open2) => {
   const strip = el("button", "main-strip");
@@ -8893,7 +9531,7 @@ var createStripCore = (host, context, open2) => {
         if (swap) {
           const frames = [{ opacity: 0, transform: "translateY(3px)" }, { opacity: 1, transform: "none" }];
           for (const part of [text2, kind]) {
-            part.animate(frames, { duration: SWAP_MS2, easing: EASE4 });
+            part.animate(frames, { duration: SWAP_MS2, easing: EASE5 });
           }
         }
       }
@@ -8956,7 +9594,7 @@ var createSessionStripView = (host, context) => {
 };
 
 // src/ui/card.ts
-var EASE5 = "cubic-bezier(.2,.8,.2,1)";
+var EASE6 = "cubic-bezier(.2,.8,.2,1)";
 var CARD_ERROR_TEXT = "This card stopped updating. Reload the page.";
 var createProgressChip = (context) => {
   const element = el("span", "progress-chip");
@@ -8974,7 +9612,7 @@ var createProgressChip = (context) => {
       element.dataset.tone = chip.tone;
       if (bump) {
         const frames = [{ transform: "none" }, { transform: "scale(1.12)", offset: 0.35 }, { transform: "none" }];
-        element.animate(frames, { duration: 500, easing: EASE5 });
+        element.animate(frames, { duration: 500, easing: EASE6 });
       }
     }
   };
@@ -9204,7 +9842,7 @@ var HIDE_TEXT = "Hide";
 var CLEAR_TEXT = "Clear";
 var OPEN_MESSAGES_TEXT = "Open the main-thread messages";
 var ROW_ERROR_TEXT = "This row stopped updating. Reload the page.";
-var EASE6 = "cubic-bezier(.2,.8,.2,1)";
+var EASE7 = "cubic-bezier(.2,.8,.2,1)";
 var OUTCOME_TONE_TEXTS = {
   conversation: "conversation",
   none: "not merged",
@@ -9528,7 +10166,7 @@ var ROW_LEAVE_MS = 440;
 var ROW_LEAVE_EASE = "cubic-bezier(.4,0,.2,1)";
 var ROW_MOVE_MS = 420;
 var enterRow = (element) => {
-  element.animate(ROW_ENTER, { duration: ROW_ENTER_MS, easing: EASE6, fill: "backwards" });
+  element.animate(ROW_ENTER, { duration: ROW_ENTER_MS, easing: EASE7, fill: "backwards" });
 };
 var createRowList = (list, make) => {
   const rows = /* @__PURE__ */ new Map();
@@ -9622,7 +10260,7 @@ var createRowList = (list, make) => {
         for (const [element, top] of before) {
           const delta = top - element.offsetTop;
           if (element.isConnected && !leaving.has(element) && Math.abs(delta) > 1) {
-            element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: ROW_MOVE_MS, easing: EASE6 });
+            element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: ROW_MOVE_MS, easing: EASE7 });
           }
         }
         for (const id of fresh) {
@@ -9639,7 +10277,7 @@ var createRowList = (list, make) => {
 
 // src/ui/conversations.ts
 var CONVERSATIONS_TITLE = "Conversations";
-var EASE7 = "cubic-bezier(.2,.8,.2,1)";
+var EASE8 = "cubic-bezier(.2,.8,.2,1)";
 var ENTER = [{ opacity: 0, transform: "translateY(-14px)" }, { opacity: 1, transform: "none" }];
 var FOLD_MS = 440;
 var FOLD_EASE = "cubic-bezier(.4,0,.2,1)";
@@ -9718,7 +10356,7 @@ var createSectionCore = (make) => {
     heading2.setAttribute("aria-label", conversationsLabel(next.length));
     element.hidden = next.length === 0;
     if (motion && !wasShown && next.length > 0) {
-      element.animate(ENTER, { duration: 420, easing: EASE7, fill: "backwards" });
+      element.animate(ENTER, { duration: 420, easing: EASE8, fill: "backwards" });
     }
   };
   return { element, rows, sync };
@@ -9990,7 +10628,7 @@ var createChipsRow = (host, context, actions) => {
     show(entry.status, texts.status);
     entry.status.dataset.tone = texts.tone;
     if (changed && !fresh && texts.status !== "" && !context.reducedMotion()) {
-      entry.status.animate(BUMP_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE8 });
+      entry.status.animate(BUMP_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE3 });
     }
     entry.element.title = chipTitle(chip);
     if (chip.kind === "fold") {
@@ -10027,7 +10665,7 @@ var createChipsRow = (host, context, actions) => {
           entry = create(chip);
           entries.set(key, entry);
           if (drawn && !context.reducedMotion()) {
-            entry.element.animate(ENTER_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE8 });
+            entry.element.animate(ENTER_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE3 });
           }
           write2(entry, chip, true);
         } else {
@@ -10721,7 +11359,7 @@ var createFinishedSessionsPanel = (context, options) => {
 var EMPTY_BOARD_TEXT = "No runs yet. A session shows up here as a conversation once it gets a prompt, and as a card once it delegates to a subagent, edits files or opens a PR.";
 var NO_ACTIVE_TEXT = "No active runs. A new run shows up here once a session gets a prompt; the finished ones are under Finished runs.";
 var NO_REPOSITORY_TEXT = "No repository yet. A repository gets a tab once a Claude Code session runs in it with a Nurselog config (nurselog init).";
-var EASE8 = "cubic-bezier(.2,.8,.2,1)";
+var EASE3 = "cubic-bezier(.2,.8,.2,1)";
 var FADE_MS = 320;
 var ENTER2 = [{ opacity: 0, transform: "translateY(-14px)" }, { opacity: 1, transform: "none" }];
 var ENTER_MS = 420;
@@ -10911,7 +11549,7 @@ var morphFrom = (element, from) => {
   const to = element.getBoundingClientRect();
   const frames = [{ transform: `translateY(${from.top - to.top}px)`, height: `${from.height}px` }, { transform: "none", height: `${to.height}px` }];
   element.classList.add("morphing");
-  const morph = element.animate(frames, { duration: MORPH_MS, easing: EASE8 });
+  const morph = element.animate(frames, { duration: MORPH_MS, easing: EASE3 });
   const settle = () => element.classList.remove("morphing");
   morph.finished.then(settle, settle);
 };
@@ -10920,7 +11558,7 @@ var glide = (before, after, still = /* @__PURE__ */ new Set()) => {
   for (const [element, top] of before) {
     const delta = top - (after.get(element) ?? top);
     if (!still.has(element) && Math.abs(delta) > 0.5) {
-      element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE8 });
+      element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE3 });
     }
   }
 };
@@ -11006,7 +11644,7 @@ var createCardStack = (host, context, repositoryId, options) => {
     for (const card of stackChange.entered) {
       const from = rowRects.get(card.element.dataset.run ?? "");
       if (!from) {
-        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE8, fill: "backwards" });
+        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE3, fill: "backwards" });
         continue;
       }
       morphFrom(card.element, from);
@@ -11153,6 +11791,1177 @@ var createConnectionState = (show, delay = CONNECTING_DELAY_MS) => {
         timer = void 0;
         show("connecting");
       }, delay);
+    }
+  };
+};
+
+// src/ui/suggested-changes.ts
+var CHANGE_FILE = "CLAUDE.md";
+var LARGE_OUTPUTS = {
+  fix: "Cut long command output with tail, and run full test suites in a subagent.",
+  lines: [
+    "Pipe a command that can print more than 200 lines through `tail -n 80`.",
+    "Run a full test suite in a subagent and keep only its summary."
+  ]
+};
+var PEAK_CONTEXT = {
+  fix: "Start a new session for each task.",
+  lines: ["When a task is done and the next one is a different task, stop and tell me to start a new session."]
+};
+var COST_SHARE = {
+  fix: "Hand the writing to subagents once the decisions are made.",
+  lines: ["When the decisions are made and the work spans several files, hand the writing to a subagent."]
+};
+var MAIN_CACHE = {
+  fix: "Hand wide searches to a subagent and read files by line range.",
+  lines: ["Send a search across many files to a subagent and read only the line ranges it returns."]
+};
+var SECOND_IMPLEMENTER = {
+  fix: "Give each brief what one run needs to finish.",
+  lines: ["An implementer brief lists the files, the acceptance criteria and the checks to run before handing back."]
+};
+var QUICK_ANSWERS = {
+  fix: "Make questions quick to answer.",
+  lines: ["Ask each question with its options and a recommended answer first."]
+};
+var kindsText = (kinds) => {
+  if (kinds.length < 2) {
+    return kinds.join("");
+  }
+  return `${kinds.slice(0, -1).join(", ")} and ${kinds[kinds.length - 1]}`;
+};
+var cacheChange = (step, role) => {
+  if (step === "main") {
+    return MAIN_CACHE;
+  }
+  if (role === void 0) {
+    return void 0;
+  }
+  if (step === "explore") {
+    const line = `When you start ${role}, name the folders to search and ask for file paths and line ranges, not file contents.`;
+    return { fix: "Name the folders to search, and ask for paths and line ranges.", lines: [line] };
+  }
+  if (step === "review") {
+    const line = `Write the diff to a file once and give ${role} its path and the changed files; it reads those, not the whole repository.`;
+    return { fix: `Pass the diff to ${role} as a file.`, lines: [line] };
+  }
+  return { fix: `Name the files ${role} needs in its brief.`, lines: [`A brief for ${role} names the files it needs by path and line range.`] };
+};
+var budgetLine = (budget) => {
+  if (budget === void 0) {
+    return "A brief that needs more tool calls than its role's budget is two briefs.";
+  }
+  return `A brief that needs more than about ${plural(budget, "tool call")} is two briefs.`;
+};
+var quietChange = (role) => {
+  const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
+  return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
+};
+var checksLine = (setup) => {
+  const kinds = setup?.verification ?? [];
+  const checks = kinds.length === 0 ? "the project's checks" : `the ${kindsText(kinds)} commands`;
+  return `Before a subagent hands back a change, it runs ${checks} and fixes what fails.`;
+};
+var changeOf = (source, role) => {
+  switch (source.line.insight.signal) {
+    case "main-large-outputs":
+      return LARGE_OUTPUTS;
+    case "main-peak-context":
+      return PEAK_CONTEXT;
+    case "main-cost-share":
+      return COST_SHARE;
+    case "cache-per-output":
+      return cacheChange(source.step, role);
+    case "budget-first-stop":
+      return { fix: "Split tasks into briefs that fit the budget.", lines: [budgetLine(source.budget)] };
+    case "second-implementer":
+      return SECOND_IMPLEMENTER;
+    case "second-round":
+      return { fix: "Run the checks before the hand-back.", lines: [checksLine(source.setup)] };
+    case "quiet-reviewer":
+      return role === void 0 ? void 0 : quietChange(role);
+    case "question-open-time":
+      return QUICK_ANSWERS;
+    default:
+      return void 0;
+  }
+};
+var effectOf = (source, verdict) => {
+  const window2 = source.window;
+  if (source.line.insight.signal === "quiet-reviewer" && window2?.value !== void 0 && window2.n > 0) {
+    const saving = cost(window2.value);
+    if (saving !== cost(0)) {
+      return `up to ${saving} less per ${plural(window2.n, "run")}`;
+    }
+  }
+  if (verdict === "change") {
+    return source.guideline === void 0 ? "back within the guideline" : `back within the guideline (${source.guideline})`;
+  }
+  return source.before === void 0 ? "back to the level before" : `back to the level before (${source.before})`;
+};
+var suggestedChange = (source) => {
+  const verdict = source.line.verdict;
+  if (verdict !== "change" && verdict !== "consider") {
+    return void 0;
+  }
+  const role = source.line.role === "" ? void 0 : source.line.role;
+  const change = changeOf(source, role);
+  if (change === void 0) {
+    return void 0;
+  }
+  return { fix: change.fix, effect: effectOf(source, verdict), file: CHANGE_FILE, lines: [...change.lines] };
+};
+
+// src/model/metrics.ts
+var VERIFY_KINDS = ["typecheck", "lint", "test"];
+var processedTokens = (counts) => counts.input + counts.cacheWrite + counts.cacheWrite1h + counts.cacheRead + counts.output;
+var byStart = (a, b) => time(a.startedAt) - time(b.startedAt) || compareText(a.id, b.id);
+var entryOf = (map, key, create) => {
+  const found = map.get(key);
+  if (found !== void 0) {
+    return found;
+  }
+  const entry = create();
+  map.set(key, entry);
+  return entry;
+};
+var roleMetrics = (role, agents) => {
+  const models = [...new Set(agents.flatMap((agent) => agent.model === void 0 ? [] : [agent.model]))];
+  const sum = (value2) => agents.reduce((total, agent) => total + value2(agent), 0);
+  const peakContext = Math.max(0, ...agents.map((agent) => agent.budget.context.used));
+  const requests = sum((agent) => agent.budget.requests);
+  const cacheRead = sum((agent) => agent.budget.tokens.cacheRead);
+  const output = sum((agent) => agent.budget.tokens.output);
+  return { role, models, runs: agents.length, requests, cacheRead, output, peakContext, usd: sum((agent) => agent.budget.costUsd) };
+};
+var totalOf = (roles) => {
+  const total = { runs: 0, requests: 0, cacheRead: 0, output: 0, peakContext: 0, usd: 0 };
+  for (const role of roles) {
+    total.runs += role.runs;
+    total.requests += role.requests;
+    total.cacheRead += role.cacheRead;
+    total.output += role.output;
+    total.peakContext = Math.max(total.peakContext, role.peakContext);
+    total.usd += role.usd;
+  }
+  return total;
+};
+var branchMetrics = (subagents, rows) => {
+  const branches = /* @__PURE__ */ new Map();
+  for (const agent of subagents) {
+    const name = agent.branch;
+    if (name === void 0) {
+      continue;
+    }
+    const branch = entryOf(branches, name, () => ({ branch: name, agents: 0, usd: 0 }));
+    branch.agents += 1;
+    branch.usd += agent.budget.costUsd;
+  }
+  const rowBranches = rows.map((row2) => row2.branch).filter((branch) => branches.has(branch));
+  const ordered = [.../* @__PURE__ */ new Set([...rowBranches, ...branches.keys()])];
+  return ordered.flatMap((branch) => branches.get(branch) ?? []);
+};
+var toolMetrics = (agents) => {
+  const tools = /* @__PURE__ */ new Map();
+  for (const agent of agents) {
+    for (const [tool, output] of Object.entries(agent.budget.toolOutput)) {
+      const sum = entryOf(tools, tool, () => ({ tool, calls: 0, chars: 0, maxChars: 0 }));
+      sum.calls += output.calls;
+      sum.chars += output.chars;
+      sum.maxChars = Math.max(sum.maxChars, output.maxChars);
+    }
+  }
+  return [...tools.values()].sort((a, b) => b.chars - a.chars || compareText(a.tool, b.tool));
+};
+var verificationMetrics = (role, agents) => {
+  const commands = { typecheck: 0, lint: 0, test: 0 };
+  const failed = { typecheck: 0, lint: 0, test: 0 };
+  for (const agent of agents) {
+    const rounds = agent.budget.verifyRounds;
+    for (const kind of VERIFY_KINDS) {
+      commands[kind] += rounds.commands[kind];
+      failed[kind] += rounds.results[kind].filter((result) => result === "fail").length;
+    }
+  }
+  const all = VERIFY_KINDS.reduce((sum, kind) => sum + commands[kind], 0);
+  if (all === 0) {
+    return void 0;
+  }
+  return { role, runs: agents.length, commands, failed, meanPerRun: all / agents.length };
+};
+var sessionMetrics = (session) => {
+  const main = Object.hasOwn(session.agents, MAIN_AGENT) ? session.agents[MAIN_AGENT] : void 0;
+  const subagents = Object.entries(session.agents).filter(([key]) => key !== MAIN_AGENT).map(([, agent]) => agent).sort(byStart);
+  const mainGroup = main ? [[MAIN_AGENT, [main]]] : [];
+  const byRole = /* @__PURE__ */ new Map();
+  for (const agent of subagents) {
+    entryOf(byRole, agent.role, () => []).push(agent);
+  }
+  const groups2 = [...mainGroup, ...byRole.entries()];
+  const roles = groups2.map(([role, agents]) => roleMetrics(role, agents));
+  const verification = groups2.flatMap(([role, agents]) => verificationMetrics(role, agents) ?? []);
+  const byStage = Object.fromEntries(Object.entries(session.tokens.byStage).map(([key, counts]) => [key, counts ? processedTokens(counts) : 0]));
+  const tokens2 = { byStage, total: processedTokens(session.tokens.total), usd: session.tokens.total.usd };
+  const tools = { main: toolMetrics(main ? [main] : []), subagents: toolMetrics(subagents) };
+  const total = totalOf(roles);
+  const resumes = resumeMetrics(session.resumes ?? []);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens: tokens2, resumes };
+  if (session.overhead) {
+    metrics.overhead = overheadMetrics(session.overhead, total.usd);
+  }
+  return metrics;
+};
+var overheadMetrics = (overhead, sessionUsd) => {
+  const share2 = sessionUsd > 0 ? overhead.usd / sessionUsd : 0;
+  return { ...structuredClone(overhead), share: share2 };
+};
+var resumeMetrics = (resumes) => {
+  const expired = resumes.filter((entry) => entry.cacheLikelyExpired === true).length;
+  const cacheWriteUsd = resumes.reduce((sum, entry) => sum + (entry.cacheWriteUsd ?? 0), 0);
+  return { count: resumes.length, expired, cacheWriteUsd, items: structuredClone(resumes) };
+};
+
+// src/model/aggregate.ts
+var WORK_SESSION_CALLS = 5;
+
+// src/ui/workflow-map.ts
+var ABSENT_TEXT = "not in this workflow";
+var UNMEASURED_TEXT = "not measured";
+var EMPTY_TEXT2 = "The workflow map appears once a work session has finished.";
+var EMPTY_TITLE = `A work session has at least ${WORK_SESSION_CALLS} main-thread tool calls.`;
+var STEPS = [
+  { id: "main", name: "Main thread" },
+  { id: "explore", name: "Explore" },
+  { id: "implement", name: "Implement" },
+  { id: "review", name: "Review" },
+  { id: "verify", name: "Verify" },
+  { id: "merge", name: "PR and merge" },
+  { id: "you", name: "Your answers" }
+];
+var AREA_STEPS = {
+  delivery: "merge",
+  implementers: "implement",
+  review: "review",
+  verification: "verify",
+  tokens: "main",
+  questions: "you"
+};
+var STAGE_STEPS = { implement: "implement", review: "review", pr: "merge", other: "explore" };
+var STEP_STAGES = { explore: "other", implement: "implement", review: "review", merge: "pr" };
+var NEUTRAL = {
+  "fix-followups": "fix follow-ups recorded",
+  "verify-commands": "verification recorded",
+  "questions-per-session": "questions recorded"
+};
+var PHRASES = {
+  "cost-per-pr": ["PRs cost more", "cost per PR in range"],
+  "time-to-pr": ["PRs take longer", "PRs open quickly"],
+  "cost-per-100-lines": ["changes cost more per line", "cost per line in range"],
+  "budget-first-stop": ["implementers stop at budget", "within budget"],
+  "second-implementer": ["streams need a second implementer", "one implementer per stream"],
+  "second-round": ["branches reviewed twice", "reviews pass first time"],
+  "quiet-reviewer": ["<role> finds nothing", "reviewers find issues"],
+  "failed-runs": ["verification fails often", "verification passes"],
+  "cache-per-output": ["<role> reads whole files", "reads selectively"],
+  "main-peak-context": ["context runs too full", "context in range"],
+  "main-cost-share": ["carries most of the cost", "cost share in range"],
+  "overhead-share": ["Nurselog overhead high", "overhead small"],
+  "main-large-outputs": ["reads raw output", "keeps output short"],
+  "question-open-time": ["questions wait long", "quick answers"],
+  "developer-wait": ["work waits for you", "little waiting"]
+};
+var MAIN_CACHE_PROBLEM = "re-reads a long context";
+var NO_ROLE = "a role";
+var MERGE_TEXT = { developer: "you merge", agent: "agent merges" };
+var MAX_ROLES = 3;
+var isPlainObject = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var isArea = (value2) => typeof value2 === "string" && Object.hasOwn(AREA_STEPS, value2);
+var isInformational = (signal) => Object.hasOwn(NEUTRAL, signal);
+var isSignal = (value2) => typeof value2 === "string" && (Object.hasOwn(NEUTRAL, value2) || Object.hasOwn(PHRASES, value2));
+var lineVerdict = (line, signal) => {
+  if (isPlainObject(line.notMeasured)) {
+    return line.notMeasured.unused === true ? "unused" : "unmeasured";
+  }
+  if (isInformational(signal)) {
+    return "info";
+  }
+  if (line.flag === "guideline") {
+    return "change";
+  }
+  return line.flag === "comparison" ? "consider" : "ok";
+};
+var readLine = (value2) => {
+  if (!isPlainObject(value2) || !isArea(value2.area) || !isSignal(value2.signal)) {
+    return void 0;
+  }
+  const insight = value2;
+  const verdict = lineVerdict(value2, value2.signal);
+  return typeof value2.role === "string" ? { insight, role: value2.role, verdict } : { insight, verdict };
+};
+var stageOf = (role, setup) => {
+  const roles = setup?.roles ?? [];
+  const entry = roles.find((item2) => item2.role === role) ?? roles.find((item2) => item2.role === "*");
+  return entry?.stage ?? "other";
+};
+var isMainLine = (line) => line.role === void 0 || line.role === "main";
+var stepOf = (line, setup) => {
+  if (line.insight.signal === "cache-per-output" && !isMainLine(line)) {
+    return STAGE_STEPS[stageOf(line.role ?? "", setup)];
+  }
+  return AREA_STEPS[line.insight.area];
+};
+var linePhrase = (line, verdict, shortName) => {
+  const signal = line.insight.signal;
+  if (isInformational(signal)) {
+    return NEUTRAL[signal];
+  }
+  const [problem, good] = PHRASES[signal];
+  if (verdict === "ok") {
+    return good;
+  }
+  if (signal === "cache-per-output" && isMainLine(line)) {
+    return MAIN_CACHE_PROBLEM;
+  }
+  const role = line.role === void 0 ? NO_ROLE : shortName(line.role);
+  return problem.replace("<role>", role);
+};
+var stepVerdict = (lines) => {
+  const counted = lines.filter((line) => line.verdict !== "unused");
+  if (counted.length === 0) {
+    return "absent";
+  }
+  const order = ["change", "consider", "ok", "unmeasured"];
+  return order.find((verdict) => counted.some((line) => line.verdict === verdict)) ?? "ok";
+};
+var stepPhrase = (lines, verdict, shortName) => {
+  if (verdict === "absent") {
+    return "";
+  }
+  if (verdict === "unmeasured") {
+    return UNMEASURED_TEXT;
+  }
+  const first = lines.find((line) => line.verdict === verdict) ?? lines.find((line) => line.verdict === "info");
+  return first ? linePhrase(first, verdict, shortName) : "";
+};
+var roleList = (names) => {
+  const shown = names.slice(0, MAX_ROLES).join(", ");
+  const rest = names.length - MAX_ROLES;
+  return rest > 0 ? `${shown} +${rest}` : shown;
+};
+var sharedBudget = (roles, setup) => {
+  const entryOf2 = (role) => setup.roles.find((item2) => item2.role === role) ?? setup.roles.find((item2) => item2.role === "*");
+  const budgets = roles.map((role) => entryOf2(role)?.toolCalls);
+  if (budgets.length === 0 || budgets.some((budget) => budget === void 0)) {
+    return void 0;
+  }
+  if (budgets.every((budget) => budget === null)) {
+    return null;
+  }
+  const first = budgets[0];
+  return typeof first === "number" && budgets.every((budget) => budget === first) ? first : void 0;
+};
+var budgetText = (roles, setup) => {
+  const budget = sharedBudget(roles, setup);
+  if (budget === null) {
+    return " \xB7 no budget";
+  }
+  return budget === void 0 ? "" : ` \xB7 ${plural(budget, "call")}`;
+};
+var listedRoles = (stage, lines, setup) => {
+  const lineRoles = [...new Set(lines.flatMap((line) => line.role ?? []))];
+  if (lineRoles.length > 0 || !setup) {
+    return lineRoles;
+  }
+  return setup.roles.filter((item2) => item2.stage === stage && item2.role !== "*").map((item2) => item2.role);
+};
+var setupLine = (id, lines, setup, shortName) => {
+  if (id === "verify") {
+    return setup ? setup.verification.join(", ") : "";
+  }
+  const stage = STEP_STAGES[id];
+  if (stage === void 0) {
+    return "";
+  }
+  if (id === "merge" && lines.every((line) => line.role === void 0)) {
+    return setup ? MERGE_TEXT[setup.mergeBy] : "";
+  }
+  const roles = listedRoles(stage, lines, setup);
+  const listed = roleList(roles.map(shortName));
+  return id === "implement" && setup ? `${listed}${budgetText(roles, setup)}` : listed;
+};
+var implementBudget = (lines, setup) => {
+  const budget = setup ? sharedBudget(listedRoles("implement", lines, setup), setup) : void 0;
+  return typeof budget === "number" ? budget : void 0;
+};
+var countText3 = (change, consider, measured) => {
+  const parts = [];
+  if (change > 0) {
+    parts.push(`${change} to change`);
+  }
+  if (consider > 0) {
+    parts.push(`${consider} to consider`);
+  }
+  if (parts.length > 0) {
+    return parts.join(" \xB7 ");
+  }
+  return measured ? "nothing to change" : "nothing measured yet";
+};
+var basisText = (sessions) => `checked against guidelines, the setup and the last ${plural(sessions, "work session")}`;
+var workflowMap = (insights, roleShorts) => {
+  const { report, setup } = insights;
+  const shortName = (role) => {
+    const short = ownValue(roleShorts, role);
+    return typeof short === "string" && short !== "" ? short : role;
+  };
+  const listed = Array.isArray(report.insights) ? report.insights : [];
+  const lines = listed.flatMap((value2) => readLine(value2) ?? []);
+  const byStep = new Map(STEPS.map((step) => [step.id, []]));
+  for (const line of lines) {
+    byStep.get(stepOf(line, setup))?.push(line);
+  }
+  const steps = STEPS.map(({ id, name }) => {
+    const own = byStep.get(id) ?? [];
+    const verdict = stepVerdict(own);
+    const flagged = own.filter((line) => line.verdict === "change" || line.verdict === "consider").length;
+    const setupText = verdict === "absent" ? ABSENT_TEXT : setupLine(id, own, setup, shortName);
+    const phrase = stepPhrase(own, verdict, shortName);
+    return { id, name, lines: own, verdict, setup: setupText, phrase, more: Math.max(0, flagged - 1) };
+  });
+  const change = lines.filter((line) => line.verdict === "change").length;
+  const consider = lines.filter((line) => line.verdict === "consider").length;
+  const measured = steps.some((step) => step.verdict === "change" || step.verdict === "consider" || step.verdict === "ok");
+  const sessions = Array.isArray(report.sessions) ? report.sessions.length : 0;
+  return { steps, change, consider, empty: sessions === 0, count: countText3(change, consider, measured), basis: basisText(sessions) };
+};
+
+// src/ui/health-report.ts
+var PR = ["PR", "PRs"];
+var RUN = ["run", "runs"];
+var STREAM = ["stream", "streams"];
+var BRANCH = ["branch", "branches"];
+var SESSION = ["session", "sessions"];
+var ANSWERED = ["answered question", "answered questions"];
+var QUIET_RUNS = 10;
+var HEADROOM = 1.08;
+var MAX_CHIPS = 4;
+var noun2 = (count, unit) => count === 1 ? unit[0] : unit[1];
+var wholePercent = (fraction) => `${Math.round(fraction * 100)}%`;
+var tenthPercent = (fraction) => `${(fraction * 100).toFixed(1)}%`;
+var rateText = (k, n2, unit, hit) => `${k} of ${n2} ${noun2(n2, unit)} ${hit}`;
+var rate = (hit) => ({
+  text: (evidence, unit) => evidence.k === void 0 ? void 0 : rateText(evidence.k, evidence.n, unit, hit),
+  row: (number, point2, unit) => point2.k !== void 0 && point2.n !== void 0 ? rateText(point2.k, point2.n, unit, hit) : `${wholePercent(number)} of ${unit[1]} ${hit}`
+});
+var valued = (text2, row2 = text2) => ({
+  text: (evidence) => evidence.value === void 0 ? void 0 : text2(evidence.value),
+  row: row2
+});
+var quietLeast = (limit) => {
+  let least = 0;
+  while (least < QUIET_RUNS && least / QUIET_RUNS < limit) {
+    least += 1;
+  }
+  return least;
+};
+var SIGNALS = {
+  "cost-per-pr": {
+    impact: "cost",
+    unit: PR,
+    headline: ["PRs cost more than before", "Cost per PR stays in range"],
+    ...valued((value2) => `${cost(value2)} per PR`)
+  },
+  "time-to-pr": {
+    impact: "time",
+    unit: PR,
+    headline: ["PRs take longer to open", "PRs open quickly"],
+    ...valued(duration)
+  },
+  "cost-per-100-lines": {
+    impact: "cost",
+    unit: PR,
+    headline: ["Changes cost more per line", "Cost per changed line stays in range"],
+    text: (evidence) => evidence.value === void 0 ? "no changed lines" : `${cost(evidence.value)} per 100 lines`,
+    row: (number) => `${cost(number)} per 100 lines`
+  },
+  "budget-first-stop": {
+    impact: "time",
+    unit: RUN,
+    headline: ["Implementers stop at their tool-call budget", "Implementers finish within their budget"],
+    ...rate("reached the budget"),
+    limit: (limit) => `under ${Math.round(limit * 100)}%`,
+    scale: true
+  },
+  "second-implementer": {
+    impact: "time",
+    unit: STREAM,
+    headline: ["Streams need a second implement run", "One implement run per stream"],
+    ...rate("had a second run")
+  },
+  "second-round": {
+    impact: "time",
+    unit: BRANCH,
+    headline: ["Branches need a second review round", "Reviews pass in one round"],
+    ...rate("had a second round")
+  },
+  "quiet-reviewer": {
+    impact: "cost",
+    unit: RUN,
+    headline: ["<role> rarely finds anything to fix", "<role> finds things to fix"],
+    // A quiet-reviewer point is one run; a session's points merge into one row, "2 of 3 runs had a fix follow-up".
+    ...rate("had a fix follow-up"),
+    limit: (limit) => `at least ${quietLeast(limit)} of ${QUIET_RUNS}`,
+    perRun: true
+  },
+  "failed-runs": {
+    impact: "quality",
+    unit: RUN,
+    headline: ["Verification fails often", "Verification passes"],
+    ...rate("failed")
+  },
+  "cache-per-output": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["<role> reads whole files", "<role> reads selectively"],
+    ...valued((value2) => `${Math.round(value2)} per output token`),
+    limit: (limit) => `at most ${Math.round(limit)}`,
+    scale: true
+  },
+  "main-peak-context": {
+    impact: "quality",
+    unit: SESSION,
+    headline: ["The main thread's context runs too full", "The main thread's context stays in range"],
+    ...valued((value2) => `${tokens(value2)} tokens`),
+    // The points are peak tokens and the limit a share of the context limit: no common scale.
+    limit: (limit) => `at most ${Math.round(limit * 100)}% of the context limit`
+  },
+  "main-cost-share": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The main thread carries most of the cost", "The main thread's cost share stays in range"],
+    ...valued(wholePercent)
+  },
+  "overhead-share": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The Nurselog overhead is high", "The Nurselog overhead stays small"],
+    ...valued(tenthPercent),
+    limit: (limit) => `at most ${tenthPercent(limit)}`,
+    scale: true
+  },
+  "main-large-outputs": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The main thread reads raw command output", "The main thread keeps long output out of its context"],
+    ...valued((value2) => `a median of ${value2} per session`, (value2) => plural(value2, "large output")),
+    limit: (limit) => `at most ${limit} per session`,
+    scale: true
+  },
+  "question-open-time": {
+    impact: "time",
+    unit: ANSWERED,
+    headline: ["Questions wait long for an answer", "Questions get quick answers"],
+    ...valued(duration)
+  },
+  "developer-wait": {
+    impact: "time",
+    unit: SESSION,
+    headline: ["Work waits for you", "Little waiting for you"],
+    ...valued((value2) => `${duration(value2)} per session`, duration)
+  },
+  "fix-followups": {
+    impact: "quality",
+    unit: RUN,
+    headline: ["Fix follow-ups per review run", "Fix follow-ups per review run"],
+    ...valued((value2) => `${value2.toFixed(1)} per run`)
+  },
+  "verify-commands": {
+    impact: "quality",
+    unit: RUN,
+    headline: ["Verification commands per implement run", "Verification commands per implement run"],
+    ...valued((value2) => `a median of ${value2} per run`, (value2) => `${value2} per run`)
+  },
+  "questions-per-session": {
+    impact: "time",
+    unit: SESSION,
+    headline: ["Questions per session", "Questions per session"],
+    ...valued((value2) => `a median of ${value2} per session`, (value2) => plural(value2, "question"))
+  }
+};
+var MAIN_CACHE2 = ["The main thread re-reads a long context", "The main thread's cache reads stay in range"];
+var NO_ROLE2 = "A role";
+var NO_TITLE = "recorded session";
+var AREA_NAMES = {
+  delivery: "Delivery",
+  implementers: "Implementers",
+  review: "Review",
+  verification: "Verification",
+  tokens: "Token economy",
+  questions: "Questions and waits"
+};
+var GROUPS = [
+  { group: "change", label: "Worth changing" },
+  { group: "consider", label: "Worth considering" },
+  { group: "ok", label: "Working well" },
+  { group: "info", label: "For reference" },
+  { group: "unmeasured", label: "Not measured" }
+];
+var FOOTER = "Checked against the guidelines and the workflow setup of nurselog.config.json. These are suggestions; nothing on this board changes your files.";
+var isPlainObject2 = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var finite = (value2) => typeof value2 === "number" && Number.isFinite(value2);
+var nonEmpty = (value2) => typeof value2 === "string" && value2 !== "" ? value2 : void 0;
+var readEvidence = (value2) => {
+  if (!isPlainObject2(value2) || !finite(value2.n) || value2.n < 0) {
+    return void 0;
+  }
+  const evidence = { n: value2.n };
+  if (finite(value2.k)) {
+    evidence.k = value2.k;
+  }
+  if (finite(value2.value)) {
+    evidence.value = value2.value;
+  }
+  return evidence;
+};
+var readLimit = (value2) => {
+  if (!isPlainObject2(value2) || !finite(value2.limit)) {
+    return void 0;
+  }
+  return { limit: value2.limit, worse: value2.worse === "below" ? "below" : "above" };
+};
+var pointNumber = (value2, k, n2) => {
+  if (finite(value2)) {
+    return value2;
+  }
+  return k !== void 0 && n2 !== void 0 && n2 > 0 ? k / n2 : null;
+};
+var readPoints = (series) => {
+  if (!Array.isArray(series)) {
+    return [];
+  }
+  return series.flatMap((item2) => {
+    if (!isPlainObject2(item2) || typeof item2.session !== "string") {
+      return [];
+    }
+    const k = finite(item2.k) ? item2.k : void 0;
+    const n2 = finite(item2.n) ? item2.n : void 0;
+    return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2 }];
+  });
+};
+var readFacts = (report) => {
+  const basis = report.basis;
+  const options = report.options;
+  const listed = report.sessions;
+  const entries = Array.isArray(listed) ? listed : [];
+  const sessions = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (isPlainObject2(entry) && typeof entry.id === "string") {
+      sessions.set(entry.id, { key: nonEmpty(entry.key), title: nonEmpty(entry.title) });
+    }
+  }
+  const last = entries[entries.length - 1];
+  const facts = { sessions, newest: isPlainObject2(last) ? last : void 0 };
+  if (isPlainObject2(basis)) {
+    facts.window = finite(basis.window) ? basis.window : void 0;
+    facts.baseline = finite(basis.baseline) ? basis.baseline : void 0;
+  }
+  if (isPlainObject2(options)) {
+    facts.minBaseline = finite(options.minBaseline) ? options.minBaseline : void 0;
+  }
+  return facts;
+};
+var sideText = (format, evidence) => {
+  if (evidence === void 0) {
+    return void 0;
+  }
+  return evidence.n === 0 ? `no ${format.unit[1]}` : format.text(evidence, format.unit);
+};
+var numberOf = (label, text2) => text2 === void 0 ? void 0 : { label, text: text2 };
+var nowLabel = (signal, window2, facts) => {
+  if (signal === "quiet-reviewer" && window2 !== void 0) {
+    return `last ${plural(window2.n, "run")}`;
+  }
+  return facts.window === void 0 ? "recent sessions" : `last ${plural(facts.window, "session")}`;
+};
+var sparkline = (points, limit, unit) => {
+  if (points.length === 0) {
+    return void 0;
+  }
+  const numbers = points.flatMap((point2) => point2.number ?? []);
+  const max = Math.max(0, ...numbers, limit?.limit ?? 0) * HEADROOM;
+  const guide = limit !== void 0 && max > 0 ? limit : void 0;
+  const bars = points.map((point2) => {
+    const number = point2.number;
+    if (number === null) {
+      return { height: null, window: point2.window, worse: false };
+    }
+    const height = max > 0 ? Math.max(0, number / max) : 0;
+    const beyond = guide !== void 0 && (guide.worse === "above" ? number > guide.limit : number < guide.limit);
+    return { height, window: point2.window, worse: beyond };
+  });
+  const first = points.findIndex((point2) => point2.window);
+  const highlighted = points.filter((point2) => point2.window).length;
+  const label = `${plural(points.length, unit)}, the latest ${highlighted} highlighted${guide ? ", dashed line is the guideline" : ""}`;
+  const spark = { bars, windowStart: first === -1 ? points.length : first, label };
+  if (guide) {
+    spark.guide = guide.limit / max;
+  }
+  return spark;
+};
+var mergeRuns = (session, runs) => {
+  const k = runs.reduce((total, run) => total + (run.k ?? ((run.number ?? 0) >= 1 ? 1 : 0)), 0);
+  const n2 = runs.reduce((total, run) => total + (run.n ?? 1), 0);
+  return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2 };
+};
+var rowPoints = (points, perRun) => {
+  const newestFirst3 = [...points].reverse().filter((point2) => point2.window && point2.number !== null);
+  if (!perRun) {
+    return newestFirst3;
+  }
+  const bySession = /* @__PURE__ */ new Map();
+  for (const point2 of newestFirst3) {
+    const runs = bySession.get(point2.session);
+    if (runs === void 0) {
+      bySession.set(point2.session, [point2]);
+    } else {
+      runs.push(point2);
+    }
+  }
+  return [...bySession].map(([session, runs]) => mergeRuns(session, runs));
+};
+var pointRows = (points, format, facts) => {
+  const rows = [];
+  const sessionValues = /* @__PURE__ */ new Map();
+  for (const point2 of rowPoints(points, format.perRun === true)) {
+    if (point2.number === null) {
+      continue;
+    }
+    const value2 = format.row(point2.number, point2, format.unit);
+    const session = facts.sessions.get(point2.session);
+    rows.push({ session: point2.session, key: session?.key ?? "", title: session?.title ?? NO_TITLE, value: value2 });
+    if (!sessionValues.has(point2.session)) {
+      sessionValues.set(point2.session, value2);
+    }
+  }
+  return { rows, sessionValues };
+};
+var groupOf = (verdict) => verdict === "unused" ? "unmeasured" : verdict;
+var lineText = (insight, role) => {
+  const text2 = typeof insight.text === "string" ? insight.text : "";
+  const prefix = `${AREA_NAMES[insight.area]}: `;
+  const bare = text2.startsWith(prefix) ? text2.slice(prefix.length) : text2;
+  if (role !== void 0 && role !== "" && bare.startsWith(role)) {
+    return bare;
+  }
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+};
+var headlineOf = (line) => {
+  const signal = line.insight.signal;
+  if (signal === "fix-followups") {
+    return line.role === void 0 ? SIGNALS[signal].headline[0] : `${line.role}: fix follow-ups per run`;
+  }
+  const mainThread = signal === "cache-per-output" && (line.role === void 0 || line.role === "main");
+  const [problem, good] = mainThread ? MAIN_CACHE2 : SIGNALS[signal].headline;
+  const role = line.role ?? NO_ROLE2;
+  return (line.verdict === "ok" ? good : problem).replace("<role>", () => role);
+};
+var idOf = (line) => line.role === void 0 ? line.insight.signal : `${line.insight.signal}:${line.role}`;
+var unmeasuredImpact = (insight) => {
+  const covered = isPlainObject2(insight.notMeasured) ? insight.notMeasured.signals : void 0;
+  const signals = Array.isArray(covered) ? covered : [];
+  const known = signals.find((signal) => typeof signal === "string" && Object.hasOwn(SIGNALS, signal));
+  return known === void 0 ? "quality" : SIGNALS[known].impact;
+};
+var unmeasuredFinding = (line, step) => ({
+  id: `unmeasured:${line.insight.area}`,
+  step: step.id,
+  stepName: step.name,
+  group: "unmeasured",
+  absent: line.verdict === "unused",
+  impact: unmeasuredImpact(line.insight),
+  headline: AREA_NAMES[line.insight.area],
+  line: lineText(line.insight),
+  sessionValues: /* @__PURE__ */ new Map()
+});
+var measuredFinding = (line, step, facts, changes) => {
+  const insight = line.insight;
+  const format = SIGNALS[insight.signal];
+  const window2 = readEvidence(insight.window);
+  const baseline = readEvidence(insight.baseline);
+  const limit = readLimit(insight.guideline);
+  const points = readPoints(insight.series);
+  const now = numberOf(nowLabel(insight.signal, window2, facts), sideText(format, window2));
+  const before = numberOf(facts.baseline === void 0 ? "before" : `${facts.baseline} before`, sideText(format, baseline));
+  const guideline = limit === void 0 || format.limit === void 0 ? void 0 : numberOf("guideline", format.limit(limit.limit));
+  const spark = sparkline(points, format.scale === true ? limit : void 0, insight.signal === "quiet-reviewer" ? "run" : "session");
+  const { rows, sessionValues } = pointRows(points, format, facts);
+  const evidence = { setup: step.verdict === "absent" ? "" : step.setup, rows };
+  if (now) {
+    evidence.now = now;
+  }
+  if (before) {
+    evidence.before = before;
+  }
+  if (guideline) {
+    evidence.guideline = guideline;
+  }
+  if (spark) {
+    evidence.spark = spark;
+  }
+  const finding = {
+    id: idOf(line),
+    step: step.id,
+    stepName: step.name,
+    group: groupOf(line.verdict),
+    absent: false,
+    impact: format.impact,
+    headline: headlineOf(line),
+    line: lineText(insight, line.role),
+    evidence,
+    sessionValues
+  };
+  if (line.verdict === "change") {
+    finding.basis = "worse than the guideline";
+  }
+  if (line.verdict === "consider") {
+    finding.basis = "worse than before";
+  }
+  if ((line.verdict === "ok" || line.verdict === "info") && now) {
+    finding.value = now.text;
+  }
+  const change = suggestedChange({ line, step: step.id, ...changes, guideline: guideline?.text, before: before?.text, window: window2 });
+  if (change) {
+    finding.change = change;
+  }
+  return finding;
+};
+var noteOf = (facts) => {
+  const { window: window2, baseline, minBaseline } = facts;
+  if (window2 === void 0 || baseline === void 0 || minBaseline === void 0 || baseline >= minBaseline) {
+    return void 0;
+  }
+  const recorded = `Only ${plural(baseline, "work session")} ${baseline === 1 ? "is" : "are"} recorded before the latest ${window2}.`;
+  return `${recorded} Guidelines still apply; the comparison with before settles as more sessions finish.`;
+};
+var updatedOf = (newest2) => {
+  if (newest2 === void 0 || typeof newest2.finishedAt !== "string") {
+    return void 0;
+  }
+  return { name: nonEmpty(newest2.key) ?? "a session", finishedAt: newest2.finishedAt };
+};
+var healthReport = (insights, roleShorts, repositoryName) => {
+  const map = workflowMap(insights, roleShorts);
+  const facts = readFacts(insights.report);
+  const implement = map.steps.find((step) => step.id === "implement");
+  const changes = { setup: insights.setup, budget: implementBudget(implement?.lines ?? [], insights.setup) };
+  const owners = /* @__PURE__ */ new Map();
+  for (const step of map.steps) {
+    for (const line of step.lines) {
+      owners.set(line.insight, { line, step });
+    }
+  }
+  const listed = Array.isArray(insights.report.insights) ? insights.report.insights : [];
+  const findings = listed.flatMap((value2) => {
+    const owner = owners.get(value2);
+    if (owner === void 0) {
+      return [];
+    }
+    const unmeasured = owner.line.verdict === "unmeasured" || owner.line.verdict === "unused";
+    return [unmeasured ? unmeasuredFinding(owner.line, owner.step) : measuredFinding(owner.line, owner.step, facts, changes)];
+  });
+  const groups2 = GROUPS.map(({ group, label }) => ({ group, label, findings: findings.filter((finding) => finding.group === group) }));
+  const stages = map.steps.filter((step) => findings.some((finding) => finding.step === step.id)).map(({ id, name }) => ({ id, name }));
+  const report = {
+    title: `Workflow health \xB7 ${repositoryName}`,
+    count: map.count,
+    keyless: [...facts.sessions.values()].every((session) => session.key === void 0),
+    stages,
+    groups: groups2.filter((group) => group.findings.length > 0),
+    closing: typeof insights.report.closing === "string" ? insights.report.closing : "",
+    footer: FOOTER
+  };
+  const updated = updatedOf(facts.newest);
+  if (updated) {
+    report.updated = updated;
+  }
+  const newest2 = nonEmpty(facts.newest?.id);
+  if (newest2 !== void 0) {
+    report.newest = newest2;
+  }
+  const note = noteOf(facts);
+  if (note !== void 0) {
+    report.note = note;
+  }
+  return report;
+};
+var costChanges = (report) => {
+  const suggested = report.groups.filter((group) => group.group === "change" || group.group === "consider");
+  return suggested.reduce((total, group) => total + group.findings.filter((finding) => finding.impact === "cost").length, 0);
+};
+var costLinkText = (count) => `${plural(count, "workflow change")} would cut token use`;
+var sessionChips2 = (report, sessionId) => {
+  const suggested = report.groups.filter((group) => group.group === "change" || group.group === "consider");
+  const chips = suggested.flatMap((group) => group.findings).flatMap((finding) => {
+    const value2 = finding.sessionValues.get(sessionId);
+    return value2 === void 0 ? [] : [{ headline: finding.headline, value: value2 }];
+  });
+  return chips.slice(0, MAX_CHIPS);
+};
+
+// src/ui/health-strip.ts
+var healthOpenKey = (repositoryId) => `nurselog.health.${repositoryId}`;
+var RETRY_MS = 3e4;
+var VERDICT_LABELS = { change: "to change", consider: "to consider", ok: "working well", unmeasured: "", absent: ABSENT_TEXT };
+var stepLabel = (step) => {
+  const change = step.lines.filter((line) => line.verdict === "change").length;
+  const consider = step.lines.filter((line) => line.verdict === "consider").length;
+  const changeText = change > 0 ? `${change} to change` : "";
+  const considerText = consider > 0 ? `${consider} to consider` : "";
+  const counts = [changeText, considerText].filter((part) => part !== "").join(", ");
+  const counted = step.more > 0 ? counts : VERDICT_LABELS[step.verdict];
+  const parts = [counted, step.phrase].filter((part) => part !== "");
+  return parts.length > 0 ? `${step.name}: ${parts.join(", ")}` : step.name;
+};
+var healthReporter = (context, repositoryName, changed) => {
+  let last;
+  return (insights) => {
+    if (insights === last) {
+      return;
+    }
+    last = insights;
+    context.health = insights ? healthReport(insights, context.config.roleShorts, repositoryName()) : void 0;
+    changed();
+  };
+};
+var stripCount = 0;
+var setTitle2 = (element, text2) => {
+  if (text2 === "") {
+    element.removeAttribute("title");
+  } else if (element.title !== text2) {
+    element.title = text2;
+  }
+};
+var createStep = (setupId, open2) => {
+  const item2 = el("li");
+  const node = el("button", "wn");
+  node.type = "button";
+  const dot = el("span", "wd");
+  dot.setAttribute("aria-hidden", "true");
+  const name = el("span", "wl");
+  const setup = el("span", "ws");
+  setup.id = setupId;
+  node.setAttribute("aria-describedby", setupId);
+  const verdict = el("span", "wv");
+  const phrase = el("span");
+  const more = el("b");
+  verdict.append(phrase, more);
+  node.append(dot, name, setup, verdict);
+  item2.append(node);
+  node.addEventListener("animationend", () => node.classList.remove("bump"));
+  node.addEventListener("click", () => open2(node));
+  return { item: item2, step: { node, name, setup, phrase, more } };
+};
+var bumpKey = (step) => `${step.verdict}:${step.more}`;
+var createHealthStrip = (context, hooks) => {
+  stripCount += 1;
+  const element = el("section", "hstrip");
+  element.setAttribute("aria-label", "Workflow health");
+  element.hidden = true;
+  const header = el("div", "hsh");
+  const toggle = el("button", "hsx");
+  toggle.type = "button";
+  const bodyId = `health-body-${stripCount}`;
+  toggle.setAttribute("aria-controls", bodyId);
+  toggle.append(chevronIcon());
+  const count = el("span", "hsc");
+  const countDot = el("i");
+  countDot.setAttribute("aria-hidden", "true");
+  const countText4 = el("span");
+  count.append(countDot, countText4);
+  const basis = el("span", "hsu");
+  const note = el("span", "hsn", EMPTY_TEXT2);
+  note.title = EMPTY_TITLE;
+  const reportButton = el("button", "button hso", "Open report");
+  reportButton.type = "button";
+  reportButton.addEventListener("click", () => hooks.open(reportButton, {}));
+  header.append(toggle, el("h2", void 0, "Workflow health"), count, basis, note, reportButton);
+  const body = el("div", "hsb");
+  body.id = bodyId;
+  const clip3 = el("div");
+  const list = el("ol", "wmap");
+  const line = el("li", "wline");
+  line.setAttribute("aria-hidden", "true");
+  list.append(line);
+  const steps = /* @__PURE__ */ new Map();
+  clip3.append(list);
+  body.append(clip3);
+  element.append(header, body);
+  const openKey = healthOpenKey(context.repositoryId);
+  let open2 = readValue(openKey, true) === "1";
+  let stamp;
+  let pending;
+  let failedAt;
+  let data;
+  let map;
+  let drawnKeys;
+  const drawOpen = () => {
+    const empty = map?.empty ?? false;
+    const shown = open2 && !empty;
+    element.classList.toggle("open", shown);
+    body.classList.toggle("open", shown);
+    body.inert = !shown;
+    for (const parts of steps.values()) {
+      parts.node.tabIndex = shown ? 0 : -1;
+    }
+    toggle.setAttribute("aria-expanded", String(open2));
+    toggle.setAttribute("aria-label", open2 ? "Hide the workflow map" : "Show the workflow map");
+  };
+  const drawUpdated = () => {
+    setTitle2(reportButton, context.health ? updatedText(context.health, Date.now()) : "");
+  };
+  header.addEventListener("click", (event) => {
+    if (reportButton.contains(event.target) || !map || map.empty) {
+      return;
+    }
+    open2 = !open2;
+    writeValue(openKey, open2 ? "1" : void 0, true);
+    drawOpen();
+  });
+  const openStep = (id, node) => {
+    const listed = context.health?.stages.some((stage) => stage.id === id) ?? false;
+    hooks.open(node, listed ? { stage: id } : {});
+  };
+  const drawStep = (step) => {
+    let parts = steps.get(step.id);
+    if (!parts) {
+      const id = step.id;
+      const made = createStep(`${bodyId}-${id}-setup`, (node) => openStep(id, node));
+      list.append(made.item);
+      steps.set(step.id, made.step);
+      parts = made.step;
+    }
+    parts.node.className = parts.node.classList.contains("bump") ? `wn ${step.verdict} bump` : `wn ${step.verdict}`;
+    parts.node.dataset.step = step.id;
+    const label = stepLabel(step);
+    if (parts.node.getAttribute("aria-label") !== label) {
+      parts.node.setAttribute("aria-label", label);
+    }
+    setText(parts.name, step.name);
+    setText(parts.setup, step.setup);
+    setTitle2(parts.setup, step.setup);
+    setText(parts.phrase, step.phrase);
+    setText(parts.more, step.more > 0 ? `+${step.more}` : "");
+    parts.more.hidden = step.more === 0;
+  };
+  const bump = (id) => {
+    const node = steps.get(id)?.node;
+    if (!node) {
+      return;
+    }
+    node.classList.remove("bump");
+    void node.offsetWidth;
+    node.classList.add("bump");
+  };
+  const rising = () => element.getAnimations().some((animation) => animation.playState !== "finished");
+  const enter = () => {
+    const height = `${element.offsetHeight}px`;
+    const gap = flowGap(element);
+    const from = { ...ENTER2[0], height: "0px", marginBottom: `${-gap}px`, overflow: "hidden" };
+    const to = { ...ENTER2[1], height, marginBottom: "0px", overflow: "hidden" };
+    element.animate([from, to], { duration: ENTER_MS, easing: EASE3 });
+  };
+  const draw2 = () => {
+    const wasHidden = element.hidden;
+    element.hidden = stamp === void 0 || data === void 0;
+    if (!data) {
+      hooks.report(void 0);
+      return;
+    }
+    const next = workflowMap(data, context.config.roleShorts);
+    map = next;
+    element.classList.toggle("empty", next.empty);
+    toggle.hidden = next.empty;
+    count.hidden = next.empty;
+    basis.hidden = next.empty;
+    reportButton.hidden = next.empty;
+    note.hidden = !next.empty;
+    body.hidden = next.empty;
+    countDot.hidden = next.change === 0;
+    setText(countText4, next.count);
+    setText(basis, next.basis);
+    for (const step of next.steps) {
+      drawStep(step);
+    }
+    const keys2 = new Map(next.steps.map((step) => [step.id, bumpKey(step)]));
+    if (drawnKeys && !context.reducedMotion()) {
+      for (const [id, key] of keys2) {
+        const before = drawnKeys.get(id);
+        if (before !== void 0 && before !== key) {
+          bump(id);
+        }
+      }
+    }
+    drawnKeys = keys2;
+    drawOpen();
+    hooks.report(data);
+    drawUpdated();
+    if (wasHidden && !context.reducedMotion() && !rising()) {
+      enter();
+    }
+  };
+  const guardedDraw = () => {
+    try {
+      draw2();
+    } catch (error) {
+      element.hidden = true;
+      console.error("Nurselog: the workflow health strip failed to draw; it is hidden until its next report.", error);
+    }
+  };
+  const fetchReport = () => {
+    pending?.abort();
+    const controller = new AbortController();
+    pending = controller;
+    void context.source.insights(context.repositoryId, controller.signal).then((result) => {
+      if (pending !== controller) {
+        return;
+      }
+      pending = void 0;
+      if (result) {
+        failedAt = void 0;
+        data = result;
+        guardedDraw();
+      } else if (data === void 0) {
+        failedAt = Date.now();
+      }
+    });
+  };
+  drawOpen();
+  return {
+    element,
+    update(next) {
+      drawUpdated();
+      if (next === stamp) {
+        if (next !== void 0 && pending === void 0 && failedAt !== void 0 && Date.now() - failedAt >= RETRY_MS) {
+          failedAt = void 0;
+          fetchReport();
+        }
+        return;
+      }
+      stamp = next;
+      failedAt = void 0;
+      if (next === void 0) {
+        pending?.abort();
+        pending = void 0;
+        data = void 0;
+      } else {
+        fetchReport();
+      }
+      guardedDraw();
+    },
+    waiting: () => stamp !== void 0 && data === void 0 && pending !== void 0,
+    destroy() {
+      pending?.abort();
+      pending = void 0;
+      failedAt = void 0;
     }
   };
 };
@@ -11501,6 +13310,272 @@ var showLegend = (config) => {
   }
 };
 
+// src/ui/tabs.ts
+var TAB_PARAM = "repo";
+var wantedName = (search) => new URLSearchParams(search).get(TAB_PARAM) || void 0;
+var tabUrl = (href, name) => {
+  const url = new URL(href);
+  url.searchParams.set(TAB_PARAM, name);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+var VIEW_PARAM = "view";
+var pageView = (search) => new URLSearchParams(search).get(VIEW_PARAM) === "runs" ? "runs" : "sessions";
+var SESSION_PARAM = "session";
+var wantedSession = (search) => new URLSearchParams(search).get(SESSION_PARAM) || void 0;
+var withoutSession = (href) => {
+  const url = new URL(href);
+  url.searchParams.delete(SESSION_PARAM);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+var SESSION_WAIT_MS = 1e4;
+var sessionLinkStep = (canOpen, waitedMs) => {
+  if (canOpen) {
+    return "jump";
+  }
+  return waitedMs !== void 0 && waitedMs >= SESSION_WAIT_MS ? "drop" : "wait";
+};
+var mostRecentlyActive = (list) => {
+  let newest2;
+  for (const repository of list) {
+    if (!newest2 || (repository.lastLineAt ?? "") > (newest2.lastLineAt ?? "")) {
+      newest2 = repository;
+    }
+  }
+  return newest2;
+};
+var selectRepository = (list, wanted, currentId) => {
+  const current = currentId === void 0 ? void 0 : list.find((repository) => repository.id === currentId);
+  const named = wanted === void 0 ? void 0 : list.find((repository) => repository.name === wanted);
+  return current ?? named ?? mostRecentlyActive(list);
+};
+var tabViews = (list, selectedId) => list.map((repository) => {
+  const running = Math.max(0, repository.running);
+  const waiting = Math.max(0, repository.waiting);
+  const label = `${repository.name}: ${running} running, ${waiting} waiting for you`;
+  return { id: repository.id, name: repository.name, running, waiting, selected: repository.id === selectedId, label };
+});
+var plainClick = (event) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
+var waitingTotal = (list) => list.reduce((sum, repository) => sum + Math.max(0, repository.waiting), 0);
+var documentTitle = (list, selected, label) => {
+  if (!selected) {
+    return label;
+  }
+  const waiting = waitingTotal(list);
+  const count = waiting > 0 ? `(${waiting}) ` : "";
+  return `${count}${selected.name} \xB7 ${label}`;
+};
+var inView = (start, end, viewStart, viewEnd) => start >= viewStart - 0.5 && end <= viewEnd + 0.5;
+var hiddenWaiting = (boxes, viewStart, viewEnd) => {
+  let start;
+  let end;
+  for (const box of boxes) {
+    if (box.waiting <= 0) {
+      continue;
+    }
+    const spanStart = Math.min(box.nameStart, box.badgeStart);
+    const spanEnd = Math.max(box.nameEnd, box.badgeEnd);
+    const fits = spanEnd - spanStart <= viewEnd - viewStart + 1;
+    const shownStart = fits ? spanStart : box.nameStart;
+    const shownEnd = fits ? spanEnd : box.nameEnd;
+    if (shownStart < viewStart - 0.5 && (!start || box.start > start.start)) {
+      start = box;
+    }
+    if (shownEnd > viewEnd + 0.5 && (!end || box.end < end.end)) {
+      end = box;
+    }
+  }
+  return { start: start?.id, end: end?.id };
+};
+var tabNameId = (id) => `repo-tab-${id}-name`;
+var INCHWORM_REACH = 0.42;
+var inchwormFrames = (from, to) => {
+  const left = Math.min(from.left, to.left);
+  const right = Math.max(from.left + from.width, to.left + to.width);
+  return [{ left: from.left, width: from.width }, { left, width: right - left, offset: INCHWORM_REACH }, { left: to.left, width: to.width }];
+};
+var centredScroll = (tab, viewWidth, scrollWidth) => {
+  const left = tab.left - (viewWidth - tab.width) / 2;
+  return Math.min(Math.max(0, left), Math.max(0, scrollWidth - viewWidth));
+};
+var travelDirection = (ids, fromId, toId) => {
+  const from = fromId === void 0 ? -1 : ids.indexOf(fromId);
+  const to = toId === void 0 ? -1 : ids.indexOf(toId);
+  return from >= 0 && to >= 0 && to < from ? -1 : 1;
+};
+var badgeMotion = (previous, next, selected) => {
+  const bump = previous !== void 0 && next > previous;
+  return { bump, ping: bump && !selected };
+};
+var keyTarget = (ids, currentId, key) => {
+  const index = ids.indexOf(currentId);
+  if (index < 0) {
+    return void 0;
+  }
+  switch (key) {
+    case "ArrowRight":
+      return ids[(index + 1) % ids.length];
+    case "ArrowLeft":
+      return ids[(index - 1 + ids.length) % ids.length];
+    case "Home":
+      return ids[0];
+    case "End":
+      return ids[ids.length - 1];
+    default:
+      return void 0;
+  }
+};
+
+// src/ui/link-hand-off.ts
+var APP_WINDOW_QUERY = "(display-mode: standalone)";
+var HAND_OFF_CHANNEL = "nurselog-board";
+var OFFER_WAIT_MS = 150;
+var ACK_WAIT_MS = 150;
+var CLOSE_WAIT_MS = 500;
+var HANDED_OFF_TEXT = "Opened in the Nurselog app window.";
+var SHOW_HERE_TEXT = "Show here";
+var MAX_TEXT = 1024;
+var OFFERS_KEPT = 8;
+var isText = (value2) => typeof value2 === "string" && value2.length > 0 && value2.length <= MAX_TEXT;
+var parseHandOffMessage = (data) => {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return void 0;
+  }
+  const { type, id, repo, session, from, to, focusedAt } = data;
+  if (!isText(id)) {
+    return void 0;
+  }
+  if (type === "ask" && isText(repo) && isText(session)) {
+    return { type, id, repo, session };
+  }
+  if (type === "offer" && isText(from) && typeof focusedAt === "number" && Number.isFinite(focusedAt) && focusedAt >= 0) {
+    return { type, id, from, focusedAt };
+  }
+  if (type === "go" && isText(to)) {
+    return { type, id, to };
+  }
+  if (type === "ack" && isText(from)) {
+    return { type, id, from };
+  }
+  return void 0;
+};
+var chooseOffer = (offers) => {
+  let newest2;
+  for (const offer of offers) {
+    if (!newest2 || offer.focusedAt > newest2.focusedAt) {
+      newest2 = offer;
+    }
+  }
+  return newest2;
+};
+var askLink = (search) => {
+  const repo = wantedName(search);
+  const session = wantedSession(search);
+  return repo === void 0 || session === void 0 ? void 0 : { repo, session };
+};
+var launchLink = (targetURL) => {
+  if (typeof targetURL !== "string") {
+    return void 0;
+  }
+  let search;
+  try {
+    search = new URL(targetURL).search;
+  } catch {
+    return void 0;
+  }
+  const session = wantedSession(search);
+  return session === void 0 ? void 0 : { repo: wantedName(search), session };
+};
+var receiverEligible = (state, repo) => {
+  const free = state.appWindow && state.view === "sessions" && !state.signedOut && !state.asking;
+  return free && state.tabNames.includes(repo);
+};
+var linkStep = (place2, link) => {
+  const selected = place2.repositories.find((repository) => repository.id === place2.selectedId);
+  const target = link.repo === void 0 ? selected : place2.repositories.find((repository) => repository.name === link.repo);
+  if (place2.signedOut || place2.view !== "sessions" || target === void 0) {
+    return { step: "ignore" };
+  }
+  if (target !== selected) {
+    return { step: "want", session: link.session, switchTo: target, waitFrom: "first-snapshot" };
+  }
+  return place2.wantedSession === link.session ? { step: "keep" } : { step: "want", session: link.session, waitFrom: "now" };
+};
+var startAsk = (deps, link, finish) => {
+  const id = deps.newId();
+  const offers = [];
+  let phase = "collect";
+  let chosen;
+  let cancel = () => {
+  };
+  const end = (outcome) => {
+    if (phase === "done") {
+      return;
+    }
+    phase = "done";
+    cancel();
+    finish(outcome);
+  };
+  const pick = () => {
+    const offer = chooseOffer(offers);
+    if (!offer) {
+      end("fallback");
+      return;
+    }
+    phase = "go";
+    chosen = offer.from;
+    deps.post({ type: "go", id, to: offer.from });
+    cancel = deps.setTimer(() => end("fallback"), ACK_WAIT_MS);
+  };
+  deps.post({ type: "ask", id, repo: link.repo, session: link.session });
+  cancel = deps.setTimer(pick, OFFER_WAIT_MS);
+  return {
+    receive(message) {
+      if (message.id !== id) {
+        return;
+      }
+      if (phase === "collect" && message.type === "offer") {
+        offers.push({ from: message.from, focusedAt: message.focusedAt });
+      } else if (phase === "go" && message.type === "ack" && message.from === chosen) {
+        end("handed");
+      }
+    },
+    cancel() {
+      phase = "done";
+      cancel();
+    }
+  };
+};
+var createAnswerer = (deps) => {
+  const offered = /* @__PURE__ */ new Map();
+  return {
+    receive(message) {
+      if (message.type === "ask") {
+        if (!deps.eligible(message.repo)) {
+          return;
+        }
+        offered.delete(message.id);
+        offered.set(message.id, { repo: message.repo, session: message.session });
+        for (const old of offered.keys()) {
+          if (offered.size <= OFFERS_KEPT) {
+            break;
+          }
+          offered.delete(old);
+        }
+        deps.post({ type: "offer", id: message.id, from: deps.id, focusedAt: deps.focusedAt() });
+        return;
+      }
+      if (message.type !== "go" || message.to !== deps.id) {
+        return;
+      }
+      const link = offered.get(message.id);
+      offered.delete(message.id);
+      if (link && deps.eligible(link.repo) && deps.take(link)) {
+        deps.post({ type: "ack", id: message.id, from: deps.id });
+      }
+    }
+  };
+};
+
 // src/ui/overview.ts
 var EASE11 = "cubic-bezier(.2,.8,.2,1)";
 var ENTER3 = [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
@@ -11544,7 +13619,29 @@ var createRow = (key, link) => {
   element.append(dot, keyText, title, value2, bar);
   return { element, dot, key: keyText, title, value: value2, bar, segments: /* @__PURE__ */ new Map() };
 };
-var createRanking = (context, link, reveal) => {
+var createHealthLink = (openHealth) => {
+  const element = el("button", "hlink");
+  element.type = "button";
+  element.hidden = true;
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  const text2 = el("span");
+  element.append(dot, text2, chevronIcon());
+  element.addEventListener("click", () => openHealth(element));
+  let count = 0;
+  return {
+    element,
+    draw(report) {
+      const next = report ? costChanges(report) : 0;
+      element.hidden = next === 0;
+      if (next > 0 && next !== count) {
+        setText(text2, costLinkText(next));
+      }
+      count = next;
+    }
+  };
+};
+var createRanking = (context, link, openHealth, reveal) => {
   overviewCount += 1;
   const element = el("div", link ? "overview-panel overview-ranking linkable" : "overview-panel overview-ranking");
   const head = el("div", "overview-head");
@@ -11573,6 +13670,10 @@ var createRanking = (context, link, reveal) => {
   const toggleLabel = el("span");
   toggle.append(toggleLabel, chevronIcon());
   element.append(head, columns, top, more, toggle);
+  const healthLink = openHealth ? createHealthLink(openHealth) : void 0;
+  if (healthLink) {
+    element.append(healthLink.element);
+  }
   const rows = /* @__PURE__ */ new Map();
   let open2 = false;
   let drawn = false;
@@ -11653,6 +13754,9 @@ var createRanking = (context, link, reveal) => {
   };
   return {
     element,
+    health(report) {
+      healthLink?.draw(report);
+    },
     highlight(tickets) {
       lit = tickets;
       for (const [key, row2] of rows) {
@@ -11721,7 +13825,7 @@ var createRanking = (context, link, reveal) => {
     }
   };
 };
-var createOverview = (host, context, link) => {
+var createOverview = (host, context, link, openHealth) => {
   const element = el("section", "overview");
   element.setAttribute("aria-label", "Board overview");
   element.hidden = true;
@@ -11737,7 +13841,7 @@ var createOverview = (host, context, link) => {
     element.dataset.panels = String(shown);
     element.hidden = shown === 0;
   };
-  const ranking = createRanking(context, link, (shown) => {
+  const ranking = createRanking(context, link, openHealth, (shown) => {
     ranking.element.hidden = !shown;
     layout();
   });
@@ -11791,6 +13895,9 @@ var createOverview = (host, context, link) => {
         layout();
       }
     },
+    health(report) {
+      ranking.health(report);
+    },
     link(next) {
       linked = next;
       ranking.highlight(next?.tickets);
@@ -11816,7 +13923,7 @@ var FIXTURE_ANNOUNCEMENTS = {
 };
 var FIXTURE_NOTE_MS = 2e3;
 var dispositionName = (header, fallback) => /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
-var plainClick = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
+var plainClick2 = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
 var saveBlob = (blob, name) => {
   const url = URL.createObjectURL(blob);
   const anchor = el("a");
@@ -11876,7 +13983,7 @@ var createFixtureLink = (context, deps = browserDeps()) => {
     }
   };
   element.addEventListener("click", (event) => {
-    if (plainClick(event)) {
+    if (plainClick2(event)) {
       event.preventDefault();
       void save();
     }
@@ -12117,10 +14224,10 @@ var createSessionFollowupsView = (host, context, options) => {
     const entering = section2.hidden;
     section2.hidden = false;
     if (animate && entering) {
-      section2.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE8 });
+      section2.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE3 });
     } else if (animate) {
       for (const element of entered) {
-        element.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE8 });
+        element.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE3 });
       }
     }
   };
@@ -12148,7 +14255,7 @@ var createSessionFollowupsView = (host, context, options) => {
       const land = () => {
         remove();
         if (folded && !destroyed) {
-          total.animate(BUMP_FRAMES, { duration: BUMP_MS, easing: EASE8 });
+          total.animate(BUMP_FRAMES, { duration: BUMP_MS, easing: EASE3 });
         }
       };
       chip.animate(flyFrames(origin, target), { duration: FLY_MS3, easing: FLY_EASE3, fill: "forwards" }).finished.then(land, remove);
@@ -12177,115 +14284,6 @@ var createSessionFollowupsView = (host, context, options) => {
       timers.clear();
     }
   };
-};
-
-// src/model/metrics.ts
-var VERIFY_KINDS = ["typecheck", "lint", "test"];
-var processedTokens = (counts) => counts.input + counts.cacheWrite + counts.cacheWrite1h + counts.cacheRead + counts.output;
-var byStart = (a, b) => time(a.startedAt) - time(b.startedAt) || compareText(a.id, b.id);
-var entryOf = (map, key, create) => {
-  const found = map.get(key);
-  if (found !== void 0) {
-    return found;
-  }
-  const entry = create();
-  map.set(key, entry);
-  return entry;
-};
-var roleMetrics = (role, agents) => {
-  const models = [...new Set(agents.flatMap((agent) => agent.model === void 0 ? [] : [agent.model]))];
-  const sum = (value2) => agents.reduce((total, agent) => total + value2(agent), 0);
-  const peakContext = Math.max(0, ...agents.map((agent) => agent.budget.context.used));
-  const requests = sum((agent) => agent.budget.requests);
-  const cacheRead = sum((agent) => agent.budget.tokens.cacheRead);
-  const output = sum((agent) => agent.budget.tokens.output);
-  return { role, models, runs: agents.length, requests, cacheRead, output, peakContext, usd: sum((agent) => agent.budget.costUsd) };
-};
-var totalOf = (roles) => {
-  const total = { runs: 0, requests: 0, cacheRead: 0, output: 0, peakContext: 0, usd: 0 };
-  for (const role of roles) {
-    total.runs += role.runs;
-    total.requests += role.requests;
-    total.cacheRead += role.cacheRead;
-    total.output += role.output;
-    total.peakContext = Math.max(total.peakContext, role.peakContext);
-    total.usd += role.usd;
-  }
-  return total;
-};
-var branchMetrics = (subagents, rows) => {
-  const branches = /* @__PURE__ */ new Map();
-  for (const agent of subagents) {
-    const name = agent.branch;
-    if (name === void 0) {
-      continue;
-    }
-    const branch = entryOf(branches, name, () => ({ branch: name, agents: 0, usd: 0 }));
-    branch.agents += 1;
-    branch.usd += agent.budget.costUsd;
-  }
-  const rowBranches = rows.map((row2) => row2.branch).filter((branch) => branches.has(branch));
-  const ordered = [.../* @__PURE__ */ new Set([...rowBranches, ...branches.keys()])];
-  return ordered.flatMap((branch) => branches.get(branch) ?? []);
-};
-var toolMetrics = (agents) => {
-  const tools = /* @__PURE__ */ new Map();
-  for (const agent of agents) {
-    for (const [tool, output] of Object.entries(agent.budget.toolOutput)) {
-      const sum = entryOf(tools, tool, () => ({ tool, calls: 0, chars: 0, maxChars: 0 }));
-      sum.calls += output.calls;
-      sum.chars += output.chars;
-      sum.maxChars = Math.max(sum.maxChars, output.maxChars);
-    }
-  }
-  return [...tools.values()].sort((a, b) => b.chars - a.chars || compareText(a.tool, b.tool));
-};
-var verificationMetrics = (role, agents) => {
-  const commands = { typecheck: 0, lint: 0, test: 0 };
-  const failed = { typecheck: 0, lint: 0, test: 0 };
-  for (const agent of agents) {
-    const rounds = agent.budget.verifyRounds;
-    for (const kind of VERIFY_KINDS) {
-      commands[kind] += rounds.commands[kind];
-      failed[kind] += rounds.results[kind].filter((result) => result === "fail").length;
-    }
-  }
-  const all = VERIFY_KINDS.reduce((sum, kind) => sum + commands[kind], 0);
-  if (all === 0) {
-    return void 0;
-  }
-  return { role, runs: agents.length, commands, failed, meanPerRun: all / agents.length };
-};
-var sessionMetrics = (session) => {
-  const main = Object.hasOwn(session.agents, MAIN_AGENT) ? session.agents[MAIN_AGENT] : void 0;
-  const subagents = Object.entries(session.agents).filter(([key]) => key !== MAIN_AGENT).map(([, agent]) => agent).sort(byStart);
-  const mainGroup = main ? [[MAIN_AGENT, [main]]] : [];
-  const byRole = /* @__PURE__ */ new Map();
-  for (const agent of subagents) {
-    entryOf(byRole, agent.role, () => []).push(agent);
-  }
-  const groups2 = [...mainGroup, ...byRole.entries()];
-  const roles = groups2.map(([role, agents]) => roleMetrics(role, agents));
-  const verification = groups2.flatMap(([role, agents]) => verificationMetrics(role, agents) ?? []);
-  const byStage = Object.fromEntries(Object.entries(session.tokens.byStage).map(([key, counts]) => [key, counts ? processedTokens(counts) : 0]));
-  const tokens2 = { byStage, total: processedTokens(session.tokens.total), usd: session.tokens.total.usd };
-  const tools = { main: toolMetrics(main ? [main] : []), subagents: toolMetrics(subagents) };
-  const total = totalOf(roles);
-  const resumes = resumeMetrics(session.resumes ?? []);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens: tokens2, resumes };
-  if (session.overhead) {
-    metrics.overhead = overheadMetrics(session.overhead, total.usd);
-  }
-  return metrics;
-};
-var overheadMetrics = (overhead, sessionUsd) => {
-  const share2 = sessionUsd > 0 ? overhead.usd / sessionUsd : 0;
-  return { ...structuredClone(overhead), share: share2 };
-};
-var resumeMetrics = (resumes) => {
-  const expired = resumes.filter((entry) => entry.cacheLikelyExpired === true).length;
-  const cacheWriteUsd = resumes.reduce((sum, entry) => sum + (entry.cacheWriteUsd ?? 0), 0);
-  return { count: resumes.length, expired, cacheWriteUsd, items: structuredClone(resumes) };
 };
 
 // src/ui/graph/fit.ts
@@ -12637,7 +14635,7 @@ var createSessionGraphView = (host, context) => {
 
 // src/ui/session-id.ts
 var SESSION_ID_LENGTH = 8;
-var COPIED_TEXT = "copied";
+var COPIED_TEXT2 = "copied";
 var COPIED_MS = 1200;
 var shortSessionId = (id) => id.slice(0, SESSION_ID_LENGTH);
 var sessionIdTitle = (id) => `Claude Code session ${id} \xB7 click to copy`;
@@ -12696,7 +14694,7 @@ var createSessionIdButton = () => {
   let id = "";
   const render = () => {
     const copied = feedback.active;
-    setText(element, copied ? COPIED_TEXT : shortSessionId(id));
+    setText(element, copied ? COPIED_TEXT2 : shortSessionId(id));
     setText(status, copied ? sessionIdAnnouncement(id) : "");
   };
   const feedback = createCopyFeedback({ write: clipboardWrite, change: render });
@@ -12801,7 +14799,7 @@ var overheadView = (overhead) => {
     return { head: NO_OVERHEAD, bars: [], note: NO_OVERHEAD_NOTE };
   }
   const percent = ((Number.isFinite(overhead.share) ? Math.max(0, overhead.share) : 0) * 100).toFixed(1);
-  const head = `\u2248\xA0${tokens(overhead.tokens)} tokens \xB7 ${overheadCost(overhead.usd)} \xB7 ${percent}\xA0% of cost`;
+  const head = `\u2248\xA0${tokens(overhead.tokens)} tokens \xB7 ${overheadCost(overhead.usd)} \xB7 ${percent}% of cost`;
   const bars = [];
   for (const { key, label } of OVERHEAD_PARTS) {
     const part = overhead.parts[key];
@@ -12979,7 +14977,9 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
   resumes.body.append(resumesHead, resumeList);
   left.append(agents.element, verification.element, resumes.element);
   right.append(branches.element, tools.element, overhead.element);
-  inner.append(left, right);
+  const health = el("div", "hsum");
+  health.hidden = true;
+  inner.append(left, right, health);
   clip3.append(inner);
   panel.append(clip3);
   host.append(panel);
@@ -13025,6 +15025,20 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     element.append(cache, el("span", "summary-verify-mean", row2.usd));
     return element;
   };
+  const healthChip = (chip) => {
+    const element = el("span", "hchip");
+    const dot = el("i");
+    dot.setAttribute("aria-hidden", "true");
+    element.append(dot, el("span", void 0, `${chip.headline}: ${chip.value}`));
+    return element;
+  };
+  let drawnHealth;
+  const drawHealth = (session) => {
+    drawnHealth = context.health;
+    const chips = context.health ? sessionChips2(context.health, session.id) : [];
+    health.hidden = chips.length === 0;
+    health.replaceChildren(...chips.length > 0 ? [el("h4", "details-heading", "In workflow health"), ...chips.map(healthChip)] : []);
+  };
   const draw2 = (session) => {
     const metrics = metricsOf(session);
     const markOf2 = (model) => modelMark(model, context.config.modelLetters);
@@ -13049,6 +15063,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     resumesHead.className = continued.rows.length > 0 ? "summary-overhead-head" : "summary-empty";
     resumeList.replaceChildren(...continued.rows.map(resumeLine));
     resumeList.hidden = continued.rows.length === 0;
+    drawHealth(session);
   };
   let current;
   let shown = false;
@@ -13112,7 +15127,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
         shown = true;
         button.hidden = false;
         if (!first && !context.reducedMotion()) {
-          button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE8 });
+          button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE3 });
         }
       }
       first = false;
@@ -13121,6 +15136,9 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
       }
     },
     frame() {
+      if (open2 && current && context.health !== drawnHealth) {
+        drawHealth(current);
+      }
     },
     destroy() {
       destroyed = true;
@@ -13194,7 +15212,7 @@ var bucketSeries = (series, endMs, columns) => {
   return { times, keys: series.keys, upper };
 };
 var plotX = (plot, ms) => PAD_X + ms / plot.spanMs * (plot.width - 2 * PAD_X);
-var plotY = (plot, count) => plot.height - FLOOR - count / plot.top * (plot.height - FLOOR - CEIL);
+var plotY2 = (plot, count) => plot.height - FLOOR - count / plot.top * (plot.height - FLOOR - CEIL);
 var topTarget = (total) => Math.max(MIN_TOP, total * TOP_FACTOR);
 var easeTop = (top, target, instant) => {
   if (top === void 0 || instant) {
@@ -13207,9 +15225,9 @@ var fixed3 = (value2) => Math.round(value2 * 10) / 10;
 var linePath = (xs, ys) => xs.map((x, i) => `${i === 0 ? "M" : "L"}${fixed3(x)} ${fixed3(ys[i])}`).join(" ");
 var stackPaths = (plot, times, upper, lower) => {
   const xs = times.map((time2) => plotX(plot, time2));
-  const line = linePath(xs, upper.map((count) => plotY(plot, count)));
+  const line = linePath(xs, upper.map((count) => plotY2(plot, count)));
   const floor = lower ?? upper.map(() => 0);
-  const back = xs.map((x, i) => `L${fixed3(x)} ${fixed3(plotY(plot, floor[i]))}`).reverse();
+  const back = xs.map((x, i) => `L${fixed3(x)} ${fixed3(plotY2(plot, floor[i]))}`).reverse();
   return { area: `${line} ${back.join(" ")} Z`, line };
 };
 var needsRedraw = (drawn, next) => {
@@ -13222,7 +15240,7 @@ var needsRedraw = (drawn, next) => {
   const pixel = chartSpan(next.endMs) / Math.max(1, next.width - 2 * PAD_X);
   return Math.abs(next.endMs - drawn.endMs) >= pixel;
 };
-var GROUPS = [
+var GROUPS2 = [
   { label: "Plan", includes: (stage) => stage === "plan" },
   { label: "Implement", includes: (stage) => stage.startsWith("implement:") },
   { label: "Review", includes: (stage) => stage === "review" },
@@ -13237,13 +15255,13 @@ var totalRows = (byStage, packages) => {
     const entry = Object.hasOwn(byStage, stage) ? byStage[stage] : void 0;
     return entry ? processedTokens(entry) : 0;
   };
-  const sums = GROUPS.map((group) => order.filter(group.includes).reduce((sum, stage) => sum + counts(stage), 0));
+  const sums = GROUPS2.map((group) => order.filter(group.includes).reduce((sum, stage) => sum + counts(stage), 0));
   const max = Math.max(1, ...sums);
   const segmentOf = (stage) => {
     const width = counts(stage) / max * 100;
     return { stage, color: stageKeyColor(stage), title: stageKeyTitle(stage, packages), width };
   };
-  return GROUPS.map((group, i) => {
+  return GROUPS2.map((group, i) => {
     const filled = order.filter((stage) => group.includes(stage) && counts(stage) > 0);
     const segments = filled.map(segmentOf);
     return { label: group.label, total: sums[i], value: tokens(sums[i]), segments };
@@ -13292,7 +15310,7 @@ var createSessionTokensView = (host, context) => {
   root.append(details, toggle);
   host.append(root);
   clip3.inert = true;
-  const rowViews = GROUPS.map((group) => {
+  const rowViews = GROUPS2.map((group) => {
     const row2 = el("div", "tokens-row off");
     const bar = el("span", "tokens-bar");
     const value2 = el("span", "tokens-value num", "0");
@@ -13382,7 +15400,7 @@ var createSessionTokensView = (host, context) => {
       chart.setAttribute("viewBox", `0 0 ${frame.width} ${CHART_HEIGHT}`);
     }
     GRID_SHARES.forEach((share2, i) => {
-      const y = Math.round(plotY(plot, frame.top / TOP_FACTOR * share2)) + 0.5;
+      const y = Math.round(plotY2(plot, frame.top / TOP_FACTOR * share2)) + 0.5;
       const line = grid[i];
       line.setAttribute("x1", "0");
       line.setAttribute("x2", String(frame.width));
@@ -13889,7 +15907,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
         morphFrom(card.element, from);
         morphing.add(card.element);
       } else {
-        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE8, fill: "backwards" });
+        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE3, fill: "backwards" });
       }
     }
     glide(before, measure(), morphing);
@@ -14032,119 +16050,279 @@ var createSignInNotice = () => {
   return notice;
 };
 
-// src/ui/tabs.ts
-var TAB_PARAM = "repo";
-var wantedName = (search) => new URLSearchParams(search).get(TAB_PARAM) || void 0;
-var tabUrl = (href, name) => {
-  const url = new URL(href);
-  url.searchParams.set(TAB_PARAM, name);
-  return `${url.pathname}${url.search}${url.hash}`;
-};
-var VIEW_PARAM = "view";
-var pageView = (search) => new URLSearchParams(search).get(VIEW_PARAM) === "runs" ? "runs" : "sessions";
-var SESSION_PARAM = "session";
-var wantedSession = (search) => new URLSearchParams(search).get(SESSION_PARAM) || void 0;
-var withoutSession = (href) => {
-  const url = new URL(href);
-  url.searchParams.delete(SESSION_PARAM);
-  return `${url.pathname}${url.search}${url.hash}`;
-};
-var SESSION_WAIT_MS = 1e4;
-var sessionLinkStep = (canOpen, waitedMs) => {
-  if (canOpen) {
-    return "jump";
-  }
-  return waitedMs !== void 0 && waitedMs >= SESSION_WAIT_MS ? "drop" : "wait";
-};
-var mostRecentlyActive = (list) => {
-  let newest2;
-  for (const repository of list) {
-    if (!newest2 || (repository.lastLineAt ?? "") > (newest2.lastLineAt ?? "")) {
-      newest2 = repository;
+// src/ui/update.ts
+var SKIP_KEY = "nurselog.skipVersion";
+var NOTES_SHOWN = 6;
+var COPY_TEXT2 = "Copy";
+var COPIED_TEXT3 = "Copied";
+var COPY_FAILED_TEXT2 = "Select and copy";
+var COPY_RESET_MS2 = 1600;
+var POPOVER_ID = "update-popover";
+var TITLE_ID2 = "update-title";
+var ROOM_GAP = 12;
+var ENTER_MS5 = 420;
+var DOT_MS2 = 520;
+var DOT_DELAY_MS = 220;
+var OPEN_MS3 = 220;
+var CLOSE_MS2 = 140;
+var LEAVE_MS = 220;
+var GLIDE_ENTER = { duration: ENTER_MS5, easing: EASE3 };
+var GLIDE_LEAVE = { duration: LEAVE_MS, easing: "ease-in" };
+var ENTER_FRAMES2 = [{ opacity: 0, transform: "translateX(12px) scale(.96)" }, { opacity: 1, transform: "none" }];
+var DOT_FRAMES = [{ transform: "scale(0)" }, { transform: "scale(1.5)", offset: 0.6 }, { transform: "none" }];
+var OPEN_FRAMES = [{ opacity: 0, transform: "translateY(-6px) scale(.97)" }, { opacity: 1, transform: "none" }];
+var CLOSE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px) scale(.98)" }];
+var LEAVE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateX(8px) scale(.96)" }];
+var versionParts = (version) => version.split(".").map(Number);
+var newestFirst2 = (a, b) => {
+  const left = versionParts(a.version);
+  const right = versionParts(b.version);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (right[index] ?? 0) - (left[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
     }
   }
-  return newest2;
+  return 0;
 };
-var selectRepository = (list, wanted, currentId) => {
-  const current = currentId === void 0 ? void 0 : list.find((repository) => repository.id === currentId);
-  const named = wanted === void 0 ? void 0 : list.find((repository) => repository.name === wanted);
-  return current ?? named ?? mostRecentlyActive(list);
+var noteItems = (notes) => {
+  const all = [...notes].sort(newestFirst2).flatMap((note) => note.items);
+  return { items: all.slice(0, NOTES_SHOWN), more: all.length > NOTES_SHOWN };
 };
-var tabViews = (list, selectedId) => list.map((repository) => {
-  const running = Math.max(0, repository.running);
-  const waiting = Math.max(0, repository.waiting);
-  const label = `${repository.name}: ${running} running, ${waiting} waiting for you`;
-  return { id: repository.id, name: repository.name, running, waiting, selected: repository.id === selectedId, label };
-});
-var plainClick2 = (event) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
-var waitingTotal = (list) => list.reduce((sum, repository) => sum + Math.max(0, repository.waiting), 0);
-var documentTitle = (list, selected, label) => {
-  if (!selected) {
-    return label;
-  }
-  const waiting = waitingTotal(list);
-  const count = waiting > 0 ? `(${waiting}) ` : "";
-  return `${count}${selected.name} \xB7 ${label}`;
+var restartNote = () => {
+  const note = el("p", "update-restart");
+  const first = "The board closes itself within 10 seconds; the next session start, or ";
+  const second = ", starts the new version. Running sessions keep the old one until ";
+  note.append(first, el("code", void 0, "nurselog open"), second, el("code", void 0, "/reload-plugins"), ".");
+  return note;
 };
-var inView = (start, end, viewStart, viewEnd) => start >= viewStart - 0.5 && end <= viewEnd + 0.5;
-var hiddenWaiting = (boxes, viewStart, viewEnd) => {
-  let start;
-  let end;
-  for (const box of boxes) {
-    if (box.waiting <= 0) {
-      continue;
+var createUpdateButton = (options) => {
+  const element = el("div", "topbar-update");
+  element.hidden = true;
+  const button = el("button", "button update-button");
+  button.type = "button";
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-controls", POPOVER_ID);
+  button.setAttribute("aria-haspopup", "dialog");
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  const label = el("span", "update-label", "Update");
+  label.append(el("span", "update-more", " available"));
+  const version = el("span", "update-version");
+  button.append(dot, label, version);
+  const popover = el("div", "update-popover");
+  popover.id = POPOVER_ID;
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-labelledby", TITLE_ID2);
+  popover.hidden = true;
+  const title = el("h3", "update-title");
+  title.id = TITLE_ID2;
+  title.tabIndex = -1;
+  const current = el("span", "update-current");
+  const head = el("div", "update-head");
+  head.append(title, current);
+  const notesHeading = el("p", "update-heading", "What's new");
+  const notes = el("ul", "update-notes");
+  const allChanges = el("a", "update-all", "All changes");
+  allChanges.target = "_blank";
+  allChanges.rel = "noopener";
+  const command = el("code");
+  const copy = el("button", "button update-copy", COPY_TEXT2);
+  copy.type = "button";
+  const commandBox = el("div", "update-command");
+  commandBox.append(command, copy);
+  const laterButton = el("button", "button", "Remind me later");
+  laterButton.type = "button";
+  const skipButton = el("button", "update-skip", "Skip this version");
+  skipButton.type = "button";
+  const actions = el("div", "update-actions");
+  actions.append(laterButton, skipButton);
+  popover.append(head, notesHeading, notes, allChanges, el("p", "update-heading", "Update"), commandBox, restartNote(), actions);
+  element.append(button, popover);
+  let notice = null;
+  let noticeKey = "";
+  let deferred = false;
+  let shown = false;
+  let open2 = false;
+  let leaving;
+  let glides = [];
+  let copyReset;
+  const draw2 = (next) => {
+    setText(version, next.latest);
+    setText(title, `Nurselog ${next.latest}`);
+    setText(current, `You have ${next.current}`);
+    const { items, more } = noteItems(next.notes);
+    notes.replaceChildren(...items.map((item2) => el("li", void 0, item2)));
+    notesHeading.hidden = items.length === 0;
+    notes.hidden = items.length === 0;
+    const url = more ? next.changesUrl : void 0;
+    allChanges.hidden = url === void 0;
+    if (url === void 0) {
+      allChanges.removeAttribute("href");
+    } else {
+      allChanges.href = url;
     }
-    const spanStart = Math.min(box.nameStart, box.badgeStart);
-    const spanEnd = Math.max(box.nameEnd, box.badgeEnd);
-    const fits = spanEnd - spanStart <= viewEnd - viewStart + 1;
-    const shownStart = fits ? spanStart : box.nameStart;
-    const shownEnd = fits ? spanEnd : box.nameEnd;
-    if (shownStart < viewStart - 0.5 && (!start || box.start > start.start)) {
-      start = box;
+    setText(command, next.command);
+  };
+  const setOpen2 = (next) => {
+    if (next === open2) {
+      return;
     }
-    if (shownEnd > viewEnd + 0.5 && (!end || box.end < end.end)) {
-      end = box;
+    open2 = next;
+    button.setAttribute("aria-expanded", String(next));
+    for (const animation of popover.getAnimations()) {
+      animation.cancel();
     }
-  }
-  return { start: start?.id, end: end?.id };
-};
-var tabNameId = (id) => `repo-tab-${id}-name`;
-var INCHWORM_REACH = 0.42;
-var inchwormFrames = (from, to) => {
-  const left = Math.min(from.left, to.left);
-  const right = Math.max(from.left + from.width, to.left + to.width);
-  return [{ left: from.left, width: from.width }, { left, width: right - left, offset: INCHWORM_REACH }, { left: to.left, width: to.width }];
-};
-var centredScroll = (tab, viewWidth, scrollWidth) => {
-  const left = tab.left - (viewWidth - tab.width) / 2;
-  return Math.min(Math.max(0, left), Math.max(0, scrollWidth - viewWidth));
-};
-var travelDirection = (ids, fromId, toId) => {
-  const from = fromId === void 0 ? -1 : ids.indexOf(fromId);
-  const to = toId === void 0 ? -1 : ids.indexOf(toId);
-  return from >= 0 && to >= 0 && to < from ? -1 : 1;
-};
-var badgeMotion = (previous, next, selected) => {
-  const bump = previous !== void 0 && next > previous;
-  return { bump, ping: bump && !selected };
-};
-var keyTarget = (ids, currentId, key) => {
-  const index = ids.indexOf(currentId);
-  if (index < 0) {
-    return void 0;
-  }
-  switch (key) {
-    case "ArrowRight":
-      return ids[(index + 1) % ids.length];
-    case "ArrowLeft":
-      return ids[(index - 1 + ids.length) % ids.length];
-    case "Home":
-      return ids[0];
-    case "End":
-      return ids[ids.length - 1];
-    default:
-      return void 0;
-  }
+    if (next) {
+      popover.hidden = false;
+      const room = window.innerHeight - popover.getBoundingClientRect().top - ROOM_GAP;
+      popover.style.maxHeight = room > 0 ? `${Math.floor(room)}px` : "";
+      if (!options.reducedMotion()) {
+        popover.animate(OPEN_FRAMES, { duration: OPEN_MS3, easing: EASE3 });
+      }
+      title.focus({ preventScroll: true });
+      return;
+    }
+    const done = () => {
+      if (!open2) {
+        popover.hidden = true;
+      }
+    };
+    if (options.reducedMotion()) {
+      done();
+      return;
+    }
+    const fade = popover.animate(CLOSE_FRAMES, { duration: CLOSE_MS2, easing: "ease-in", fill: "forwards" });
+    fade.finished.then(done, () => void 0);
+  };
+  const place2 = (hidden, timing) => {
+    if (options.reducedMotion()) {
+      element.hidden = hidden;
+      return;
+    }
+    const items = Array.from(element.parentElement?.children ?? []).filter((item2) => item2 !== element);
+    const before = new Map(items.map((item2) => [item2, item2.getBoundingClientRect()]));
+    for (const glide2 of glides) {
+      glide2.cancel();
+    }
+    element.hidden = hidden;
+    glides = [];
+    for (const [item2, from] of before) {
+      const to = item2.getBoundingClientRect();
+      const dx = from.left - to.left;
+      const dy = from.top - to.top;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        glides.push(item2.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], timing));
+      }
+    }
+  };
+  const enter = () => {
+    shown = true;
+    leaving?.cancel();
+    leaving = void 0;
+    if (element.hidden) {
+      place2(false, GLIDE_ENTER);
+    }
+    if (options.reducedMotion()) {
+      return;
+    }
+    button.animate(ENTER_FRAMES2, { duration: ENTER_MS5, easing: EASE3 });
+    dot.animate(DOT_FRAMES, { duration: DOT_MS2, delay: DOT_DELAY_MS, easing: EASE3, fill: "backwards" });
+  };
+  const leave = () => {
+    shown = false;
+    setOpen2(false);
+    const gone = () => {
+      if (shown) {
+        return;
+      }
+      if (element.contains(document.activeElement)) {
+        element.previousElementSibling?.focus({ preventScroll: true });
+      }
+      place2(true, GLIDE_LEAVE);
+      for (const animation of button.getAnimations()) {
+        animation.cancel();
+      }
+    };
+    if (options.reducedMotion()) {
+      gone();
+      return;
+    }
+    leaving = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS, easing: "ease-in", fill: "forwards" });
+    leaving.finished.then(gone, gone);
+  };
+  const sync = () => {
+    const wanted = notice !== null && !deferred && readValue(SKIP_KEY, true) !== notice.latest;
+    if (wanted && !shown) {
+      enter();
+    } else if (!wanted && shown) {
+      leave();
+    }
+  };
+  button.addEventListener("click", () => {
+    if (shown) {
+      setOpen2(!open2);
+    }
+  });
+  copy.addEventListener("click", () => {
+    const text2 = notice?.command;
+    if (text2 === void 0) {
+      return;
+    }
+    const done = (copied) => {
+      setText(copy, copied ? COPIED_TEXT3 : COPY_FAILED_TEXT2);
+      window.clearTimeout(copyReset);
+      copyReset = window.setTimeout(() => setText(copy, COPY_TEXT2), COPY_RESET_MS2);
+    };
+    try {
+      navigator.clipboard.writeText(text2).then(() => done(true), () => done(false));
+    } catch {
+      done(false);
+    }
+  });
+  laterButton.addEventListener("click", () => {
+    deferred = true;
+    button.focus({ preventScroll: true });
+    sync();
+  });
+  skipButton.addEventListener("click", () => {
+    if (notice) {
+      writeValue(SKIP_KEY, notice.latest, true);
+    }
+    button.focus({ preventScroll: true });
+    sync();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!open2 || event.key !== "Escape") {
+      return;
+    }
+    const focused = document.activeElement;
+    const inside = focused === button || focused !== null && popover.contains(focused);
+    setOpen2(false);
+    if (inside) {
+      button.focus({ preventScroll: true });
+    }
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (open2 && !element.contains(event.target)) {
+      setOpen2(false);
+    }
+  });
+  return {
+    element,
+    show(next) {
+      const key = next === null ? "" : JSON.stringify(next);
+      if (key === noticeKey) {
+        return;
+      }
+      noticeKey = key;
+      notice = next;
+      if (next) {
+        draw2(next);
+      }
+      sync();
+    }
+  };
 };
 
 // src/ui/topbar.ts
@@ -14174,7 +16352,7 @@ var setCount = (count, value2) => {
   setText(count.lastElementChild ?? count, String(value2));
   count.hidden = value2 === 0;
 };
-var px2 = (span) => ({ left: `${span.left}px`, width: `${span.width}px` });
+var px3 = (span) => ({ left: `${span.left}px`, width: `${span.width}px` });
 var createTopBar = (host, options) => {
   const brand = el("div", "topbar-brand");
   const name = el("strong", "topbar-name", "Nurselog");
@@ -14210,6 +16388,8 @@ var createTopBar = (host, options) => {
   warnings.append(button, list);
   status.append(connection, github, warnings);
   appendLegend(status, host);
+  const update = createUpdateButton({ reducedMotion: options.reducedMotion });
+  status.append(update.element);
   host.replaceChildren(brand, status);
   const sentinel = el("div", "topbar-sentinel");
   sentinel.setAttribute("aria-hidden", "true");
@@ -14246,7 +16426,7 @@ var createTopBar = (host, options) => {
       }
     });
     element.addEventListener("click", (event) => {
-      if (!plainClick2(event)) {
+      if (!plainClick(event)) {
         return;
       }
       event.preventDefault();
@@ -14336,7 +16516,7 @@ var createTopBar = (host, options) => {
       settle();
       return;
     }
-    const frames = inchwormFrames(from, to).map((frame) => ({ ...frame, ...px2(frame) }));
+    const frames = inchwormFrames(from, to).map((frame) => ({ ...frame, ...px3(frame) }));
     const move = indicator.animate(frames, { duration: INCHWORM_MS, easing: INCHWORM_EASE });
     inchworm = move;
     const done = () => {
@@ -14654,6 +16834,9 @@ var createTopBar = (host, options) => {
           setText(element, ago(clock - at));
         }
       }
+    },
+    setUpdate(notice) {
+      update.show(notice);
     }
   };
 };
@@ -14674,6 +16857,9 @@ var parseSessionView = (data) => {
     const typical = view.typical;
     if (typeof typical !== "object" || typical === null || Array.isArray(typical)) {
       delete parsed.typical;
+    }
+    if (typeof view.insightsAt !== "string") {
+      delete parsed.insightsAt;
     }
     return parsed;
   } catch {
@@ -14707,7 +16893,7 @@ var branchLabels = (board, canOpen) => {
   const runsOn = (branch) => branchRunIds(board.branches, branch).flatMap((id) => board.runs[id] ?? []);
   return (branch) => runsOn(branch).flatMap((run) => run.key ?? run.title ?? []);
 };
-var RETRY_MS = 5e3;
+var RETRY_MS2 = 5e3;
 var OUT_MS = 150;
 var OUT_SHIFT = 16;
 var OUT_EASE = "cubic-bezier(.4,0,1,1)";
@@ -14720,6 +16906,8 @@ var RISE_STAGGER_MS = 45;
 var RISE_ITEMS = 9;
 var TOP_GAP = 12;
 var EASE13 = "cubic-bezier(.2,.8,.2,1)";
+var UPDATE_POLL_MS = 15 * 60 * 1e3;
+var UPDATE_FOLLOW_UP_MS = 15 * 1e3;
 var parseBoard = (data) => {
   try {
     const board = JSON.parse(String(data));
@@ -14739,7 +16927,7 @@ var emptied = (snapshot) => {
   }
   return { ...snapshot, runs: {}, order: [] };
 };
-var startBoard = async (source) => {
+var startBoard = async (source, options = {}) => {
   const topBarHost = document.getElementById("topbar");
   const boardHost = document.getElementById("board");
   if (!topBarHost || !boardHost) {
@@ -14753,6 +16941,7 @@ var startBoard = async (source) => {
   clock.configure({ replay, speed });
   const now = () => clock.now(Date.now());
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const appWindow = window.matchMedia(APP_WINDOW_QUERY);
   const reducedMotion = () => motion.matches;
   const view = pageView(window.location.search);
   const parse = view === "sessions" ? parseSessionView : parseBoard;
@@ -14771,10 +16960,28 @@ var startBoard = async (source) => {
   let failed = false;
   let signedOut = false;
   let wantedSessionId = view === "sessions" ? wantedSession(window.location.search) : void 0;
-  let firstSnapshotAt;
+  let waitFrom;
+  let handOff;
+  let ask;
+  let handOffNote;
+  let signInNotice;
+  const releaseHandOff = () => {
+    ask?.cancel();
+    ask = void 0;
+    handOff = void 0;
+    handOffNote?.remove();
+    handOffNote = void 0;
+    if (signInNotice && !signInNotice.isConnected) {
+      boardHost.append(signInNotice);
+    }
+  };
   const select = (id) => {
     const next = repositories.find((repository) => repository.id === id);
     if (next) {
+      if (handOff === "handed") {
+        drewStack = true;
+      }
+      releaseHandOff();
       void show(next);
     }
   };
@@ -14785,11 +16992,17 @@ var startBoard = async (source) => {
   });
   connection.set("connecting");
   const badge = createAppBadge(navigator);
-  window.addEventListener("pagehide", () => badge.clear());
+  window.addEventListener("pagehide", () => {
+    if (appWindow.matches) {
+      badge.clear();
+    }
+  });
   const drawTabs = () => {
     topBar.setTabs(repositories, selected?.id);
     document.title = documentTitle(repositories, selected, source.label);
-    badge.set(waitingTotal(repositories));
+    if (appWindow.matches) {
+      badge.set(waitingTotal(repositories));
+    }
     if (selected) {
       boardHost.setAttribute("aria-labelledby", tabNameId(selected.id));
     } else {
@@ -14824,6 +17037,18 @@ var startBoard = async (source) => {
       window.location.reload();
     }
   };
+  let updateAsk = 0;
+  const checkUpdate = async () => {
+    if (!source.update || signedOut) {
+      return;
+    }
+    updateAsk += 1;
+    const own = updateAsk;
+    const notice = await source.update();
+    if (own === updateAsk && !signedOut && notice !== void 0) {
+      topBar.setUpdate(notice);
+    }
+  };
   const checkList = async (own) => {
     const list = await source.repositories();
     if (list === SIGNED_OUT) {
@@ -14842,6 +17067,7 @@ var startBoard = async (source) => {
         if (failed) {
           failed = false;
           void checkRestart();
+          void checkUpdate();
         }
       },
       message(data) {
@@ -14866,7 +17092,7 @@ var startBoard = async (source) => {
         }
         stream.close();
         connection.set("disconnected");
-        retry = window.setTimeout(() => connect(own), RETRY_MS);
+        retry = window.setTimeout(() => connect(own), RETRY_MS2);
       }
     });
     events = stream;
@@ -14887,7 +17113,9 @@ var startBoard = async (source) => {
     }
     stack?.destroy();
     previous.overview?.destroy();
+    previous.strip?.destroy();
     clearSnapshot(previous.context);
+    previous.context.health = void 0;
     host.classList.add("leaving");
     if (reducedMotion()) {
       host.remove();
@@ -14905,8 +17133,9 @@ var startBoard = async (source) => {
       window.scrollTo({ top, behavior: "auto" });
     }
   };
-  const riseItems = (host) => {
-    const visible = (element) => element.getClientRects().length > 0;
+  const riseItems = (current, host) => {
+    const showsSoon = (element) => element === current.strip?.element && current.strip.waiting();
+    const visible = (element) => element.getClientRects().length > 0 || showsSoon(element);
     const risesAlone = (element) => ["card", "overview-panel"].some((name) => element.classList.contains(name));
     const items = [];
     for (const child of host.children) {
@@ -14932,7 +17161,7 @@ var startBoard = async (source) => {
       const below = { filter: "opacity(0)", transform: `translateY(${RISE_SHIFT}px)` };
       const rise = [below, { filter: "opacity(1)", transform: "none" }];
       const rising = [];
-      for (const [index, item2] of riseItems(host).entries()) {
+      for (const [index, item2] of riseItems(current, host).entries()) {
         const delay = RISE_DELAY_MS + index * RISE_STAGGER_MS;
         rising.push(item2.animate(rise, { duration: RISE_MS, delay, easing: EASE13, fill: "backwards" }));
       }
@@ -15015,6 +17244,29 @@ var startBoard = async (source) => {
     };
   };
   const canOpenOf = (current) => (sessionId) => current.stack?.canOpen?.(sessionId) ?? false;
+  const guardStrip = (step) => {
+    try {
+      step();
+    } catch (error) {
+      console.error("Nurselog: the workflow health strip failed to draw; the cards go on.", error);
+    }
+  };
+  const openReport = (current, link, opener, filter) => {
+    openHealthReport({
+      opener,
+      report: () => current.context.health,
+      filter,
+      opens: (sessionId) => link.opens({ kind: "session", sessionId }),
+      open: (sessionId) => link.open({ kind: "session", sessionId })
+    });
+  };
+  const repositoryName = (current) => repositories.find((item2) => item2.id === current.id)?.name ?? "";
+  const drawStrip = (current, board) => {
+    const strip = current.strip;
+    if (strip && isSessionView(board)) {
+      guardStrip(() => strip.update(board.insightsAt));
+    }
+  };
   const guardOverview = (step) => {
     try {
       step();
@@ -15059,6 +17311,7 @@ var startBoard = async (source) => {
   const drawStack = (current, board) => {
     if (current.stack) {
       drawOverview(current, board);
+      drawStrip(current, board);
       current.stack.update(board);
       return;
     }
@@ -15070,8 +17323,21 @@ var startBoard = async (source) => {
     const switched = drewStack;
     drewStack = true;
     drawn = current;
+    if (link) {
+      const refresh = () => guardOverview(() => current.overview?.health(current.context.health));
+      const reporter = healthReporter(current.context, () => repositoryName(current), refresh);
+      const hooks = {
+        report: (insights) => guardStrip(() => reporter(insights)),
+        open: (opener, filter) => openReport(current, link, opener, filter)
+      };
+      guardStrip(() => {
+        current.strip = createHealthStrip(current.context, hooks);
+        host.prepend(current.strip.element);
+      });
+    }
+    const openHealth = link ? (opener) => openReport(current, link, opener, { impact: "cost" }) : void 0;
     guardOverview(() => {
-      current.overview = createOverview(host, current.context, link);
+      current.overview = createOverview(host, current.context, link, openHealth);
       current.overview.mountBranches((panelHost) => {
         const branches = createBranchesOverview(panelHost, current.context, link);
         const labelsOf = (branch) => current.branchLabels?.(branch) ?? [];
@@ -15086,6 +17352,7 @@ var startBoard = async (source) => {
       showLegend(current.context.config);
     });
     drawOverview(current, board);
+    drawStrip(current, board);
     current.stack.update(board);
     if (switched) {
       enter(current, host);
@@ -15093,12 +17360,12 @@ var startBoard = async (source) => {
   };
   const settleSessionLink = () => {
     const sessionId = wantedSessionId;
-    if (sessionId === void 0) {
+    if (sessionId === void 0 || handOff !== void 0) {
       return;
     }
     const entered = drawn?.entering === void 0 || drawn.entering.playState === "finished";
     const opens = drawn !== void 0 && entered && canOpenOf(drawn)(sessionId);
-    const waited = firstSnapshotAt === void 0 ? void 0 : Date.now() - firstSnapshotAt;
+    const waited = waitFrom === void 0 ? void 0 : Date.now() - waitFrom;
     const step = sessionLinkStep(opens, waited);
     if (step === "jump") {
       drawn?.host?.dispatchEvent(new CustomEvent(SESSION_LINK, { detail: { sessionId } }));
@@ -15109,8 +17376,10 @@ var startBoard = async (source) => {
   };
   const tick = (time2) => {
     requestAnimationFrame(tick);
-    if (pending && latest && shown) {
+    let drew = false;
+    if (pending && latest && shown && handOff === void 0) {
       pending = false;
+      drew = true;
       const board = latest;
       takeSnapshot(shown.context, board);
       topBar.update(board);
@@ -15119,15 +17388,16 @@ var startBoard = async (source) => {
       if (shown.linkSource) {
         relink(shown);
       }
-      firstSnapshotAt ??= Date.now();
+      waitFrom ??= Date.now();
       settleSessionLink();
       follow(board.repositories);
-    } else {
-      settleSessionLink();
     }
     const clockNow = now();
     topBar.frame(clockNow);
     drawn?.stack?.frame(clockNow, time2);
+    if (!drew) {
+      settleSessionLink();
+    }
     guardOverview(() => drawn?.overview?.frame(clockNow, time2));
   };
   const signOut = () => {
@@ -15150,20 +17420,122 @@ var startBoard = async (source) => {
     selected = void 0;
     drawTabs();
     connection.set("disconnected");
-    boardHost.append(createSignInNotice());
+    signInNotice = createSignInNotice();
+    if (handOff !== "handed") {
+      boardHost.append(signInNotice);
+    }
     const check2 = async () => {
       if (Array.isArray(await source.repositories())) {
         window.location.reload();
         return;
       }
-      retry = window.setTimeout(() => void check2(), RETRY_MS);
+      retry = window.setTimeout(() => void check2(), RETRY_MS2);
     };
-    retry = window.setTimeout(() => void check2(), RETRY_MS);
+    retry = window.setTimeout(() => void check2(), RETRY_MS2);
   };
+  const receiveLink = (link) => {
+    const step = linkStep({ view, signedOut, repositories, selectedId: selected?.id, wantedSession: wantedSessionId }, link);
+    if (step.step !== "want") {
+      return step.step === "keep";
+    }
+    if (step.switchTo) {
+      void show(step.switchTo);
+    }
+    waitFrom = step.waitFrom === "now" ? Date.now() : void 0;
+    wantedSessionId = step.session;
+    return true;
+  };
+  const setTimer = (callback, ms) => {
+    const handle = window.setTimeout(callback, ms);
+    return () => window.clearTimeout(handle);
+  };
+  const showHandedOff = () => {
+    if (handOff !== "handed") {
+      return;
+    }
+    const note = el("p", "board-note hand-off-note");
+    note.setAttribute("role", "status");
+    const showHere = el("button", "hand-off-show", SHOW_HERE_TEXT);
+    showHere.type = "button";
+    showHere.addEventListener("click", releaseHandOff);
+    note.append(`${HANDED_OFF_TEXT} `, showHere);
+    boardHost.append(note);
+    handOffNote = note;
+  };
+  const startLinkHandOff = () => {
+    if (typeof BroadcastChannel !== "function") {
+      return;
+    }
+    const channel = new BroadcastChannel(HAND_OFF_CHANNEL);
+    const post = (message) => channel.postMessage(message);
+    let focusedAt = document.hasFocus() ? Date.now() : 0;
+    const noteFocus = () => {
+      focusedAt = Date.now();
+    };
+    window.addEventListener("focus", noteFocus);
+    window.addEventListener("blur", noteFocus);
+    const eligible = (repo) => {
+      const tabNames = repositories.map((repository) => repository.name);
+      const state = { appWindow: appWindow.matches, view, signedOut, asking: handOff !== void 0, tabNames };
+      return receiverEligible(state, repo);
+    };
+    const lastFocus = () => document.hasFocus() ? Date.now() : focusedAt;
+    const answerer = createAnswerer({ post, id: crypto.randomUUID(), eligible, focusedAt: lastFocus, take: receiveLink });
+    channel.addEventListener("message", (event) => {
+      const message = parseHandOffMessage(event.data);
+      if (message) {
+        ask?.receive(message);
+        answerer.receive(message);
+      }
+    });
+    const link = view === "sessions" ? askLink(window.location.search) : void 0;
+    if (link === void 0) {
+      return;
+    }
+    handOff = "asking";
+    ask = startAsk({ post, setTimer, newId: () => crypto.randomUUID() }, link, (outcome) => {
+      ask = void 0;
+      if (outcome === "fallback") {
+        handOff = void 0;
+        return;
+      }
+      handOff = "handed";
+      signInNotice?.remove();
+      window.close();
+      window.setTimeout(showHandedOff, CLOSE_WAIT_MS);
+    });
+  };
+  const consumeLaunches = () => {
+    window.launchQueue?.setConsumer((params) => {
+      const link = launchLink(params.targetURL);
+      if (link) {
+        receiveLink(link);
+      }
+    });
+  };
+  const guardHandOff = (step, undo) => {
+    try {
+      step();
+    } catch (error) {
+      undo?.();
+      console.error("Nurselog: the link hand-off failed to start; the board goes on without it.", error);
+    }
+  };
+  if (options.linkHandOff) {
+    guardHandOff(startLinkHandOff, releaseHandOff);
+  }
   if (firstList === SIGNED_OUT) {
     signOut();
   } else {
     void show(selectRepository(repositories, wantedName(window.location.search), void 0));
+  }
+  if (options.linkHandOff) {
+    guardHandOff(consumeLaunches);
+  }
+  if (source.update) {
+    void checkUpdate();
+    window.setTimeout(() => void checkUpdate(), UPDATE_FOLLOW_UP_MS);
+    window.setInterval(() => void checkUpdate(), UPDATE_POLL_MS);
   }
   requestAnimationFrame(tick);
 };
@@ -15187,6 +17559,43 @@ var getJson = async (path, signal) => {
   } catch {
     return void 0;
   }
+};
+var isPlainObject3 = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var ROLE_STAGES = ["implement", "review", "pr", "other"];
+var VERIFICATION_KINDS2 = ["typecheck", "lint", "test"];
+var isSetupRole = (value2) => isPlainObject3(value2) && typeof value2.role === "string" && ROLE_STAGES.includes(value2.stage) && (value2.toolCalls === null || typeof value2.toolCalls === "number" && Number.isFinite(value2.toolCalls));
+var isWorkflowSetup = (value2) => isPlainObject3(value2) && Array.isArray(value2.roles) && value2.roles.every(isSetupRole) && Array.isArray(value2.verification) && value2.verification.every((kind) => VERIFICATION_KINDS2.includes(kind)) && (value2.mergeBy === "developer" || value2.mergeBy === "agent");
+var isInsightReport = (value2) => isPlainObject3(value2) && typeof value2.generatedAt === "string" && Array.isArray(value2.insights) && Array.isArray(value2.sessions) && isPlainObject3(value2.basis) && isPlainObject3(value2.options);
+var VERSION = /^\d+\.\d+\.\d+$/;
+var isVersion = (value2) => typeof value2 === "string" && VERSION.test(value2);
+var isStringList = (value2) => Array.isArray(value2) && value2.every((item2) => typeof item2 === "string");
+var isReleaseNotes = (value2) => isPlainObject3(value2) && isVersion(value2.version) && isStringList(value2.items);
+var isWebUrl = (value2) => {
+  if (typeof value2 !== "string") {
+    return false;
+  }
+  try {
+    const protocol = new URL(value2).protocol;
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+var readUpdateNotice = (body) => {
+  if (!isPlainObject3(body) || !isVersion(body.current) || !isVersion(body.latest)) {
+    return null;
+  }
+  const { command, notes, changesUrl } = body;
+  const valid = typeof command === "string" && command !== "" && Array.isArray(notes) && notes.every(isReleaseNotes);
+  if (!valid || changesUrl !== void 0 && !isWebUrl(changesUrl)) {
+    return null;
+  }
+  const releaseNotes = notes.map((note) => ({ version: note.version, items: [...note.items] }));
+  const notice = { current: body.current, latest: body.latest, command, notes: releaseNotes };
+  if (changesUrl !== void 0) {
+    notice.changesUrl = changesUrl;
+  }
+  return notice;
 };
 var serverSource = () => ({
   label: "Nurselog",
@@ -15212,11 +17621,22 @@ var serverSource = () => ({
   },
   session: (repositoryId, sessionId, signal) => getJson(sessionPath(repositoryId, sessionId), signal),
   agent: (repositoryId, sessionId, agentId, signal) => getJson(`${sessionPath(repositoryId, sessionId)}&agent=${encodeURIComponent(agentId)}`, signal),
+  async insights(repositoryId, signal) {
+    const body = await getJson(`/api/insights${repoQuery(repositoryId)}`, signal);
+    if (!isPlainObject3(body) || !isInsightReport(body.report)) {
+      return null;
+    }
+    return { report: body.report, setup: isWorkflowSetup(body.setup) ? body.setup : null };
+  },
   fixture: {
     url: fixturePath,
     read: (repositoryId, sessionId) => fetch(fixturePath(repositoryId, sessionId))
+  },
+  async update() {
+    const body = await getJson("/api/update");
+    return body === null ? null : readUpdateNotice(body) ?? void 0;
   }
 });
 
 // src/ui/board.ts
-void startBoard(serverSource());
+void startBoard(serverSource(), { linkHandOff: true });

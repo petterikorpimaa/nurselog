@@ -5,9 +5,10 @@ import {
   USAGE,
   alreadyRunningMessage,
   boardTab,
+  insightsOf,
   listOrphanedSpools,
   listRepositories,
-  percentile,
+  plainText,
   purgeAggregates,
   purgeableAggregates,
   readAggregates,
@@ -16,11 +17,11 @@ import {
   runLink,
   runStatus,
   startNurselog
-} from "./chunk-XW5TBIYW.js";
+} from "./chunk-YNDBNRBJ.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-NFVUCHPF.js";
+} from "./chunk-HYV5PM6C.js";
 import {
   DEFAULT_CONFIG,
   PACKAGE_ROOT,
@@ -30,7 +31,7 @@ import {
   mergeOverDefaults,
   runCommand,
   validateConfig
-} from "./chunk-4VI3FZIO.js";
+} from "./chunk-4YEIGH7M.js";
 import {
   BRANCH_KEY_PATTERN,
   LINUX_APP_BROWSERS,
@@ -47,7 +48,6 @@ import {
   cacheDirOf,
   checkBoard,
   cliCommand,
-  compareText,
   defaultRoot,
   dropUserOnlyKeys,
   ensurePrivateDir,
@@ -84,11 +84,10 @@ import {
   terminalCommandLine,
   terminalCommandPath,
   tildeHome,
-  time,
   userConfigPath,
   waitForBoard,
   writeSignInFile
-} from "./chunk-KSQVLKAZ.js";
+} from "./chunk-YQE4KOST.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
@@ -580,571 +579,6 @@ var runInit = async (args, io, run = runCommand, backup = {}) => {
 // src/cli/insights.ts
 import { parseArgs as parseArgs3 } from "util";
 
-// src/ui/format.ts
-var cost = (usd) => `$${(Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)}`;
-var tokens = (count2) => {
-  const value = Number.isFinite(count2) ? Math.max(0, count2) : 0;
-  if (value >= 999500) {
-    return `${Number((value / 1e6).toFixed(2))}M`;
-  }
-  if (value >= 99950) {
-    return `${Math.round(value / 1e3)}k`;
-  }
-  if (value >= 999.5) {
-    return `${(value / 1e3).toFixed(1)}k`;
-  }
-  return String(Math.round(value));
-};
-
-// src/insights/insights.ts
-var AREAS = ["implementers", "review", "verification", "tokens", "questions"];
-var AREA_NAMES = { implementers: "Implementers", review: "Review", verification: "Verification", tokens: "Token economy", questions: "Questions and waits" };
-var SIGNAL_NAMES = {
-  "budget-first-stop": "budget at the first stop",
-  "second-implementer": "second implement runs",
-  "second-round": "second review rounds",
-  "fix-followups": "fix follow-ups",
-  "quiet-reviewer": "quiet review roles",
-  "verify-commands": "verification commands",
-  "failed-runs": "failed runs",
-  "cache-per-output": "cache read per output token",
-  "main-peak-context": "main-thread peak context",
-  "main-cost-share": "main-thread cost share",
-  "overhead-share": "Nurselog overhead share",
-  "main-large-outputs": "main-thread large outputs",
-  "question-open-time": "question open time",
-  "questions-per-session": "questions per session",
-  "developer-wait": "developer wait"
-};
-var FACTOR = 1.5;
-var STANDING_PERCENT = 30;
-var STANDING_RUNS = 5;
-var QUIET_RUNS = 10;
-var QUIET_FIXES = 2;
-var SPREAD_VALUES = 3;
-var MAIN_ROLE = "main";
-var OVERHEAD_STANDING = 0.01;
-var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
-var plainText = (text) => text.replace(CONTROL, "");
-var NO_IMPLEMENT_RUNS = "no subagent of an implement-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
-var NO_BUDGET = "no tool-call budget is set for the roles of the implement runs (budgets.roles.<role>.toolCalls)";
-var NO_FIRST_STOP = "no implement run with a tool-call budget stopped";
-var NO_STREAM = "no implement run was on a stream";
-var NO_REVIEWS = "no subagent of a review-stage role ran (roles.<role>.stage)";
-var NO_ROUND = "no review-stage role reviewed a branch";
-var NO_BLOCK = "no review-stage agent wrote a report block";
-var NO_COMMAND = "no command matched verification.kinds";
-var NO_REQUESTS = "no requests were recorded (usage facts come from the transcripts)";
-var NO_LIMIT = "no context limit is known for the main thread's model (budgets.contextLimits)";
-var NO_OVERHEAD = "no session recorded the Nurselog overhead (its hook or board predates the count)";
-var NOT_STORED = "the session aggregates lack it (an older board wrote them)";
-var IMPLEMENT_RUN = ["implement run", "implement runs"];
-var STREAM = ["stream", "streams"];
-var BRANCH = ["branch", "branches"];
-var RUN = ["run", "runs"];
-var SESSION = ["session", "sessions"];
-var WORK_SESSION = ["work session", "work sessions"];
-var ANSWERED = ["answered question", "answered questions"];
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var fieldsOf = (value) => isRecord(value) ? value : {};
-var entriesOf = (value) => Array.isArray(value) ? value.filter(isRecord) : void 0;
-var numberOf = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
-var timeOf = (value) => typeof value === "string" ? time(value) : Number.NaN;
-var isNumber = (value) => value !== null;
-var implementRun = (entry) => ({
-  callsAtFirstStop: numberOf(entry.callsAtFirstStop),
-  callLimit: numberOf(entry.callLimit),
-  commands: numberOf(entry.commands),
-  failed: numberOf(entry.failed)
-});
-var reviewRuns = (entries) => {
-  const runs = [];
-  entries.forEach((entry, index) => {
-    if (typeof entry.role === "string") {
-      const start2 = timeOf(entry.startedAt);
-      runs.push({ role: plainText(entry.role), start: Number.isFinite(start2) ? start2 : 0, index, fixItems: numberOf(entry.fixItems), usd: numberOf(entry.usd) });
-    }
-  });
-  return runs;
-};
-var rowNumbers = (entry) => {
-  const streamRuns2 = Array.isArray(entry.streamRuns) ? entry.streamRuns.map(numberOf).filter(isNumber) : [];
-  return { owned: entry.owner === true, ownerKnown: typeof entry.owner === "boolean", reviewRound: numberOf(entry.reviewRound), streamRuns: streamRuns2 };
-};
-var roleNumbers = (entries) => entries.flatMap((entry) => {
-  if (typeof entry.role !== "string") {
-    return [];
-  }
-  const role = plainText(entry.role);
-  return [{ role, runs: numberOf(entry.runs), cacheRead: numberOf(entry.cacheRead), output: numberOf(entry.output), peakContext: numberOf(entry.peakContext), usd: numberOf(entry.usd) }];
-});
-var openTime = (entry) => {
-  const asked = timeOf(entry.askedAt);
-  const answered = timeOf(entry.answeredAt);
-  return Number.isFinite(asked) && Number.isFinite(answered) ? Math.max(0, answered - asked) : null;
-};
-var readSession = (aggregate, finished) => {
-  const main2 = fieldsOf(aggregate.main);
-  const metrics = fieldsOf(aggregate.metrics);
-  const roles = entriesOf(metrics.roles);
-  const reviews = entriesOf(aggregate.reviews);
-  return {
-    id: aggregate.id,
-    finished,
-    builds: entriesOf(aggregate.builds)?.map(implementRun),
-    reviews: reviews === void 0 ? void 0 : reviewRuns(reviews),
-    rows: entriesOf(aggregate.rows)?.map(rowNumbers),
-    roles: roles === void 0 ? void 0 : roleNumbers(roles),
-    totalUsd: numberOf(fieldsOf(metrics.total).usd),
-    overheadUsd: numberOf(fieldsOf(metrics.overhead).usd),
-    largeOutputs: numberOf(main2.largeOutputs),
-    contextLimit: numberOf(main2.contextLimit),
-    questions: entriesOf(aggregate.questions)?.map(openTime),
-    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs)
-  };
-};
-var pad = (value) => String(value).padStart(2, "0");
-var localDay2 = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-var sum = (values) => values.reduce((total, value) => total + value, 0);
-var median = (values) => percentile(values, 50);
-var count = (value, noun) => `${value} ${value === 1 ? noun[0] : noun[1]}`;
-var percent = (fraction) => Math.round(fraction * 100);
-var percentTenths = (fraction) => (fraction * 100).toFixed(1);
-var duration = (ms) => {
-  const seconds = Math.round(Math.max(0, ms) / 1e3);
-  if (seconds < 60) {
-    return `${seconds} s`;
-  }
-  const tenthMinutes = Math.round(seconds / 6);
-  if (tenthMinutes < 100) {
-    return `${(tenthMinutes / 10).toFixed(1)} min`;
-  }
-  const minutes = Math.round(seconds / 60);
-  return minutes < 120 ? `${minutes} min` : `${(Math.round(seconds / 360) / 10).toFixed(1)} h`;
-};
-var listText = (items) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-var onBaseline = (sides, of) => sides.comparable ? of(sides.baseline) : void 0;
-var kOfN = (units, hit) => ({ n: units.length, k: units.filter(hit).length });
-var valueOver = (n, value) => value === void 0 ? { n } : { n, value };
-var medianOf = (values) => valueOver(values.length, median(values));
-var rateFlag = (window, baseline) => {
-  if (baseline === void 0 || baseline.n === 0) {
-    return false;
-  }
-  const k = window.k ?? 0;
-  return k >= 2 && k * baseline.n >= FACTOR * (baseline.k ?? 0) * window.n;
-};
-var factorFlag = (window, baseline) => {
-  if (window.value === void 0 || baseline?.value === void 0) {
-    return false;
-  }
-  return window.value > 0 && window.value >= FACTOR * baseline.value;
-};
-var spreadFlag = (window, baseline) => {
-  const middle = median(window);
-  const high = baseline === void 0 ? void 0 : percentile(baseline, 75);
-  return window.length >= SPREAD_VALUES && middle !== void 0 && high !== void 0 && middle > high;
-};
-var comparison = (flagged) => flagged ? "comparison" : void 0;
-var before = (sides, baseline, noun, text) => {
-  if (baseline === void 0) {
-    return `before: fewer than ${count(sides.minimum, WORK_SESSION)}`;
-  }
-  return baseline.n === 0 ? `before: no ${noun[1]}` : `before: ${text(baseline)}`;
-};
-var kOfNText = (evidence) => `${evidence.k ?? 0} of ${evidence.n}`;
-var rateLine = (sides, units, hit, noun, phrase2) => {
-  const window = kOfN(units(sides.window), hit);
-  const baseline = onBaseline(sides, (sessions) => kOfN(units(sessions), hit));
-  const body = `${window.k ?? 0} of the last ${count(window.n, noun)} ${phrase2} (${before(sides, baseline, noun, kOfNText)})`;
-  return { flag: comparison(rateFlag(window, baseline)), window, baseline, body };
-};
-var spreadSides = (sides, values) => {
-  const windowValues = values(sides.window);
-  const baselineValues = onBaseline(sides, values);
-  const baseline = baselineValues === void 0 ? void 0 : medianOf(baselineValues);
-  return { window: medianOf(windowValues), baseline, flag: comparison(spreadFlag(windowValues, baselineValues)) };
-};
-var rolesByRuns = (runs) => {
-  const counts = /* @__PURE__ */ new Map();
-  for (const run of runs) {
-    const added = run.runs === void 0 ? 1 : run.runs ?? 0;
-    counts.set(run.role, (counts.get(run.role) ?? 0) + added);
-  }
-  return [...counts].sort((a, b) => b[1] - a[1] || compareText(a[0], b[0])).map(([role]) => role);
-};
-var buildsOf = (sessions) => sessions.flatMap((session) => session.builds ?? []);
-var budgetRuns = (sessions) => {
-  const runs = [];
-  for (const run of buildsOf(sessions)) {
-    if (run.callsAtFirstStop !== null && run.callLimit !== null && run.callLimit > 0) {
-      runs.push({ calls: run.callsAtFirstStop, limit: run.callLimit });
-    }
-  }
-  return runs;
-};
-var atBudget = (run) => run.calls >= run.limit;
-var budgetFirstStop = (sides) => {
-  const builds = buildsOf(sides.window);
-  const window = kOfN(budgetRuns(sides.window), atBudget);
-  if (builds.length === 0) {
-    return { lacks: NO_IMPLEMENT_RUNS };
-  }
-  if (window.n === 0) {
-    const limited = builds.some((run) => run.callLimit !== null && run.callLimit > 0);
-    return { lacks: limited ? NO_FIRST_STOP : NO_BUDGET };
-  }
-  const baseline = onBaseline(sides, (sessions) => kOfN(budgetRuns(sessions), atBudget));
-  const k = window.k ?? 0;
-  const ruled = window.n >= STANDING_RUNS;
-  const standing = ruled && k * 100 >= STANDING_PERCENT * window.n;
-  const flag = standing ? "standing" : comparison(rateFlag(window, baseline));
-  const rule = ruled ? `; the rule flags ${STANDING_PERCENT} % or more` : "";
-  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, kOfNText);
-  const share = `${Math.floor(k * 100 / window.n)} %${rule}; ${comparedTo}`;
-  const body = `${k} of the last ${count(window.n, IMPLEMENT_RUN)} reached their tool-call budget by their first stop (${share})`;
-  return { lines: [{ flag, window, baseline, body }] };
-};
-var ownedRows = (sessions) => sessions.flatMap((session) => (session.rows ?? []).filter((row) => row.owned));
-var streamRuns = (sessions) => ownedRows(sessions).flatMap((row) => row.streamRuns);
-var ownerLacks = (sessions) => {
-  const rows = sessions.flatMap((session) => session.rows ?? []);
-  return rows.length > 0 && rows.every((row) => !row.ownerKnown);
-};
-var secondImplementer = (sides) => {
-  if (streamRuns(sides.window).length === 0) {
-    if (buildsOf(sides.window).length === 0) {
-      return { lacks: NO_IMPLEMENT_RUNS };
-    }
-    return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_STREAM };
-  }
-  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second implement run")] };
-};
-var reviewsOf = (sessions) => sessions.flatMap((session) => session.reviews ?? []);
-var blockRuns = (sessions) => reviewsOf(sessions).filter((run) => run.fixItems !== null);
-var reviewRounds = (sessions) => ownedRows(sessions).map((row) => row.reviewRound).filter(isNumber);
-var secondRound = (sides) => {
-  if (reviewRounds(sides.window).length === 0) {
-    if (reviewsOf(sides.window).length === 0) {
-      return { lacks: NO_REVIEWS };
-    }
-    return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_ROUND };
-  }
-  return { lines: [rateLine(sides, reviewRounds, (round) => round >= 2, BRANCH, "ran a second review round")] };
-};
-var blockLacks = (sides) => {
-  if (blockRuns(sides.window).length > 0) {
-    return void 0;
-  }
-  return reviewsOf(sides.window).length === 0 ? NO_REVIEWS : NO_BLOCK;
-};
-var perRunText = (evidence) => `${(evidence.value ?? 0).toFixed(1)} over ${evidence.n}`;
-var fixFollowups = (sides) => {
-  const lacks = blockLacks(sides);
-  if (lacks !== void 0) {
-    return { lacks };
-  }
-  const lines = rolesByRuns(blockRuns(sides.window)).map((role) => {
-    const of = (sessions) => {
-      const runs = blockRuns(sessions).filter((run) => run.role === role);
-      return valueOver(runs.length, runs.length === 0 ? void 0 : sum(runs.map((run) => run.fixItems ?? 0)) / runs.length);
-    };
-    const window = of(sides.window);
-    const baseline = onBaseline(sides, of);
-    const comparedTo = before(sides, baseline, RUN, perRunText);
-    const body = `${role} reported ${(window.value ?? 0).toFixed(1)} fix follow-ups per run over ${count(window.n, RUN)} (${comparedTo})`;
-    return { role, window, baseline, body };
-  });
-  return { lines };
-};
-var newestRuns = (sessions) => reviewsOf(sessions).sort((a, b) => b.start - a.start || b.index - a.index);
-var quietReviewer = (sides) => {
-  const lacks = blockLacks(sides);
-  if (lacks !== void 0) {
-    return { lacks };
-  }
-  const newest = newestRuns([...sides.window, ...sides.baseline]);
-  const lines = [];
-  for (const role of rolesByRuns(reviewsOf(sides.window))) {
-    const last = newest.filter((run) => run.role === role && run.fixItems !== null).slice(0, QUIET_RUNS);
-    const k = last.filter((run) => (run.fixItems ?? 0) >= 1).length;
-    if (last.length === QUIET_RUNS && k <= QUIET_FIXES) {
-      const usd = sum(last.map((run) => run.usd ?? 0));
-      const body = `${role} had a fix follow-up in ${k} of its last ${QUIET_RUNS} runs, which cost ${cost(usd)}`;
-      lines.push({ role, flag: "standing", window: { n: last.length, k, value: usd }, body });
-    }
-  }
-  return { lines };
-};
-var commandCounts = (sessions) => buildsOf(sessions).map((run) => run.commands).filter(isNumber);
-var verifiedRuns = (sessions) => buildsOf(sessions).filter((run) => run.commands !== null && run.commands > 0);
-var commandLacks = (sides) => {
-  if (verifiedRuns(sides.window).length > 0) {
-    return void 0;
-  }
-  return buildsOf(sides.window).length === 0 ? NO_IMPLEMENT_RUNS : NO_COMMAND;
-};
-var verifyCommands = (sides) => {
-  const lacks = commandLacks(sides);
-  if (lacks !== void 0) {
-    return { lacks };
-  }
-  const window = medianOf(commandCounts(sides.window));
-  const baseline = onBaseline(sides, (sessions) => medianOf(commandCounts(sessions)));
-  const commands = count(window.value ?? 0, ["verification command", "verification commands"]);
-  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, (evidence) => String(evidence.value ?? 0));
-  const body = `implement runs ran a median of ${commands} over ${count(window.n, RUN)} (${comparedTo})`;
-  return { lines: [{ window, baseline, body }] };
-};
-var failedUnits = (sessions) => verifiedRuns(sessions).filter((run) => run.failed !== null);
-var failedRuns = (sides) => {
-  const lacks = commandLacks(sides);
-  if (lacks !== void 0) {
-    return { lacks };
-  }
-  if (failedUnits(sides.window).length === 0) {
-    return { lacks: NOT_STORED };
-  }
-  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENT_RUN, "had a failed full-package command")] };
-};
-var outputRoles = (sessions, role) => {
-  const entries = sessions.flatMap((session) => session.roles ?? []);
-  return entries.filter((entry) => entry.output !== null && entry.output > 0 && (role === void 0 || entry.role === role));
-};
-var cacheEntries = (sessions, role) => {
-  const entries = [];
-  for (const entry of outputRoles(sessions, role)) {
-    if (entry.cacheRead !== null && entry.output !== null) {
-      entries.push({ role: entry.role, runs: entry.runs, cacheRead: entry.cacheRead, output: entry.output });
-    }
-  }
-  return entries;
-};
-var cachePerOutput = (sides) => {
-  const entries = cacheEntries(sides.window);
-  if (entries.length === 0) {
-    return { lacks: outputRoles(sides.window).length === 0 ? NO_REQUESTS : NOT_STORED };
-  }
-  const ranked = rolesByRuns(entries);
-  const roles = [...ranked.filter((role) => role === MAIN_ROLE), ...ranked.filter((role) => role !== MAIN_ROLE)];
-  const lines = roles.map((role) => {
-    const of = (sessions) => {
-      const found = cacheEntries(sessions, role);
-      return valueOver(found.length, found.length === 0 ? void 0 : sum(found.map((entry) => entry.cacheRead)) / sum(found.map((entry) => entry.output)));
-    };
-    const window = of(sides.window);
-    const baseline = onBaseline(sides, of);
-    const cached = count(Math.round(window.value ?? 0), ["cached token", "cached tokens"]);
-    const comparedTo = before(sides, baseline, SESSION, (evidence) => String(Math.round(evidence.value ?? 0)));
-    const body = `${role} read ${cached} per output token (${comparedTo})`;
-    return { role, flag: comparison(factorFlag(window, baseline)), window, baseline, body };
-  });
-  return { lines };
-};
-var mainPeaks = (sessions) => {
-  const peaks = [];
-  for (const session of sessions) {
-    const peak = session.roles?.find((entry) => entry.role === MAIN_ROLE)?.peakContext ?? null;
-    if (peak !== null && session.contextLimit !== null && session.contextLimit > 0) {
-      peaks.push({ peak, limit: session.contextLimit });
-    }
-  }
-  return peaks;
-};
-var overHalf = (peaks) => peaks.filter((entry) => entry.peak > entry.limit / 2).length;
-var mainPeakContext = (sides) => {
-  const peaks = mainPeaks(sides.window);
-  if (peaks.length === 0) {
-    return { lacks: outputRoles(sides.window, MAIN_ROLE).length === 0 ? NO_REQUESTS : NO_LIMIT };
-  }
-  const spread = spreadSides(sides, (sessions) => mainPeaks(sessions).map((entry) => entry.peak));
-  const window = { ...spread.window, k: overHalf(peaks) };
-  const baseline = spread.baseline === void 0 ? void 0 : { ...spread.baseline, k: overHalf(mainPeaks(sides.baseline)) };
-  const over = `${window.k} of ${count(window.n, SESSION)} over half the model's context limit`;
-  const comparedTo = before(sides, baseline, SESSION, (evidence) => tokens(evidence.value ?? 0));
-  const body = `the main thread's peak context had a median of ${tokens(window.value ?? 0)} per session, ${over} (${comparedTo})`;
-  return { lines: [{ flag: spread.flag, window, baseline, body }] };
-};
-var mainShares = (sessions) => {
-  const shares = [];
-  for (const session of sessions) {
-    const usd = session.roles?.find((entry) => entry.role === MAIN_ROLE)?.usd ?? null;
-    if (usd !== null && session.totalUsd !== null && session.totalUsd > 0) {
-      shares.push(usd / session.totalUsd);
-    }
-  }
-  return shares;
-};
-var mainCostShare = (sides) => {
-  if (mainShares(sides.window).length === 0) {
-    return { lacks: NO_REQUESTS };
-  }
-  const { window, baseline, flag } = spreadSides(sides, mainShares);
-  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percent(evidence.value ?? 0)} %`);
-  const body = `the main thread took a median of ${percent(window.value ?? 0)} % of a session's cost (${comparedTo})`;
-  return { lines: [{ flag, window, baseline, body }] };
-};
-var overheadShares = (sessions) => {
-  const shares = [];
-  for (const session of sessions) {
-    if (session.overheadUsd !== null && session.totalUsd !== null && session.totalUsd > 0) {
-      shares.push(session.overheadUsd / session.totalUsd);
-    }
-  }
-  return shares;
-};
-var meanOf = (values) => valueOver(values.length, values.length === 0 ? void 0 : sum(values) / values.length);
-var overheadShare = (sides) => {
-  const shares = overheadShares(sides.window);
-  if (shares.length === 0) {
-    return { lacks: NO_OVERHEAD };
-  }
-  const window = meanOf(shares);
-  const baseline = onBaseline(sides, (sessions) => meanOf(overheadShares(sessions)));
-  const flag = (window.value ?? 0) > OVERHEAD_STANDING ? "standing" : void 0;
-  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percentTenths(evidence.value ?? 0)} %`);
-  const took = `took a mean of ${percentTenths(window.value ?? 0)} % of a session's cost, at most ${percentTenths(Math.max(...shares))} %`;
-  return { lines: [{ flag, window, baseline, body: `the Nurselog overhead ${took} (${comparedTo})` }] };
-};
-var largeOutputs = (sessions) => sessions.map((session) => session.largeOutputs).filter(isNumber);
-var mainLargeOutputs = (sides) => {
-  const counts = largeOutputs(sides.window);
-  if (counts.length === 0) {
-    return { lacks: NOT_STORED };
-  }
-  const { window, baseline, flag } = spreadSides(sides, largeOutputs);
-  const read = `read ${count(sum(counts), ["response", "responses"])} over 20,000 characters in the last ${count(window.n, SESSION)}`;
-  const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
-  const body = `the main thread ${read}, a median of ${window.value ?? 0} per session (${comparedTo})`;
-  return { lines: [{ flag, window, baseline, body }] };
-};
-var listed = (sessions) => sessions.flatMap((session) => session.questions === void 0 ? [] : [session.questions]);
-var openTimes = (sessions) => listed(sessions).flatMap((questions) => questions.filter(isNumber));
-var questionOpenTime = (sides) => {
-  const lists = listed(sides.window);
-  if (lists.length === 0) {
-    return { lacks: NOT_STORED };
-  }
-  const { window, baseline, flag } = spreadSides(sides, openTimes);
-  const comparedTo = before(sides, baseline, ANSWERED, (evidence) => duration(evidence.value ?? 0));
-  if (window.n === 0) {
-    return { lines: [{ window, baseline, body: `no question of the developer was answered in the last ${count(lists.length, SESSION)} (${comparedTo})` }] };
-  }
-  const body = `the developer's questions were open a median of ${duration(window.value ?? 0)} over ${count(window.n, ANSWERED)} (${comparedTo})`;
-  return { lines: [{ flag, window, baseline, body }] };
-};
-var questionCounts = (sessions) => listed(sessions).map((questions) => questions.length);
-var questionsPerSession = (sides) => {
-  if (listed(sides.window).length === 0) {
-    return { lacks: NOT_STORED };
-  }
-  const window = medianOf(questionCounts(sides.window));
-  const baseline = onBaseline(sides, (sessions) => medianOf(questionCounts(sessions)));
-  const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
-  const body = `a median of ${count(window.value ?? 0, ["question", "questions"])} per session (${comparedTo})`;
-  return { lines: [{ window, baseline, body }] };
-};
-var waits = (sessions) => sessions.map((session) => session.waitMs).filter(isNumber);
-var developerWait = (sides) => {
-  const totals = waits(sides.window);
-  if (totals.length === 0) {
-    return { lacks: NOT_STORED };
-  }
-  const { window, baseline, flag } = spreadSides(sides, waits);
-  const waited = `waited ${duration(sum(totals))} in the last ${count(window.n, SESSION)}`;
-  const comparedTo = before(sides, baseline, SESSION, (evidence) => duration(evidence.value ?? 0));
-  const body = `the developer ${waited}, a median of ${duration(window.value ?? 0)} per session (${comparedTo})`;
-  return { lines: [{ flag, window, baseline, body }] };
-};
-var SIGNALS = [
-  { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
-  { id: "second-implementer", area: "implementers", of: secondImplementer },
-  { id: "second-round", area: "review", of: secondRound },
-  { id: "fix-followups", area: "review", of: fixFollowups },
-  { id: "quiet-reviewer", area: "review", of: quietReviewer },
-  { id: "verify-commands", area: "verification", of: verifyCommands },
-  { id: "failed-runs", area: "verification", of: failedRuns },
-  { id: "cache-per-output", area: "tokens", of: cachePerOutput },
-  { id: "main-peak-context", area: "tokens", of: mainPeakContext },
-  { id: "main-cost-share", area: "tokens", of: mainCostShare },
-  { id: "overhead-share", area: "tokens", of: overheadShare },
-  { id: "main-large-outputs", area: "tokens", of: mainLargeOutputs },
-  { id: "question-open-time", area: "questions", of: questionOpenTime },
-  { id: "questions-per-session", area: "questions", of: questionsPerSession },
-  { id: "developer-wait", area: "questions", of: developerWait }
-];
-var signalLine = (area, signal, line) => ({
-  area,
-  signal,
-  ...line.role === void 0 ? {} : { role: line.role },
-  ...line.flag === void 0 ? {} : { flag: line.flag },
-  ...line.window === void 0 ? {} : { window: line.window },
-  ...line.baseline === void 0 ? {} : { baseline: line.baseline },
-  text: `${AREA_NAMES[area]}: ${line.body}.`
-});
-var notMeasuredOf = (area, lacks, every, sessions) => {
-  const signals = lacks.map((lack) => lack.signal);
-  const reasons = [...new Set(lacks.map((lack) => lack.reason))];
-  const span = `in the last ${count(sessions, WORK_SESSION)}`;
-  let text = `${AREA_NAMES[area]}: not measured: ${reasons[0]} ${span}.`;
-  if (!every || reasons.length > 1) {
-    const parts = reasons.map((reason) => {
-      const names = lacks.filter((lack) => lack.reason === reason).map((lack) => SIGNAL_NAMES[lack.signal]);
-      return `${listText(names)} not measured: ${reason}`;
-    });
-    text = `${AREA_NAMES[area]}: ${parts.join("; ")} ${span}.`;
-  }
-  return { area, signal: signals[0], notMeasured: { signals, reason: reasons.join("; ") }, text };
-};
-var reportLines = (sides) => {
-  const flagged = [];
-  const others = [];
-  for (const area of AREAS) {
-    const signals = SIGNALS.filter((signal) => signal.area === area);
-    const lacks = [];
-    for (const signal of signals) {
-      const outcome = signal.of(sides);
-      if ("lacks" in outcome) {
-        lacks.push({ signal: signal.id, reason: outcome.lacks });
-        continue;
-      }
-      for (const line of outcome.lines) {
-        const insight = signalLine(area, signal.id, line);
-        (insight.flag === void 0 ? others : flagged).push(insight);
-      }
-    }
-    if (lacks.length > 0) {
-      others.push(notMeasuredOf(area, lacks, lacks.length === signals.length, sides.window.length));
-    }
-  }
-  return [...flagged, ...others];
-};
-var selectSessions = (aggregates2, options, now) => {
-  const at = time(now);
-  const today = new Date(at);
-  const oldest = localDay2(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
-  const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay2(new Date(finished)) >= oldest;
-  const selected = aggregates2.filter((aggregate) => aggregate.work === true).map((aggregate) => ({ aggregate, finished: timeOf(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
-  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished));
-};
-var insightsOf = (aggregates2, options, now) => {
-  const sessions = selectSessions(aggregates2, options, now);
-  const window = sessions.slice(0, options.window);
-  const baseline = sessions.slice(options.window, options.window + options.baseline);
-  const minimum = Math.min(options.minBaseline, options.baseline);
-  const sides = { window, baseline, comparable: baseline.length >= minimum, minimum };
-  const read = [...window, ...baseline];
-  const basis = { window: window.length, baseline: baseline.length };
-  let closing = `Based on ${count(0, WORK_SESSION)}.`;
-  if (read.length > 0) {
-    basis.from = localDay2(new Date(read[read.length - 1].finished));
-    basis.to = localDay2(new Date(read[0].finished));
-    closing = `Based on ${count(read.length, WORK_SESSION)} from ${basis.from} to ${basis.to}.`;
-  }
-  const settings = { window: options.window, baseline: options.baseline, minBaseline: options.minBaseline, keepDays: options.keepDays };
-  return { generatedAt: now, options: settings, basis, insights: window.length === 0 ? [] : reportLines(sides), closing };
-};
-
 // src/insights/markdown.ts
 var NO_WORK_SESSIONS = "No work sessions yet: the board writes a session aggregate when a session finishes.";
 var insightsMarkdown = (report) => {
@@ -1446,10 +880,10 @@ var isCalendarDay = (text) => {
   }
   return localDay(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) === text;
 };
-var dayFiles = (count2) => count2 === 1 ? "1 day file" : `${count2} day files`;
-var markers = (count2) => count2 === 1 ? "1 notified marker" : `${count2} notified markers`;
-var aggregates = (count2) => count2 === 1 ? "1 session aggregate" : `${count2} session aggregates`;
-var unreadableFiles = (count2) => count2 === 1 ? "1 unreadable aggregates file" : `${count2} unreadable aggregates files`;
+var dayFiles = (count) => count === 1 ? "1 day file" : `${count} day files`;
+var markers = (count) => count === 1 ? "1 notified marker" : `${count} notified markers`;
+var aggregates = (count) => count === 1 ? "1 session aggregate" : `${count} session aggregates`;
+var unreadableFiles = (count) => count === 1 ? "1 unreadable aggregates file" : `${count} unreadable aggregates files`;
 var countOf = (stored) => typeof stored === "number" ? stored : 0;
 var phrase = (parts) => parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 var daySpan = (files) => files.length === 1 ? files[0].day : `${files[0].day} to ${files.at(-1)?.day}`;
@@ -1488,8 +922,8 @@ var targetsOf = (all, repo, cwd, onError) => {
   }
   const root = resolveRepository(repo, cwd);
   const hash = repoHash(root);
-  const listed2 = listRepositories().find((repository) => repository.hash === hash);
-  return [{ name: listed2?.name ?? basename2(root), root }];
+  const listed = listRepositories().find((repository) => repository.hash === hash);
+  return [{ name: listed?.name ?? basename2(root), root }];
 };
 var repositorySpoolDir = (root, name, io) => {
   const config = readHookConfig(root);
@@ -1521,7 +955,7 @@ var runPurge = async (args, io, deps = {}) => {
     io.err("nurselog purge: not inside a git repository; use --repo <path> or --all");
     return 2;
   }
-  const before2 = values.before;
+  const before = values.before;
   let failed = false;
   const targets = targetsOf(values.all === true, values.repo, io.cwd, (message) => {
     io.err(`nurselog purge: ${stripControl(message)}`);
@@ -1536,16 +970,16 @@ var runPurge = async (args, io, deps = {}) => {
     const name = stripControl(target.name);
     try {
       const dir = "dir" in target ? target.dir : repositorySpoolDir(target.root, name, io);
-      const files = purgeableDayFiles(dir, before2);
+      const files = purgeableDayFiles(dir, before);
       let stored = "failed";
       try {
-        stored = purgeableAggregates(dir, before2) ?? "unreadable";
+        stored = purgeableAggregates(dir, before) ?? "unreadable";
       } catch (error) {
         io.err(`nurselog purge: ${name}: its session aggregates are left alone: ${stripControl(error.message)}`);
         failed = true;
       }
       const shown2 = stripControl(tildeHome(dir));
-      const none = before2 === void 0 ? "no day files" : `no day files before ${before2}`;
+      const none = before === void 0 ? "no day files" : `no day files before ${before}`;
       const days = files.length === 0 ? none : `${dayFiles(files.length)}, ${daySpan(files)},`;
       let listing = days;
       if (stored === "unreadable") {
@@ -1560,8 +994,8 @@ var runPurge = async (args, io, deps = {}) => {
       failed = true;
     }
   }
-  const totalFiles = found.reduce((sum2, target) => sum2 + target.files.length, 0);
-  const totalAggregates = found.reduce((sum2, target) => sum2 + countOf(target.aggregates), 0);
+  const totalFiles = found.reduce((sum, target) => sum + target.files.length, 0);
+  const totalAggregates = found.reduce((sum, target) => sum + countOf(target.aggregates), 0);
   const totalUnreadable = found.filter((target) => target.aggregates === "unreadable").length;
   if (totalFiles + totalAggregates + totalUnreadable === 0) {
     io.out("Nothing to delete.");
@@ -1596,11 +1030,11 @@ var runPurge = async (args, io, deps = {}) => {
       undeleted += 1;
     };
     try {
-      const deleted = purgeSpool(target.dir, before2, onFailure);
+      const deleted = purgeSpool(target.dir, before, onFailure);
       const files = deleted.filter((path) => dirname3(path) === target.dir).length;
       deletedFiles += files;
       deletedMarkers += deleted.length - files;
-      const taken = target.aggregates === "failed" ? 0 : purgeAggregates(target.dir, before2);
+      const taken = target.aggregates === "failed" ? 0 : purgeAggregates(target.dir, before);
       if (taken === void 0) {
         deletedUnreadable += 1;
       } else {
@@ -1701,10 +1135,10 @@ var settingsPath = (env) => {
   return configDir ? join3(resolve3(configDir), "settings.json") : join3(homedir(), ".claude", "settings.json");
 };
 var handListing = (roots, bases, env, io) => {
-  const listed2 = [];
+  const listed = [];
   const collect = (path, read) => {
     try {
-      listed2.push(...read(path));
+      listed.push(...read(path));
     } catch (error) {
       io.err(`nurselog uninstall: cannot read ${shown(path)}, so it is not listed; check it by hand: ${messageOf(error)}`);
     }
@@ -1720,9 +1154,9 @@ var handListing = (roots, bases, env, io) => {
   for (const base of bases) {
     collect(base, baseLines);
   }
-  listed2.push(`A --scope local install: run ${LOCAL_SCOPE_REMOVAL} in each repository that has one.`);
-  listed2.push("An installed board app: remove it from the browser or the Dock.");
-  return listed2;
+  listed.push(`A --scope local install: run ${LOCAL_SCOPE_REMOVAL} in each repository that has one.`);
+  listed.push("An installed board app: remove it from the browser or the Dock.");
+  return listed;
 };
 var claudeStep = (root, path) => {
   if (cacheDirOf(root) === void 0) {
@@ -1848,9 +1282,9 @@ var makePlan = async (deps, keepData, io) => {
   const rootExists = lstatSync3(root, { throwIfNoEntry: false }) !== void 0;
   const claude = claudeStep(deps.packageRoot ?? PACKAGE_ROOT, deps.path ?? process.env.PATH ?? "");
   const roots = repositories.map((repository) => repository.root);
-  const listed2 = handListing(roots, bases, deps.env ?? process.env, io);
+  const listed = handListing(roots, bases, deps.env ?? process.env, io);
   const stale = state === void 0 ? void 0 : { pid: state.pid, port: state.port };
-  return { plan: { board, stale, command, spools, orphans, rootExists, claude, listed: listed2 }, failed };
+  return { plan: { board, stale, command, spools, orphans, rootExists, claude, listed }, failed };
 };
 var defaultCheck = () => checkBoard(serverStatePath(), RUNNING_CHECK_MS);
 var defaultKill = (pid, signal) => {

@@ -1734,6 +1734,206 @@ var openAppWindow = async (url, deps = {}) => {
   return void 0;
 };
 
+// src/model/paths.ts
+var time = (at) => Date.parse(at);
+var compareText = (a, b) => Number(a > b) - Number(a < b);
+var digitsByValue = (text) => text.replace(/\d+/g, (run) => run.padStart(16, "0"));
+var compareIds = (a, b) => compareText(digitsByValue(a), digitsByValue(b)) || compareText(a, b);
+var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|test|perf|build|ci)\//, "");
+var normalizePath = (path) => {
+  const prefix = path.startsWith("~/") || path === "~" ? "~" : "";
+  const parts = [];
+  for (const part of path.slice(prefix.length).split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part !== "" && part !== ".") {
+      parts.push(part);
+    }
+  }
+  return `${prefix}/${parts.join("/")}`;
+};
+var isAbsolute2 = (path) => path.startsWith("/") || path.startsWith("~/");
+var resolvePath = (base, path) => normalizePath(isAbsolute2(path) ? path : `${base}/${path}`);
+var isInside2 = (path, root) => path === root || path.startsWith(`${root}/`);
+var baseName = (path) => path.split("/").filter(Boolean).pop() ?? path;
+var escapeRegExp2 = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var worktreeRoot = (run, path, aliases) => {
+  if (isInside2(path, run.worktree)) {
+    return run.worktree;
+  }
+  for (let end = path.length; end > 0; end = path.lastIndexOf("/", end - 1)) {
+    const prefix = path.slice(0, end);
+    if (ownValue(aliases, prefix) === run.worktree) {
+      return prefix;
+    }
+  }
+  return void 0;
+};
+var relativePath = (run, path, aliases) => {
+  const normalized = isAbsolute2(path) ? normalizePath(path) : path;
+  const root = worktreeRoot(run, normalized, aliases);
+  return root === void 0 ? normalized : normalized.slice(root.length + 1);
+};
+var inWorktree = (run, path, aliases) => worktreeRoot(run, normalizePath(path), aliases) !== void 0;
+var resolveAlias = (path, aliases) => {
+  for (let end = path.length; end > 0; end = path.lastIndexOf("/", end - 1)) {
+    const real = ownValue(aliases, path.slice(0, end));
+    if (real !== void 0) {
+      return `${real}${path.slice(end)}`;
+    }
+  }
+  return path;
+};
+var packageOf = (relative, config) => config.packages.find((pkg) => pkg.paths.some((path) => relative === path || relative.startsWith(`${path}/`)))?.id;
+var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
+var ownEntry = (map, key, create) => {
+  if (Object.hasOwn(map, key)) {
+    return map[key];
+  }
+  const entry = create();
+  if (key !== "__proto__") {
+    map[key] = entry;
+  }
+  return entry;
+};
+var isTrunkLike = (branch, config) => branch === config.branches.trunk || config.branches.promote.includes(branch);
+var agentFix = (run, agentId) => [...run.fixes].reverse().find((fix) => fix.agentId === agentId);
+var SHELL_EXPANSION = /[$`*?[{\\'"]|.~|^~[^/]/;
+var literalWord = (word) => {
+  if (word === void 0) {
+    return void 0;
+  }
+  const single = /^'([^']*)'$/.exec(word);
+  if (single) {
+    return single[1];
+  }
+  const unquoted = word.replace(/^"([^"]*)"$/, "$1");
+  return SHELL_EXPANSION.test(unquoted) ? void 0 : unquoted;
+};
+var cdTarget = (word) => word === "-" ? void 0 : literalWord(word);
+var HEREDOC = /^<<(-?)[ \t]*(?:\\|(['"]?))([A-Za-z_][\w-]*)\2/;
+var QUOTE_FILL = "_";
+var quoteEnd = (command, start, escapes) => {
+  const quote = command[start];
+  for (let index = start + 1; index < command.length; index += 1) {
+    if (escapes && command[index] === "\\") {
+      index += 1;
+    } else if (command[index] === quote) {
+      return index + 1;
+    }
+  }
+  return command.length;
+};
+var skipHeredocs = (command, start, pending, out) => {
+  let index = start;
+  for (const heredoc of pending) {
+    while (index < command.length) {
+      const newline = command.indexOf("\n", index);
+      const end = newline === -1 ? command.length : newline;
+      const line = command.slice(index, end);
+      out.push(" ".repeat(line.length), newline === -1 ? "" : "\n");
+      index = end + 1;
+      if ((heredoc.tabs ? line.replace(/^\t+/, "") : line) === heredoc.word) {
+        break;
+      }
+    }
+  }
+  pending.length = 0;
+  return index;
+};
+var shellCode = (command) => {
+  const out = [];
+  const pending = [];
+  let arithmetic = 0;
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index];
+    const wordStart = index === 0 || /[\s;&|()]/.test(command[index - 1]);
+    const ansi = char === "$" && command[index + 1] === "'";
+    const heredoc = char === "<" && arithmetic === 0 ? HEREDOC.exec(command.slice(index)) : null;
+    if (char === "'" || char === '"' || ansi) {
+      const start = ansi ? index + 1 : index;
+      const quote = command[start];
+      const end = quoteEnd(command, start, quote === '"' || ansi);
+      const closed = command[end - 1] === quote && end - start > 1;
+      const inner = end - start - (closed ? 2 : 1);
+      out.push(ansi ? "$" : "", quote, QUOTE_FILL.repeat(inner), closed ? quote : "");
+      index = end;
+    } else if (char === "\\") {
+      out.push(command.slice(index, index + 2));
+      index += 2;
+    } else if (char === "#" && wordStart) {
+      const newline = command.indexOf("\n", index);
+      const end = newline === -1 ? command.length : newline;
+      out.push(" ".repeat(end - index));
+      index = end;
+    } else if (command.startsWith("<<<", index)) {
+      out.push("<<<");
+      index += 3;
+    } else if (command.startsWith("$((", index)) {
+      out.push("$((");
+      arithmetic += 2;
+      index += 3;
+    } else if (heredoc) {
+      pending.push({ word: heredoc[3], tabs: heredoc[1] === "-" });
+      out.push(heredoc[0]);
+      index += heredoc[0].length;
+    } else if (char === "\n" && pending.length > 0) {
+      out.push("\n");
+      index = skipHeredocs(command, index + 1, pending, out);
+    } else {
+      if (arithmetic > 0 && (char === "(" || char === ")")) {
+        arithmetic += char === "(" ? 1 : -1;
+      }
+      out.push(char);
+      index += 1;
+    }
+  }
+  return out.join("");
+};
+var SEGMENT_BREAK = /&&|\|\||;|\||\n|(?<!\\)\$?\(|(?<!\\)\)/g;
+var lastSplit;
+var shellSegments = (command) => {
+  if (lastSplit === void 0 || lastSplit.command !== command) {
+    const segments = splitSegments(command).map((segment) => Object.freeze(segment));
+    lastSplit = { command, segments: Object.freeze(segments) };
+  }
+  return lastSplit.segments;
+};
+var splitSegments = (command) => {
+  const code = shellCode(command);
+  const segments = [];
+  let start = 0;
+  let depth = 0;
+  for (const match of code.matchAll(SEGMENT_BREAK)) {
+    segments.push({ text: command.slice(start, match.index), code: code.slice(start, match.index), depth });
+    start = match.index + match[0].length;
+    if (match[0] === ")") {
+      depth = Math.max(0, depth - 1);
+    } else if (match[0].endsWith("(")) {
+      depth += 1;
+    }
+  }
+  segments.push({ text: command.slice(start), code: code.slice(start), depth });
+  return segments;
+};
+var shellWords = (segment) => {
+  const words = [...segment.code.matchAll(/\S+/g)];
+  return words.map((match) => segment.text.slice(match.index, match.index + match[0].length));
+};
+var PREFIX_WORD = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*|command)$/;
+var gitArgs = (words) => {
+  const start = words.findIndex((word) => !PREFIX_WORD.test(word));
+  if (start < 0 || !/(?:^|\/)git$/.test(words[start])) {
+    return void 0;
+  }
+  let at = start + 1;
+  while (at < words.length && words[at].startsWith("-")) {
+    at += words[at] === "-C" || words[at] === "-c" ? 2 : 1;
+  }
+  return words.slice(at);
+};
+
 // src/linear-regexp.ts
 var probeLinearEngine = () => {
   try {
@@ -1840,7 +2040,13 @@ var DEFAULT_CONFIG = {
   // The Node config (`src/config.ts`) gives `prices.json` of this package; the browser-safe core reads no file.
   pricesFrom: "",
   spool: { dir: "~/.local/share/nurselog", readDays: 7, keepDays: 14, maxLineBytes: 65536 },
-  insights: { window: 5, baseline: 20, minBaseline: 10, keepDays: 365 },
+  insights: {
+    window: 5,
+    baseline: 20,
+    minBaseline: 10,
+    keepDays: 365,
+    guidelines: { budgetFirstStop: 0.3, quietReviewer: 0.3, overheadShare: 0.01, mainPeakContext: 0.4, mainLargeOutputs: 2, cachePerOutput: { main: 350, agents: 100 } }
+  },
   retention: { indexHours: 6 },
   server: { host: "127.0.0.1" },
   features: { answerFromUi: false }
@@ -1986,6 +2192,8 @@ var ROLE_STAGES = ["implement", "review", "pr", "other"];
 var OBJECT = "an object";
 var STRING_LIST = "a list of strings";
 var LIMIT = "null or an integer of 0 or more";
+var SHARE_LIMIT = "null or a number from 0 to 1";
+var POSITIVE_LIMIT = "null or a positive number";
 var isBoolean = (value) => typeof value === "boolean";
 var isStringList = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
 var isPositive = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -1993,6 +2201,8 @@ var isPollSeconds = (value) => Number.isInteger(value) && value >= MIN_POLL_SECO
 var isMergeBy = (value) => value === "developer" || value === "agent";
 var isFraction = (value) => typeof value === "number" && value >= 0 && value <= 1;
 var isLimit = (value) => value === null || Number.isInteger(value) && value >= 0;
+var isShareLimit = (value) => value === null || isFraction(value);
+var isPositiveLimit = (value) => value === null || isPositive(value);
 var isRole = (value) => isPlainObject(value) && ROLE_STAGES.includes(value.stage) && (value.short === void 0 || typeof value.short === "string");
 var isRoleBudget = (value) => isPlainObject(value) && [value.toolCalls, value.verifyRounds].every((limit) => limit === void 0 || isLimit(limit));
 var isKeyUrl = (value) => {
@@ -2036,7 +2246,16 @@ var DEFAULTED_KEYS = [
   ["insights.window", "an integer from 1 to 100", isIntegerIn(1, 100)],
   ["insights.baseline", "an integer from 1 to 1000", isIntegerIn(1, 1e3)],
   ["insights.minBaseline", "an integer from 1 to 1000", isIntegerIn(1, 1e3)],
-  ["insights.keepDays", "an integer from 1 to 3650", isIntegerIn(1, 3650)]
+  ["insights.keepDays", "an integer from 1 to 3650", isIntegerIn(1, 3650)],
+  ["insights.guidelines", OBJECT, isPlainObject],
+  ["insights.guidelines.budgetFirstStop", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.quietReviewer", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.overheadShare", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.mainPeakContext", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.mainLargeOutputs", LIMIT, isLimit],
+  ["insights.guidelines.cachePerOutput", OBJECT, isPlainObject],
+  ["insights.guidelines.cachePerOutput.main", POSITIVE_LIMIT, isPositiveLimit],
+  ["insights.guidelines.cachePerOutput.agents", POSITIVE_LIMIT, isPositiveLimit]
 ];
 var valueAt = (root, path) => {
   let value = root;
@@ -2269,6 +2488,17 @@ var uiConfig = (config, root) => {
     sessionFixtures: false
   };
 };
+var SETUP_KINDS = ["typecheck", "lint", "test"];
+var workflowSetupOf = (config) => {
+  const roles = Object.entries(config.roles).map(([role, entry]) => {
+    const limits = ownValue(config.budgets.roles, role) ?? {};
+    const resolved = limits.toolCalls === void 0 ? config.budgets.default.toolCalls : limits.toolCalls;
+    const toolCalls = resolved === 0 ? null : resolved;
+    return { role, stage: entry.stage, toolCalls };
+  });
+  const verification = SETUP_KINDS.filter((kind) => config.verification.kinds[kind] !== "");
+  return { roles, verification, mergeBy: config.github.mergeBy };
+};
 
 // src/linear-flag.ts
 import { setFlagsFromString } from "v8";
@@ -2409,7 +2639,11 @@ var ghProblem = (data) => {
     return problem;
   }
   const timeProblem = ["mergedAt", "closedAt"].find((field) => pr[field] !== null && !isOptional(pr[field], isTime));
-  return timeProblem ? `data.pr.${timeProblem} must be an ISO time` : void 0;
+  if (timeProblem) {
+    return `data.pr.${timeProblem} must be an ISO time`;
+  }
+  const sizeProblem = ["additions", "deletions"].find((field) => !isOptional(pr[field], isCount));
+  return sizeProblem ? `data.pr.${sizeProblem} must be a whole number of at least 0` : void 0;
 };
 var USAGE_NUMBERS = ["input", "cacheWrite", "cacheWrite1h", "cacheRead", "output", "usd"];
 var usageProblem = (data) => {
@@ -3220,206 +3454,6 @@ var parseReportBlock = (report) => {
   }
 };
 var isBlockError = (result) => "blockError" in result;
-
-// src/model/paths.ts
-var time = (at) => Date.parse(at);
-var compareText = (a, b) => Number(a > b) - Number(a < b);
-var digitsByValue = (text) => text.replace(/\d+/g, (run) => run.padStart(16, "0"));
-var compareIds = (a, b) => compareText(digitsByValue(a), digitsByValue(b)) || compareText(a, b);
-var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|test|perf|build|ci)\//, "");
-var normalizePath = (path) => {
-  const prefix = path.startsWith("~/") || path === "~" ? "~" : "";
-  const parts = [];
-  for (const part of path.slice(prefix.length).split("/")) {
-    if (part === "..") {
-      parts.pop();
-    } else if (part !== "" && part !== ".") {
-      parts.push(part);
-    }
-  }
-  return `${prefix}/${parts.join("/")}`;
-};
-var isAbsolute2 = (path) => path.startsWith("/") || path.startsWith("~/");
-var resolvePath = (base, path) => normalizePath(isAbsolute2(path) ? path : `${base}/${path}`);
-var isInside2 = (path, root) => path === root || path.startsWith(`${root}/`);
-var baseName = (path) => path.split("/").filter(Boolean).pop() ?? path;
-var escapeRegExp2 = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var worktreeRoot = (run, path, aliases) => {
-  if (isInside2(path, run.worktree)) {
-    return run.worktree;
-  }
-  for (let end = path.length; end > 0; end = path.lastIndexOf("/", end - 1)) {
-    const prefix = path.slice(0, end);
-    if (ownValue(aliases, prefix) === run.worktree) {
-      return prefix;
-    }
-  }
-  return void 0;
-};
-var relativePath = (run, path, aliases) => {
-  const normalized = isAbsolute2(path) ? normalizePath(path) : path;
-  const root = worktreeRoot(run, normalized, aliases);
-  return root === void 0 ? normalized : normalized.slice(root.length + 1);
-};
-var inWorktree = (run, path, aliases) => worktreeRoot(run, normalizePath(path), aliases) !== void 0;
-var resolveAlias = (path, aliases) => {
-  for (let end = path.length; end > 0; end = path.lastIndexOf("/", end - 1)) {
-    const real = ownValue(aliases, path.slice(0, end));
-    if (real !== void 0) {
-      return `${real}${path.slice(end)}`;
-    }
-  }
-  return path;
-};
-var packageOf = (relative, config) => config.packages.find((pkg) => pkg.paths.some((path) => relative === path || relative.startsWith(`${path}/`)))?.id;
-var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
-var ownEntry = (map, key, create) => {
-  if (Object.hasOwn(map, key)) {
-    return map[key];
-  }
-  const entry = create();
-  if (key !== "__proto__") {
-    map[key] = entry;
-  }
-  return entry;
-};
-var isTrunkLike = (branch, config) => branch === config.branches.trunk || config.branches.promote.includes(branch);
-var agentFix = (run, agentId) => [...run.fixes].reverse().find((fix) => fix.agentId === agentId);
-var SHELL_EXPANSION = /[$`*?[{\\'"]|.~|^~[^/]/;
-var literalWord = (word) => {
-  if (word === void 0) {
-    return void 0;
-  }
-  const single = /^'([^']*)'$/.exec(word);
-  if (single) {
-    return single[1];
-  }
-  const unquoted = word.replace(/^"([^"]*)"$/, "$1");
-  return SHELL_EXPANSION.test(unquoted) ? void 0 : unquoted;
-};
-var cdTarget = (word) => word === "-" ? void 0 : literalWord(word);
-var HEREDOC = /^<<(-?)[ \t]*(?:\\|(['"]?))([A-Za-z_][\w-]*)\2/;
-var QUOTE_FILL = "_";
-var quoteEnd = (command, start, escapes) => {
-  const quote = command[start];
-  for (let index = start + 1; index < command.length; index += 1) {
-    if (escapes && command[index] === "\\") {
-      index += 1;
-    } else if (command[index] === quote) {
-      return index + 1;
-    }
-  }
-  return command.length;
-};
-var skipHeredocs = (command, start, pending, out) => {
-  let index = start;
-  for (const heredoc of pending) {
-    while (index < command.length) {
-      const newline = command.indexOf("\n", index);
-      const end = newline === -1 ? command.length : newline;
-      const line = command.slice(index, end);
-      out.push(" ".repeat(line.length), newline === -1 ? "" : "\n");
-      index = end + 1;
-      if ((heredoc.tabs ? line.replace(/^\t+/, "") : line) === heredoc.word) {
-        break;
-      }
-    }
-  }
-  pending.length = 0;
-  return index;
-};
-var shellCode = (command) => {
-  const out = [];
-  const pending = [];
-  let arithmetic = 0;
-  let index = 0;
-  while (index < command.length) {
-    const char = command[index];
-    const wordStart = index === 0 || /[\s;&|()]/.test(command[index - 1]);
-    const ansi = char === "$" && command[index + 1] === "'";
-    const heredoc = char === "<" && arithmetic === 0 ? HEREDOC.exec(command.slice(index)) : null;
-    if (char === "'" || char === '"' || ansi) {
-      const start = ansi ? index + 1 : index;
-      const quote = command[start];
-      const end = quoteEnd(command, start, quote === '"' || ansi);
-      const closed = command[end - 1] === quote && end - start > 1;
-      const inner = end - start - (closed ? 2 : 1);
-      out.push(ansi ? "$" : "", quote, QUOTE_FILL.repeat(inner), closed ? quote : "");
-      index = end;
-    } else if (char === "\\") {
-      out.push(command.slice(index, index + 2));
-      index += 2;
-    } else if (char === "#" && wordStart) {
-      const newline = command.indexOf("\n", index);
-      const end = newline === -1 ? command.length : newline;
-      out.push(" ".repeat(end - index));
-      index = end;
-    } else if (command.startsWith("<<<", index)) {
-      out.push("<<<");
-      index += 3;
-    } else if (command.startsWith("$((", index)) {
-      out.push("$((");
-      arithmetic += 2;
-      index += 3;
-    } else if (heredoc) {
-      pending.push({ word: heredoc[3], tabs: heredoc[1] === "-" });
-      out.push(heredoc[0]);
-      index += heredoc[0].length;
-    } else if (char === "\n" && pending.length > 0) {
-      out.push("\n");
-      index = skipHeredocs(command, index + 1, pending, out);
-    } else {
-      if (arithmetic > 0 && (char === "(" || char === ")")) {
-        arithmetic += char === "(" ? 1 : -1;
-      }
-      out.push(char);
-      index += 1;
-    }
-  }
-  return out.join("");
-};
-var SEGMENT_BREAK = /&&|\|\||;|\||\n|(?<!\\)\$?\(|(?<!\\)\)/g;
-var lastSplit;
-var shellSegments = (command) => {
-  if (lastSplit === void 0 || lastSplit.command !== command) {
-    const segments = splitSegments(command).map((segment) => Object.freeze(segment));
-    lastSplit = { command, segments: Object.freeze(segments) };
-  }
-  return lastSplit.segments;
-};
-var splitSegments = (command) => {
-  const code = shellCode(command);
-  const segments = [];
-  let start = 0;
-  let depth = 0;
-  for (const match of code.matchAll(SEGMENT_BREAK)) {
-    segments.push({ text: command.slice(start, match.index), code: code.slice(start, match.index), depth });
-    start = match.index + match[0].length;
-    if (match[0] === ")") {
-      depth = Math.max(0, depth - 1);
-    } else if (match[0].endsWith("(")) {
-      depth += 1;
-    }
-  }
-  segments.push({ text: command.slice(start), code: code.slice(start), depth });
-  return segments;
-};
-var shellWords = (segment) => {
-  const words = [...segment.code.matchAll(/\S+/g)];
-  return words.map((match) => segment.text.slice(match.index, match.index + match[0].length));
-};
-var PREFIX_WORD = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*|command)$/;
-var gitArgs = (words) => {
-  const start = words.findIndex((word) => !PREFIX_WORD.test(word));
-  if (start < 0 || !/(?:^|\/)git$/.test(words[start])) {
-    return void 0;
-  }
-  let at = start + 1;
-  while (at < words.length && words[at].startsWith("-")) {
-    at += words[at] === "-C" || words[at] === "-c" ? 2 : 1;
-  }
-  return words.slice(at);
-};
 
 // src/model/config-cache.ts
 var compiledConfigs = /* @__PURE__ */ new WeakMap();
@@ -5872,6 +5906,14 @@ var noteClosed = (current, pr, at) => {
     current.closedAt = at;
   }
 };
+var noteSize = (current, pr) => {
+  if (typeof pr.additions === "number") {
+    current.additions = pr.additions;
+  }
+  if (typeof pr.deletions === "number") {
+    current.deletions = pr.deletions;
+  }
+};
 var onTrunkPr = (state, pr, at, config) => {
   const runs = Object.values(state.board.runs).filter((run) => run.branch === pr.headRefName);
   for (const run of runs) {
@@ -5904,6 +5946,7 @@ var onTrunkPr = (state, pr, at, config) => {
     }
     if (current.number === pr.number) {
       noteClosed(current, pr, at);
+      noteSize(current, pr);
     }
   }
   if (pr.state === "MERGED") {
@@ -10863,6 +10906,14 @@ export {
   BRANCH_KEY_PATTERN,
   branchKeyRegExp,
   branchKey,
+  time,
+  compareText,
+  normalizePath,
+  ownValue,
+  ownEntry,
+  literalWord,
+  cdTarget,
+  shellCode,
   DEFAULT_CONFIG,
   isPlainObject,
   mergeConfig,
@@ -10876,6 +10927,7 @@ export {
   CONFIG_NOT_OBJECT,
   configOf,
   uiConfig,
+  workflowSetupOf,
   SPOOL_EVENT_NAMES,
   checkEvent,
   parseSpoolLine,
@@ -10892,14 +10944,6 @@ export {
   parseBlockBody,
   parseReportBlock,
   isBlockError,
-  time,
-  compareText,
-  normalizePath,
-  ownValue,
-  ownEntry,
-  literalWord,
-  cdTarget,
-  shellCode,
   roleConfig,
   isTrunkBranch,
   recordOf,

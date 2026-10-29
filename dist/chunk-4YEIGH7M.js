@@ -40,7 +40,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-KSQVLKAZ.js";
+} from "./chunk-YQE4KOST.js";
 
 // src/config.ts
 import { existsSync } from "fs";
@@ -931,12 +931,13 @@ var pollIntervalMs = (seconds) => {
   const value = typeof seconds === "number" && Number.isFinite(seconds) ? seconds : DEFAULT_CONFIG2.github.pollSeconds;
   return Math.min(MAX_POLL_SECONDS, Math.max(MIN_POLL_SECONDS, value)) * 1e3;
 };
-var PR_FIELDS = "number,title,url,state,headRefName,baseRefName,createdAt,mergedAt,closedAt";
+var PR_FIELDS = "number,title,url,state,headRefName,baseRefName,createdAt,mergedAt,closedAt,additions,deletions";
 var ACCOUNT_CHECK_MS = 10 * 60 * 1e3;
 var NUDGE_MS = 10 * 1e3;
 var BODY_CHARS = 4e3;
 var PR_COMMAND = /\bgh\s+pr\s+(create|merge)\b/;
 var HOST = "github.com";
+var prSignature = (pr) => `${pr.state}|${pr.mergedAt ?? ""}|${pr.additions ?? ""}|${pr.deletions ?? ""}`;
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var firstLine = (error) => String(error instanceof Error ? error.message : error).split("\n")[0];
 var matchesLogin = (pattern, login) => {
@@ -1143,7 +1144,7 @@ var createGhFacts = (options) => {
     return JSON.parse(output || "[]");
   };
   const record = (pr) => {
-    const signature = `${pr.state}|${pr.mergedAt ?? ""}`;
+    const signature = prSignature(pr);
     if (known.get(pr.number) === signature) {
       return;
     }
@@ -1206,7 +1207,7 @@ var createGhFacts = (options) => {
   return {
     observe(event) {
       if (event.event === "gh.fact" && event.data.kind === "pr") {
-        known.set(event.data.pr.number, `${event.data.pr.state}|${event.data.pr.mergedAt ?? ""}`);
+        known.set(event.data.pr.number, prSignature(event.data.pr));
         return;
       }
       if (event.event === "git.fact" && event.data.kind === "worktree-removed") {

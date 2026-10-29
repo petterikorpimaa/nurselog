@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-4VI3FZIO.js";
+} from "./chunk-4YEIGH7M.js";
 import {
   FIELD_NAMES,
   HOOK_DEFAULTS,
@@ -32,6 +32,7 @@ import {
   boardProof,
   boardUrl,
   byStart,
+  cacheDirOf,
   checkBoard,
   compareText,
   configKeepDays,
@@ -60,6 +61,7 @@ import {
   readHookConfig,
   readRepositoryRecord,
   readServerState,
+  readSmallFile,
   readWindowStart,
   recordedRootValid,
   redactValue,
@@ -80,8 +82,9 @@ import {
   uiConfig,
   userConfigPath,
   validateMarkerInput,
+  workflowSetupOf,
   writePrivate
-} from "./chunk-KSQVLKAZ.js";
+} from "./chunk-YQE4KOST.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -140,29 +143,37 @@ var trimSession = (session) => {
 var sessionView = (view, now) => {
   const nowMs = Date.parse(now ?? "");
   const gateWaits = (session) => session.promote?.state === "waiting" || session.docs?.state === "waiting";
-  const waits = (session) => session.chip.tone === "you" || gateWaits(session) || session.questions.some(blockingForYou);
+  const waits2 = (session) => session.chip.tone === "you" || gateWaits(session) || session.questions.some(blockingForYou);
   const past = (session) => session.finishedAt !== void 0 && nowMs - Date.parse(session.finishedAt) > SUMMARY_AFTER_MS;
   const entries = Object.entries(view.sessions);
-  const summarised = new Set(entries.filter(([, session]) => past(session) && !waits(session)).map(([id]) => id));
+  const summarised = new Set(entries.filter(([, session]) => past(session) && !waits2(session)).map(([id]) => id));
   const sessions = Object.fromEntries(entries.filter(([id]) => !summarised.has(id)).map(([id, session]) => [id, trimSession(session)]));
   const summaries = view.sessionOrder.filter((id) => summarised.has(id)).map((id) => sessionSummary(view.sessions[id]));
   summaries.sort((a, b) => Date.parse(b.finishedAt ?? "") - Date.parse(a.finishedAt ?? "") || compareText(a.id, b.id));
   return { ...view, sessions, sessionOrder: view.sessionOrder.filter((id) => !summarised.has(id)), summaries };
 };
-var withList = (body, listText, typicalText = "") => `${body.slice(0, -1)},"repositories":${listText}${typicalText === "" ? "" : `,"typical":${typicalText}`}}`;
+var withList = (body, listText2, typicalText = "", insightsText = "") => {
+  const typical = typicalText === "" ? "" : `,"typical":${typicalText}`;
+  const insightsAt = insightsText === "" ? "" : `,"insightsAt":${insightsText}`;
+  return `${body.slice(0, -1)},"repositories":${listText2}${typical}${insightsAt}}`;
+};
 var typicalTextOf = (repository, view) => {
   const typical = view === "sessions" ? repository.typical?.() : void 0;
   return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
+};
+var insightsTextOf = (repository, view) => {
+  const report = view === "sessions" ? repository.insights?.() : void 0;
+  return report === void 0 || report === null ? "" : JSON.stringify(report.generatedAt);
 };
 var repositorySummary = (repository, counts = countsOf(repository.store.state().board)) => {
   const { id, name } = repository;
   return { id, name, lastLineAt: repository.lastLineAt(), ...counts };
 };
 var viewBody = (store, view) => view === "runs" ? JSON.stringify(store.snapshot()) : JSON.stringify(sessionView(store.sessions(), store.state().index.now));
-var snapshotText = (repository, view, listText, body) => {
-  const list = listText ?? JSON.stringify([repositorySummary(repository)]);
+var snapshotText = (repository, view, listText2, body) => {
+  const list = listText2 ?? JSON.stringify([repositorySummary(repository)]);
   const viewText = body ?? viewBody(repository.store, view);
-  return withList(viewText, list, typicalTextOf(repository, view));
+  return withList(viewText, list, typicalTextOf(repository, view), insightsTextOf(repository, view));
 };
 var sessionBody = (store, id, agentId = null) => {
   const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
@@ -303,7 +314,7 @@ var SECURITY_HEADERS = {
   "Cross-Origin-Resource-Policy": "same-origin"
 };
 var UNAUTHORIZED_HEADERS = { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "WWW-Authenticate": 'Bearer realm="nurselog"' };
-var REPOSITORY_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/config", "GET /api/events", "GET /api/session", "GET /api/fixture"]);
+var REPOSITORY_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/config", "GET /api/insights", "GET /api/events", "GET /api/session", "GET /api/fixture"]);
 var VIEW_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/events"]);
 var VIEWS = /* @__PURE__ */ new Set(["runs", "sessions"]);
 var MAX_SESSION_ID = 256;
@@ -324,6 +335,7 @@ var UI_ASSETS = /* @__PURE__ */ new Map([
   ["/ui/table.css", { file: "table.css", type: CSS }],
   ["/ui/messages.css", { file: "messages.css", type: CSS }],
   ["/ui/overview.css", { file: "overview.css", type: CSS }],
+  ["/ui/health.css", { file: "health.css", type: CSS }],
   ["/ui/branches.css", { file: "branches.css", type: CSS }],
   ["/ui/board.js", { file: "board.js", type: SCRIPT, built: true }],
   ["/ui/icon.svg", { file: "icon.svg", type: SVG }],
@@ -407,7 +419,10 @@ var createBoardServer = (options) => {
   const maxBuffered = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const log = options.log ?? (() => void 0);
   const peerCheck = options.peerCheck ?? (process.platform === "linux" ? procPeerCheck : void 0);
-  const empty = { id: "", name: "", store: createStore(structuredClone(DEFAULT_CONFIG)), uiConfig: () => uiConfig(DEFAULT_CONFIG, void 0), lastLineAt: () => void 0 };
+  const emptyStore = createStore(structuredClone(DEFAULT_CONFIG));
+  const emptyUiConfig = () => uiConfig(DEFAULT_CONFIG, void 0);
+  const emptySetup = () => workflowSetupOf(DEFAULT_CONFIG);
+  const empty = { id: "", name: "", store: emptyStore, uiConfig: emptyUiConfig, setup: emptySetup, lastLineAt: () => void 0 };
   const streams = /* @__PURE__ */ new Map();
   const followed = /* @__PURE__ */ new Map();
   const counts = /* @__PURE__ */ new Map();
@@ -452,15 +467,15 @@ var createBoardServer = (options) => {
     }
     return fresh;
   };
-  const snapshotText2 = (repository, view, listText = JSON.stringify(summaries())) => snapshotText(repository, view, listText, bodyOf(repository, view));
+  const snapshotText2 = (repository, view, listText2 = JSON.stringify(summaries())) => snapshotText(repository, view, listText2, bodyOf(repository, view));
   const broadcast = () => {
     pending = void 0;
     sentAt = Date.now();
     try {
       const list = summaries();
-      const listText = JSON.stringify(list);
-      const listChanged = listText !== sentList;
-      sentList = listText;
+      const listText2 = JSON.stringify(list);
+      const listChanged = listText2 !== sentList;
+      sentList = listText2;
       const messages = /* @__PURE__ */ new Map();
       for (const [stream, shown] of streams) {
         const repository = listChanged || dirty.has(shown.id) ? repositoryById(shown.id) : void 0;
@@ -468,7 +483,7 @@ var createBoardServer = (options) => {
           continue;
         }
         const name = `${shown.view} ${shown.id}`;
-        const message = messages.get(name) ?? `data: ${snapshotText2(repository, shown.view, listText)}
+        const message = messages.get(name) ?? `data: ${snapshotText2(repository, shown.view, listText2)}
 
 `;
         messages.set(name, message);
@@ -488,29 +503,37 @@ var createBoardServer = (options) => {
     }
   };
   const update = () => {
-    const listed = new Map(options.repositories().map((repository) => [repository.id, repository]));
+    const listed2 = new Map(options.repositories().map((repository) => [repository.id, repository]));
     for (const [id, follow] of followed) {
-      if (listed.get(id)?.store !== follow.store) {
+      if (listed2.get(id)?.store !== follow.store) {
         follow.unsubscribe();
         followed.delete(id);
         counts.delete(id);
         bodies.delete(id);
       }
     }
-    for (const [id, repository] of listed) {
+    for (const [id, repository] of listed2) {
       if (!followed.has(id)) {
-        const unsubscribe = repository.store.subscribe(() => {
+        const unsubscribeStore = repository.store.subscribe(() => {
           counts.delete(id);
           bodies.delete(id);
           dirty.add(id);
           schedule();
         });
+        const unsubscribeInsights = repository.subscribeInsights?.(() => {
+          dirty.add(id);
+          schedule();
+        });
+        const unsubscribe = () => {
+          unsubscribeStore();
+          unsubscribeInsights?.();
+        };
         followed.set(id, { store: repository.store, unsubscribe });
       }
     }
     schedule();
     for (const [stream, { id }] of streams) {
-      if (id !== "" && !listed.has(id)) {
+      if (id !== "" && !listed2.has(id)) {
         streams.delete(stream);
         stream.end();
       }
@@ -523,11 +546,11 @@ var createBoardServer = (options) => {
   }, KEEP_ALIVE_MS);
   keepAlive.unref();
   const repositoryOf = (repo) => {
-    const listed = options.repositories();
+    const listed2 = options.repositories();
     if (repo === null) {
-      return mostRecentlyActive(listed) ?? empty;
+      return mostRecentlyActive(listed2) ?? empty;
     }
-    return listed.find((repository) => repository.id === repo);
+    return listed2.find((repository) => repository.id === repo);
   };
   const openStream = (request, response, repository, view) => {
     if (streams.size >= maxClients) {
@@ -791,8 +814,13 @@ ${message}`);
       whenReady(request, response, repository, () => void slice());
     } else if (key === "GET /api/config" && repository) {
       sendJson(response, 200, repository.uiConfig());
+    } else if (key === "GET /api/insights" && repository) {
+      const body = { report: repository.insights?.() ?? null, setup: repository.setup() };
+      sendJson(response, 200, body);
     } else if (key === "GET /api/events" && repository) {
       openStream(request, response, repository, view);
+    } else if (key === "GET /api/update") {
+      sendJson(response, 200, options.update?.() ?? null);
     } else if (key === "GET /api/health") {
       sendHealth(request, response, target.nonce);
     } else if (key === "POST /api/signin") {
@@ -921,6 +949,19 @@ var mergeFixtures = (fixtures) => {
     next[pick] += 1;
   }
 };
+var firstTime = (lines) => {
+  for (const text of lines) {
+    const time2 = timeOf(text);
+    if (time2 !== void 0) {
+      return time2;
+    }
+  }
+  return void 0;
+};
+var replayStartAt = (texts) => {
+  const starts = texts.map((text) => firstTime(fixtureLines(text))).filter((time2) => time2 !== void 0);
+  return starts.length > 0 ? new Date(Math.min(...starts)).toISOString() : void 0;
+};
 var replayFixtureTexts = (texts, speed, onLine) => {
   const contents = texts.map(fixtureLines);
   const lines = contents.length === 1 ? contents[0].map((text) => ({ text, time: timeOf(text) })) : mergeFixtures(contents);
@@ -963,11 +1004,30 @@ var replayFixtures = (paths, speed, onLine) => replayFixtureTexts(paths.map((pat
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
 import { existsSync, linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
-import { dirname, join as join5, resolve as resolve3 } from "path";
+import { dirname, join as join6, resolve as resolve3 } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 // src/server/context.ts
-import { join as join4, resolve as resolve2 } from "path";
+import { readFileSync as readFileSync5 } from "fs";
+import { join as join3, resolve } from "path";
+
+// src/spool/activity.ts
+var readLine = (text) => {
+  let line;
+  try {
+    line = JSON.parse(text);
+  } catch {
+    return { src: void 0, at: void 0 };
+  }
+  const { src, at } = line ?? {};
+  const time2 = typeof at === "string" ? Date.parse(at) : Number.NaN;
+  return { src, at: Number.isNaN(time2) ? void 0 : new Date(time2).toISOString() };
+};
+var activityAt = (text) => {
+  const { src, at } = readLine(text);
+  return src === "server" ? void 0 : at;
+};
+var lineAt = (text) => readLine(text).at;
 
 // src/spool/aggregates.ts
 import { closeSync, lstatSync, readdirSync, readFileSync as readFileSync4, readSync, renameSync, rmSync, unlinkSync } from "fs";
@@ -1040,8 +1100,8 @@ var allSubagents = (session) => Object.values(session.agents).filter((agent) => 
 var subagentsOf = (session, stage) => allSubagents(session).filter((agent) => agent.stage === stage);
 var implementOf = (agent) => {
   const { toolCalls, verifyRounds } = agent.budget;
-  const commands = VERIFY_KINDS.reduce((sum, kind) => sum + verifyRounds.commands[kind], 0);
-  const failed = VERIFY_KINDS.reduce((sum, kind) => sum + verifyRounds.results[kind].filter((result) => result === "fail").length, 0);
+  const commands = VERIFY_KINDS.reduce((sum2, kind) => sum2 + verifyRounds.commands[kind], 0);
+  const failed = VERIFY_KINDS.reduce((sum2, kind) => sum2 + verifyRounds.results[kind].filter((result) => result === "fail").length, 0);
   const callLimit = toolCalls.limit > 0 ? toolCalls.limit : null;
   return { role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, callLimit, commands, failed };
 };
@@ -1056,8 +1116,19 @@ var metricsBranchOf = (branch) => branch.includes(":") ? "?" : branch;
 var rowOf = (row) => {
   const rounds = row.reviewers.map((reviewer) => reviewer.round);
   const reviewRound = rounds.length > 0 ? Math.max(...rounds) : null;
-  const streamRuns = row.streams.filter((stream) => stream.runs.length > 0).map((stream) => stream.runs.length);
-  return { branch: branchOf(row), owner: row.owner, prNumber: row.pr?.pr?.number ?? null, reviewRound, streamRuns };
+  const streamRuns2 = row.streams.filter((stream) => stream.runs.length > 0).map((stream) => stream.runs.length);
+  const pr = row.pr?.pr;
+  return {
+    branch: branchOf(row),
+    owner: row.owner,
+    prNumber: pr?.number ?? null,
+    reviewRound,
+    streamRuns: streamRuns2,
+    firstWorkAt: row.firstWorkAt,
+    prOpenedAt: pr?.createdAt ?? null,
+    additions: pr?.additions ?? null,
+    deletions: pr?.deletions ?? null
+  };
 };
 var sameCall = (head, question) => question.origin === "ask-tool" && head.origin === "ask-tool" && question.id.startsWith(`${head.id}-`) && question.createdAt === head.createdAt && question.source.agentId === head.source.agentId;
 var questionsOf = (session) => {
@@ -1083,10 +1154,10 @@ var sessionAggregate = (session) => {
   const limit = main?.budget.context.limit;
   const contextLimit = limit !== void 0 && limit > 0 ? limit : null;
   const toolCalls = main?.budget.toolCalls.used ?? 0;
-  const { waits, totalMs, breaks } = session.developerWait;
+  const { waits: waits2, totalMs, breaks } = session.developerWait;
   const metrics = sessionMetrics(session);
   const branches = metrics.branches.map((entry) => ({ ...entry, branch: metricsBranchOf(entry.branch) }));
-  const { count, expired, cacheWriteUsd } = metrics.resumes;
+  const { count: count2, expired, cacheWriteUsd } = metrics.resumes;
   return {
     v: 1,
     id: session.id,
@@ -1097,26 +1168,18 @@ var sessionAggregate = (session) => {
     endedAt,
     finishedAt,
     work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
-    metrics: { ...metrics, branches, resumes: { count, expired, cacheWriteUsd } },
+    metrics: { ...metrics, branches, resumes: { count: count2, expired, cacheWriteUsd } },
     main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit },
     builds: subagentsOf(session, "implement").map(implementOf),
     reviews: subagentsOf(session, "review").map(reviewOf),
     agents: allSubagents(session).map(agentOf),
     rows: session.rows.map(rowOf),
     questions: questionsOf(session),
-    developerWait: { waits, totalMs, breaks }
+    developerWait: { waits: waits2, totalMs, breaks }
   };
 };
 
-// src/spool/aggregates.ts
-var AGGREGATES_FILE = "aggregates.ndjson";
-var MAX_AGGREGATES_BYTES = 64 * 1024 * 1024;
-var NEWLINE = 10;
-var CHUNK_BYTES = 1024 * 1024;
-var TEMP_FILE = /^aggregates\.ndjson(?:\.(\d+))?\.tmp$/;
-var LEFT_OVER_TEMP_MS = 10 * 60 * 1e3;
-var MAX_LINE_BYTES = 4 * 1024 * 1024;
-var OVERLONG_LINE = "(a line over 4 MiB)";
+// src/spool/aggregate-parse.ts
 var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isString = (value) => typeof value === "string";
 var isDate = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
@@ -1134,7 +1197,6 @@ var OPTIONAL_FIELDS = [
   ["questions", Array.isArray],
   ["agents", Array.isArray]
 ];
-var lineCount = (count) => count === 1 ? "1 line" : `${count} lines`;
 var completeLines = (text) => text.split("\n").slice(0, -1).filter((line) => line.trim() !== "");
 var parseObject = (line) => {
   try {
@@ -1177,6 +1239,852 @@ var parseAggregates = (text) => {
   }
   return { aggregates: [...newest.values()], skipped, repaired };
 };
+
+// src/ui/format.ts
+var cost = (usd) => `$${(Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)}`;
+var tokens = (count2) => {
+  const value = Number.isFinite(count2) ? Math.max(0, count2) : 0;
+  if (value >= 999500) {
+    return `${Number((value / 1e6).toFixed(2))}M`;
+  }
+  if (value >= 99950) {
+    return `${Math.round(value / 1e3)}k`;
+  }
+  if (value >= 999.5) {
+    return `${(value / 1e3).toFixed(1)}k`;
+  }
+  return String(Math.round(value));
+};
+var duration = (ms) => {
+  const seconds = Math.round(Math.max(0, ms) / 1e3);
+  if (seconds < 60) {
+    return `${seconds} s`;
+  }
+  const tenthMinutes = Math.round(seconds / 6);
+  if (tenthMinutes < 100) {
+    return `${(tenthMinutes / 10).toFixed(1)} min`;
+  }
+  const minutes = Math.round(seconds / 60);
+  return minutes < 120 ? `${minutes} min` : `${(Math.round(seconds / 360) / 10).toFixed(1)} h`;
+};
+var plural = (count2, noun) => `${count2} ${noun}${count2 === 1 ? "" : "s"}`;
+
+// src/insights/insights.ts
+var AREAS = ["delivery", "implementers", "review", "verification", "tokens", "questions"];
+var AREA_NAMES = {
+  delivery: "Delivery",
+  implementers: "Implementers",
+  review: "Review",
+  verification: "Verification",
+  tokens: "Token economy",
+  questions: "Questions and waits"
+};
+var SIGNAL_NAMES = {
+  "cost-per-pr": "cost per PR",
+  "time-to-pr": "time to PR",
+  "cost-per-100-lines": "cost per 100 changed lines",
+  "budget-first-stop": "budget at the first stop",
+  "second-implementer": "second implement runs",
+  "second-round": "second review rounds",
+  "fix-followups": "fix follow-ups",
+  "quiet-reviewer": "quiet review roles",
+  "verify-commands": "verification commands",
+  "failed-runs": "failed runs",
+  "cache-per-output": "cache read per output token",
+  "main-peak-context": "main-thread peak context",
+  "main-cost-share": "main-thread cost share",
+  "overhead-share": "Nurselog overhead share",
+  "main-large-outputs": "main-thread large outputs",
+  "question-open-time": "question open time",
+  "questions-per-session": "questions per session",
+  "developer-wait": "developer wait"
+};
+var FACTOR = 1.5;
+var BUDGET_RUNS = 5;
+var QUIET_RUNS = 10;
+var GUIDELINE_SESSIONS = 3;
+var SPREAD_VALUES = 3;
+var MAIN_ROLE = "main";
+var MAX_SESSION_ID2 = 256;
+var MAX_SHOWN_TEXT = 200;
+var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+var plainText = (text) => text.replace(CONTROL, "");
+var NO_IMPLEMENT_RUNS = "no subagent of an implement-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
+var NO_BUDGET = "no tool-call budget is set for the roles of the implement runs (budgets.roles.<role>.toolCalls)";
+var NO_FIRST_STOP = "no implement run with a tool-call budget stopped";
+var NO_STREAM = "no implement run was on a stream";
+var NO_REVIEWS = "no subagent of a review-stage role ran (roles.<role>.stage)";
+var NO_ROUND = "no review-stage role reviewed a branch";
+var NO_BLOCK = "no review-stage agent wrote a report block";
+var NO_COMMAND = "no command matched verification.kinds";
+var NO_REQUESTS = "no requests were recorded (usage facts come from the transcripts)";
+var NO_LIMIT = "no context limit is known for the main thread's model (budgets.contextLimits)";
+var NO_OVERHEAD = "no session recorded the Nurselog overhead (its hook or board predates the count)";
+var NOT_STORED = "the session aggregates lack it (an older board wrote them)";
+var NO_PR = "no work session opened a PR (PRs come from the gh poll of github.repo)";
+var NO_PR_AFTER_WORK = "no PR was opened after the session's first work on its branch";
+var NO_PR_SIZE = "no PR size is known (the gh poll of github.repo reads it)";
+var NO_CHANGED_LINE = "the PRs changed no line";
+var PR = ["PR", "PRs"];
+var LINE = ["line", "lines"];
+var IMPLEMENT_RUN = ["implement run", "implement runs"];
+var STREAM = ["stream", "streams"];
+var BRANCH = ["branch", "branches"];
+var RUN = ["run", "runs"];
+var SESSION = ["session", "sessions"];
+var WORK_SESSION = ["work session", "work sessions"];
+var ANSWERED = ["answered question", "answered questions"];
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var fieldsOf = (value) => isRecord(value) ? value : {};
+var entriesOf = (value) => Array.isArray(value) ? value.filter(isRecord) : void 0;
+var numberOf = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+var timeOf2 = (value) => typeof value === "string" ? time(value) : Number.NaN;
+var isNumber = (value) => value !== null;
+var lineCountOf = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+var implementRun = (entry) => ({
+  callsAtFirstStop: numberOf(entry.callsAtFirstStop),
+  callLimit: numberOf(entry.callLimit),
+  commands: numberOf(entry.commands),
+  failed: numberOf(entry.failed)
+});
+var reviewRuns = (entries, session) => {
+  const runs = [];
+  entries.forEach((entry, index) => {
+    if (typeof entry.role === "string") {
+      const start = timeOf2(entry.startedAt);
+      runs.push({ role: plainText(entry.role), session, start: Number.isFinite(start) ? start : 0, index, fixItems: numberOf(entry.fixItems), usd: numberOf(entry.usd) });
+    }
+  });
+  return runs;
+};
+var rowNumbers = (entry) => {
+  const streamRuns2 = Array.isArray(entry.streamRuns) ? entry.streamRuns.map(numberOf).filter(isNumber) : [];
+  return {
+    owned: entry.owner === true,
+    ownerKnown: typeof entry.owner === "boolean",
+    reviewRound: numberOf(entry.reviewRound),
+    streamRuns: streamRuns2,
+    prNumber: numberOf(entry.prNumber),
+    firstWork: timeOf2(entry.firstWorkAt),
+    prOpened: timeOf2(entry.prOpenedAt),
+    additions: lineCountOf(entry.additions),
+    deletions: lineCountOf(entry.deletions)
+  };
+};
+var roleNumbers = (entries) => entries.flatMap((entry) => {
+  if (typeof entry.role !== "string") {
+    return [];
+  }
+  const role = plainText(entry.role);
+  return [{ role, runs: numberOf(entry.runs), cacheRead: numberOf(entry.cacheRead), output: numberOf(entry.output), peakContext: numberOf(entry.peakContext), usd: numberOf(entry.usd) }];
+});
+var openTime = (entry) => {
+  const asked = timeOf2(entry.askedAt);
+  const answered = timeOf2(entry.answeredAt);
+  return Number.isFinite(asked) && Number.isFinite(answered) ? Math.max(0, answered - asked) : null;
+};
+var shownText = (value) => {
+  if (typeof value !== "string") {
+    return void 0;
+  }
+  const text = plainText(value);
+  return text !== "" && text.length <= MAX_SHOWN_TEXT ? text : void 0;
+};
+var readSession = (aggregate, finished) => {
+  const main = fieldsOf(aggregate.main);
+  const metrics = fieldsOf(aggregate.metrics);
+  const roles = entriesOf(metrics.roles);
+  const reviews = entriesOf(aggregate.reviews);
+  return {
+    id: aggregate.id,
+    key: shownText(aggregate.key),
+    title: shownText(aggregate.title),
+    finished,
+    builds: entriesOf(aggregate.builds)?.map(implementRun),
+    reviews: reviews === void 0 ? void 0 : reviewRuns(reviews, aggregate.id),
+    rows: entriesOf(aggregate.rows)?.map(rowNumbers),
+    roles: roles === void 0 ? void 0 : roleNumbers(roles),
+    totalUsd: numberOf(fieldsOf(metrics.total).usd),
+    overheadUsd: numberOf(fieldsOf(metrics.overhead).usd),
+    largeOutputs: numberOf(main.largeOutputs),
+    contextLimit: numberOf(main.contextLimit),
+    questions: entriesOf(aggregate.questions)?.map(openTime),
+    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs)
+  };
+};
+var pad = (value) => String(value).padStart(2, "0");
+var localDay2 = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+var sum = (values) => values.reduce((total, value) => total + value, 0);
+var median = (values) => percentile(values, 50);
+var count = (value, noun) => `${value} ${value === 1 ? noun[0] : noun[1]}`;
+var groupedCount = (value, noun) => `${value.toLocaleString("en-US")} ${value === 1 ? noun[0] : noun[1]}`;
+var percent = (fraction) => Math.round(fraction * 100);
+var percentTenths = (fraction) => (fraction * 100).toFixed(1);
+var listText = (items) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+var noRuns = (reason) => ({ lacks: reason, runCheck: true });
+var onBaseline = (sides, of) => sides.comparable ? of(sides.baseline) : void 0;
+var kOfN = (units, hit) => ({ n: units.length, k: units.filter(hit).length });
+var valueOver = (n, value) => value === void 0 ? { n } : { n, value };
+var medianOf = (values) => valueOver(values.length, median(values));
+var rateFlag = (window, baseline) => {
+  if (baseline === void 0 || baseline.n === 0) {
+    return false;
+  }
+  const k = window.k ?? 0;
+  return k >= 2 && k * baseline.n >= FACTOR * (baseline.k ?? 0) * window.n;
+};
+var factorFlag = (window, baseline) => {
+  if (window.value === void 0 || baseline?.value === void 0) {
+    return false;
+  }
+  return window.value > 0 && window.value >= FACTOR * baseline.value;
+};
+var spreadFlag = (window, baseline) => {
+  const middle = median(window);
+  const high = baseline === void 0 ? void 0 : percentile(baseline, 75);
+  return window.length >= SPREAD_VALUES && middle !== void 0 && high !== void 0 && middle > high;
+};
+var comparison = (flagged) => flagged ? "comparison" : void 0;
+var guidelineOf = (limit, worse = "above") => limit === null ? void 0 : { limit, worse };
+var flagOf = (broken, compared) => broken ? "guideline" : comparison(compared);
+var aside = (comparedTo, phrase) => phrase === void 0 ? `(${comparedTo})` : `(${comparedTo}; guideline: ${phrase})`;
+var before = (sides, baseline, noun, text) => {
+  if (baseline === void 0) {
+    return `before: fewer than ${count(sides.minimum, WORK_SESSION)}`;
+  }
+  return baseline.n === 0 ? `before: no ${noun[1]}` : `before: ${text(baseline)}`;
+};
+var kOfNText = (evidence) => `${evidence.k ?? 0} of ${evidence.n}`;
+var rateLine = (sides, units, hit, noun, phrase) => {
+  const window = kOfN(units(sides.window), hit);
+  const baseline = onBaseline(sides, (sessions) => kOfN(units(sessions), hit));
+  const body = `${window.k ?? 0} of the last ${count(window.n, noun)} ${phrase} (${before(sides, baseline, noun, kOfNText)})`;
+  return { flag: comparison(rateFlag(window, baseline)), window, baseline, body };
+};
+var spreadSides = (sides, values) => {
+  const windowValues = values(sides.window);
+  const baselineValues = onBaseline(sides, values);
+  const baseline = baselineValues === void 0 ? void 0 : medianOf(baselineValues);
+  return { window: medianOf(windowValues), baseline, flag: comparison(spreadFlag(windowValues, baselineValues)) };
+};
+var rolesByRuns = (runs) => {
+  const counts = /* @__PURE__ */ new Map();
+  for (const run of runs) {
+    const added = run.runs === void 0 ? 1 : run.runs ?? 0;
+    counts.set(run.role, (counts.get(run.role) ?? 0) + added);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || compareText(a[0], b[0])).map(([role]) => role);
+};
+var ownedRows = (sessions) => sessions.flatMap((session) => (session.rows ?? []).filter((row) => row.owned));
+var prsOf = (session) => (session.rows ?? []).filter((row) => row.owned && row.prNumber !== null);
+var prsIn = (sessions) => sessions.flatMap(prsOf);
+var prOwnerLacks = (sessions) => {
+  const numbered = sessions.flatMap((session) => session.rows ?? []).filter((row) => row.prNumber !== null);
+  return numbered.length > 0 && numbered.every((row) => !row.ownerKnown);
+};
+var noPrOutcome = (sessions) => prOwnerLacks(sessions) ? { lacks: NOT_STORED } : noRuns(NO_PR);
+var costed = (sessions) => sessions.filter((session) => session.totalUsd !== null);
+var costOf = (sessions) => sum(sessions.map((session) => session.totalUsd ?? 0));
+var prNumbers = (sessions) => new Set(prsIn(sessions).map((row) => row.prNumber));
+var prCost = (sessions) => {
+  const priced = costed(sessions);
+  const prs = prNumbers(priced).size;
+  return valueOver(prs, prs === 0 ? void 0 : costOf(priced) / prs);
+};
+var costPerPr = (sides) => {
+  if (prsIn(sides.window).length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  const window = prCost(sides.window);
+  if (window.n === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const baseline = onBaseline(sides, prCost);
+  const priced = costed(sides.window);
+  const comparedTo = before(sides, baseline, PR, (evidence) => cost(evidence.value ?? 0));
+  const spent = `the last ${count(priced.length, WORK_SESSION)} cost ${cost(costOf(priced))} for ${count(window.n, PR)}`;
+  const body = `${spent}, ${cost(window.value ?? 0)} per PR (${comparedTo})`;
+  return { lines: [{ flag: comparison(factorFlag(window, baseline)), window, baseline, body }] };
+};
+var isTimed = (row) => Number.isFinite(row.firstWork) && Number.isFinite(row.prOpened);
+var openedAfterWork = (row) => isTimed(row) && row.prOpened >= row.firstWork;
+var prTimes = (sessions) => {
+  const oldest = /* @__PURE__ */ new Map();
+  for (const row of prsIn(sessions).filter(openedAfterWork)) {
+    oldest.set(row.prNumber, row);
+  }
+  return [...oldest.values()].map((row) => row.prOpened - row.firstWork);
+};
+var timeToPr = (sides) => {
+  const prs = prsIn(sides.window);
+  if (prs.length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  if (prTimes(sides.window).length === 0) {
+    return { lacks: prs.some(isTimed) ? NO_PR_AFTER_WORK : NOT_STORED };
+  }
+  const { window, baseline, flag } = spreadSides(sides, prTimes);
+  const comparedTo = before(sides, baseline, PR, (evidence) => duration(evidence.value ?? 0));
+  const body = `a PR opened a median of ${duration(window.value ?? 0)} after the first work on its branch, over ${count(window.n, PR)} (${comparedTo})`;
+  return { lines: [{ flag, window, baseline, body }] };
+};
+var changedLines = (row) => row.additions === null || row.deletions === null ? null : row.additions + row.deletions;
+var prSizes = (sessions) => {
+  const sizes = /* @__PURE__ */ new Map();
+  for (const row of prsIn(sessions)) {
+    if (!sizes.has(row.prNumber)) {
+      sizes.set(row.prNumber, changedLines(row));
+    }
+  }
+  return sizes;
+};
+var sizedPrs = (sessions) => {
+  const priced = costed(sessions);
+  const sizes = prSizes(priced);
+  const sized = priced.filter((session) => prsOf(session).every((row) => typeof sizes.get(row.prNumber) === "number"));
+  const numbers = [...prNumbers(sized)];
+  return { prs: numbers.length, lines: sum(numbers.map((number) => sizes.get(number) ?? 0)), usd: costOf(sized) };
+};
+var linesCost = (sessions) => {
+  const { prs, lines, usd } = sizedPrs(sessions);
+  return valueOver(prs, lines > 0 ? 100 * usd / lines : void 0);
+};
+var costPer100Lines = (sides) => {
+  if (prsIn(sides.window).length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  if (prsIn(costed(sides.window)).length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const sized = sizedPrs(sides.window);
+  if (sized.prs === 0) {
+    return { lacks: NO_PR_SIZE };
+  }
+  if (sized.lines === 0) {
+    return { lacks: NO_CHANGED_LINE };
+  }
+  const window = linesCost(sides.window);
+  const baseline = onBaseline(sides, linesCost);
+  const comparedTo = before(sides, baseline, PR, (evidence) => evidence.value === void 0 ? "no changed lines" : cost(evidence.value));
+  const body = `100 changed lines cost ${cost(window.value ?? 0)}, over ${count(window.n, PR)} of ${groupedCount(sized.lines, LINE)} (${comparedTo})`;
+  return { lines: [{ flag: comparison(factorFlag(window, baseline)), window, baseline, body }] };
+};
+var buildsOf = (sessions) => sessions.flatMap((session) => session.builds ?? []);
+var budgetRuns = (sessions) => {
+  const runs = [];
+  for (const run of buildsOf(sessions)) {
+    if (run.callsAtFirstStop !== null && run.callLimit !== null && run.callLimit > 0) {
+      runs.push({ calls: run.callsAtFirstStop, limit: run.callLimit });
+    }
+  }
+  return runs;
+};
+var atBudget = (run) => run.calls >= run.limit;
+var budgetFirstStop = (sides) => {
+  const builds = buildsOf(sides.window);
+  const window = kOfN(budgetRuns(sides.window), atBudget);
+  if (builds.length === 0) {
+    return noRuns(NO_IMPLEMENT_RUNS);
+  }
+  if (window.n === 0) {
+    const limited = builds.some((run) => run.callLimit !== null && run.callLimit > 0);
+    return { lacks: limited ? NO_FIRST_STOP : NO_BUDGET };
+  }
+  const baseline = onBaseline(sides, (sessions) => kOfN(budgetRuns(sessions), atBudget));
+  const k = window.k ?? 0;
+  const floored = Math.floor(k * 100 / window.n);
+  const guideline = guidelineOf(sides.guidelines.budgetFirstStop);
+  const broken = guideline !== void 0 && window.n >= BUDGET_RUNS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, kOfNText);
+  const share = `${floored}%; ${comparedTo}`;
+  const body = `${k} of the last ${count(window.n, IMPLEMENT_RUN)} reached their tool-call budget by their first stop ${aside(share, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
+};
+var streamRuns = (sessions) => ownedRows(sessions).flatMap((row) => row.streamRuns);
+var ownerLacks = (sessions) => {
+  const rows = sessions.flatMap((session) => session.rows ?? []);
+  return rows.length > 0 && rows.every((row) => !row.ownerKnown);
+};
+var secondImplementer = (sides) => {
+  if (streamRuns(sides.window).length === 0) {
+    if (buildsOf(sides.window).length === 0) {
+      return noRuns(NO_IMPLEMENT_RUNS);
+    }
+    return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_STREAM };
+  }
+  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second implement run")] };
+};
+var reviewsOf = (sessions) => sessions.flatMap((session) => session.reviews ?? []);
+var blockRuns = (sessions) => reviewsOf(sessions).filter((run) => run.fixItems !== null);
+var reviewRounds = (sessions) => ownedRows(sessions).map((row) => row.reviewRound).filter(isNumber);
+var secondRound = (sides) => {
+  if (reviewRounds(sides.window).length === 0) {
+    if (reviewsOf(sides.window).length === 0) {
+      return noRuns(NO_REVIEWS);
+    }
+    return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_ROUND };
+  }
+  return { lines: [rateLine(sides, reviewRounds, (round) => round >= 2, BRANCH, "ran a second review round")] };
+};
+var blockLacks = (sides) => {
+  if (blockRuns(sides.window).length > 0) {
+    return void 0;
+  }
+  return reviewsOf(sides.window).length === 0 ? noRuns(NO_REVIEWS) : { lacks: NO_BLOCK };
+};
+var perRunText = (evidence) => `${(evidence.value ?? 0).toFixed(1)} over ${evidence.n}`;
+var fixFollowups = (sides) => {
+  const lacks = blockLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  const lines = rolesByRuns(blockRuns(sides.window)).map((role) => {
+    const of = (sessions) => {
+      const runs = blockRuns(sessions).filter((run) => run.role === role);
+      return valueOver(runs.length, runs.length === 0 ? void 0 : sum(runs.map((run) => run.fixItems ?? 0)) / runs.length);
+    };
+    const window = of(sides.window);
+    const baseline = onBaseline(sides, of);
+    const comparedTo = before(sides, baseline, RUN, perRunText);
+    const body = `${role} reported ${(window.value ?? 0).toFixed(1)} fix follow-ups per run over ${count(window.n, RUN)} (${comparedTo})`;
+    return { role, window, baseline, body };
+  });
+  return { lines };
+};
+var newestRuns = (sessions) => reviewsOf(sessions).sort((a, b) => b.start - a.start || b.index - a.index);
+var quietRuns = (newest, role) => newest.filter((run) => run.role === role && run.fixItems !== null);
+var quietSeries = (newest) => {
+  const points = newest.map((run, index) => ({ session: run.session, value: run.fixItems, k: (run.fixItems ?? 0) >= 1 ? 1 : 0, n: 1, window: index < QUIET_RUNS }));
+  return points.reverse();
+};
+var quietLeast = (limit) => {
+  let least = 0;
+  while (least < QUIET_RUNS && least / QUIET_RUNS < limit) {
+    least += 1;
+  }
+  return least;
+};
+var quietReviewer = (sides) => {
+  const guideline = guidelineOf(sides.guidelines.quietReviewer, "below");
+  if (guideline === void 0) {
+    return { lines: [] };
+  }
+  const lacks = blockLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  const newest = newestRuns([...sides.window, ...sides.baseline]);
+  const phrase = `at least ${quietLeast(guideline.limit)} of ${QUIET_RUNS}`;
+  const lines = [];
+  for (const role of rolesByRuns(reviewsOf(sides.window))) {
+    const runs = quietRuns(newest, role);
+    const last = runs.slice(0, QUIET_RUNS);
+    const k = last.filter((run) => (run.fixItems ?? 0) >= 1).length;
+    if (last.length === QUIET_RUNS && k / QUIET_RUNS < guideline.limit) {
+      const usd = sum(last.map((run) => run.usd ?? 0));
+      const body = `${role} had a fix follow-up in ${k} of its last ${QUIET_RUNS} runs, which cost ${cost(usd)} (guideline: ${phrase})`;
+      lines.push({ role, flag: "guideline", window: { n: last.length, k, value: usd }, guideline, series: quietSeries(runs), body });
+    }
+  }
+  return { lines };
+};
+var commandCounts = (sessions) => buildsOf(sessions).map((run) => run.commands).filter(isNumber);
+var verifiedRuns = (sessions) => buildsOf(sessions).filter((run) => run.commands !== null && run.commands > 0);
+var commandLacks = (sides) => {
+  if (verifiedRuns(sides.window).length > 0) {
+    return void 0;
+  }
+  return buildsOf(sides.window).length === 0 ? noRuns(NO_IMPLEMENT_RUNS) : { lacks: NO_COMMAND };
+};
+var verifyCommands = (sides) => {
+  const lacks = commandLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  const window = medianOf(commandCounts(sides.window));
+  const baseline = onBaseline(sides, (sessions) => medianOf(commandCounts(sessions)));
+  const commands = count(window.value ?? 0, ["verification command", "verification commands"]);
+  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, (evidence) => String(evidence.value ?? 0));
+  const body = `implement runs ran a median of ${commands} over ${count(window.n, RUN)} (${comparedTo})`;
+  return { lines: [{ window, baseline, body }] };
+};
+var failedUnits = (sessions) => verifiedRuns(sessions).filter((run) => run.failed !== null);
+var failedRuns = (sides) => {
+  const lacks = commandLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  if (failedUnits(sides.window).length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENT_RUN, "had a failed full-package command")] };
+};
+var outputRoles = (sessions, role) => {
+  const entries = sessions.flatMap((session) => session.roles ?? []);
+  return entries.filter((entry) => entry.output !== null && entry.output > 0 && (role === void 0 || entry.role === role));
+};
+var cacheEntries = (sessions, role) => {
+  const entries = [];
+  for (const entry of outputRoles(sessions, role)) {
+    if (entry.cacheRead !== null && entry.output !== null) {
+      entries.push({ role: entry.role, runs: entry.runs, cacheRead: entry.cacheRead, output: entry.output });
+    }
+  }
+  return entries;
+};
+var cachePerOutput = (sides) => {
+  const entries = cacheEntries(sides.window);
+  if (entries.length === 0) {
+    return { lacks: outputRoles(sides.window).length === 0 ? NO_REQUESTS : NOT_STORED };
+  }
+  const ranked = rolesByRuns(entries);
+  const limits = sides.guidelines.cachePerOutput;
+  const roles = [...ranked.filter((role) => role === MAIN_ROLE), ...ranked.filter((role) => role !== MAIN_ROLE)];
+  const lines = roles.map((role) => {
+    const of = (sessions) => {
+      const found = cacheEntries(sessions, role);
+      return valueOver(found.length, found.length === 0 ? void 0 : sum(found.map((entry) => entry.cacheRead)) / sum(found.map((entry) => entry.output)));
+    };
+    const window = of(sides.window);
+    const baseline = onBaseline(sides, of);
+    const perOutput = Math.round(window.value ?? 0);
+    const guideline = guidelineOf(role === MAIN_ROLE ? limits.main : limits.agents);
+    const broken = guideline !== void 0 && window.n >= GUIDELINE_SESSIONS && perOutput > Math.round(guideline.limit);
+    const phrase = guideline === void 0 ? void 0 : `at most ${Math.round(guideline.limit)}`;
+    const cached = count(perOutput, ["cached token", "cached tokens"]);
+    const comparedTo = before(sides, baseline, SESSION, (evidence) => String(Math.round(evidence.value ?? 0)));
+    const body = `${role} read ${cached} per output token ${aside(comparedTo, phrase)}`;
+    return { role, flag: flagOf(broken, factorFlag(window, baseline)), window, baseline, guideline, body };
+  });
+  return { lines };
+};
+var mainPeaks = (sessions) => {
+  const peaks = [];
+  for (const session of sessions) {
+    const peak = session.roles?.find((entry) => entry.role === MAIN_ROLE)?.peakContext ?? null;
+    if (peak !== null && session.contextLimit !== null && session.contextLimit > 0) {
+      peaks.push({ peak, limit: session.contextLimit });
+    }
+  }
+  return peaks;
+};
+var overShare = (peaks, share) => peaks.filter((entry) => entry.peak > entry.limit * share).length;
+var mainPeakContext = (sides) => {
+  const peaks = mainPeaks(sides.window);
+  if (peaks.length === 0) {
+    return { lacks: outputRoles(sides.window, MAIN_ROLE).length === 0 ? NO_REQUESTS : NO_LIMIT };
+  }
+  const guideline = guidelineOf(sides.guidelines.mainPeakContext);
+  const share = guideline?.limit ?? 0.5;
+  const spread = spreadSides(sides, (sessions) => mainPeaks(sessions).map((entry) => entry.peak));
+  const window = { ...spread.window, k: overShare(peaks, share) };
+  const baseline = spread.baseline === void 0 ? void 0 : { ...spread.baseline, k: overShare(mainPeaks(sides.baseline), share) };
+  const ratio = median(peaks.map((entry) => entry.peak / entry.limit));
+  const broken = guideline !== void 0 && peaks.length >= GUIDELINE_SESSIONS && ratio !== void 0 && percent(ratio) > percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `at most ${percent(guideline.limit)}% of the context limit`;
+  const limitText = guideline === void 0 ? "half" : `${percent(guideline.limit)}% of`;
+  const over = `${window.k} of ${count(window.n, SESSION)} over ${limitText} the model's context limit`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => tokens(evidence.value ?? 0));
+  const body = `the main thread's peak context had a median of ${tokens(window.value ?? 0)} per session, ${over} ${aside(comparedTo, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, spread.flag !== void 0), window, baseline, guideline, body }] };
+};
+var mainShares = (sessions) => {
+  const shares = [];
+  for (const session of sessions) {
+    const usd = session.roles?.find((entry) => entry.role === MAIN_ROLE)?.usd ?? null;
+    if (usd !== null && session.totalUsd !== null && session.totalUsd > 0) {
+      shares.push(usd / session.totalUsd);
+    }
+  }
+  return shares;
+};
+var mainCostShare = (sides) => {
+  if (mainShares(sides.window).length === 0) {
+    return { lacks: NO_REQUESTS };
+  }
+  const { window, baseline, flag } = spreadSides(sides, mainShares);
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percent(evidence.value ?? 0)}%`);
+  const body = `the main thread took a median of ${percent(window.value ?? 0)}% of a session's cost (${comparedTo})`;
+  return { lines: [{ flag, window, baseline, body }] };
+};
+var overheadShares = (sessions) => {
+  const shares = [];
+  for (const session of sessions) {
+    if (session.overheadUsd !== null && session.totalUsd !== null && session.totalUsd > 0) {
+      shares.push(session.overheadUsd / session.totalUsd);
+    }
+  }
+  return shares;
+};
+var meanOf = (values) => valueOver(values.length, values.length === 0 ? void 0 : sum(values) / values.length);
+var overheadShare = (sides) => {
+  const shares = overheadShares(sides.window);
+  if (shares.length === 0) {
+    return { lacks: NO_OVERHEAD };
+  }
+  const window = meanOf(shares);
+  const baseline = onBaseline(sides, (sessions) => meanOf(overheadShares(sessions)));
+  const guideline = guidelineOf(sides.guidelines.overheadShare);
+  const broken = guideline !== void 0 && Number(percentTenths(window.value ?? 0)) > Number(percentTenths(guideline.limit));
+  const phrase = guideline === void 0 ? void 0 : `at most ${percentTenths(guideline.limit)}%`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percentTenths(evidence.value ?? 0)}%`);
+  const took = `took a mean of ${percentTenths(window.value ?? 0)}% of a session's cost, at most ${percentTenths(Math.max(...shares))}%`;
+  return { lines: [{ flag: flagOf(broken, false), window, baseline, guideline, body: `the Nurselog overhead ${took} ${aside(comparedTo, phrase)}` }] };
+};
+var largeOutputs = (sessions) => sessions.map((session) => session.largeOutputs).filter(isNumber);
+var mainLargeOutputs = (sides) => {
+  const counts = largeOutputs(sides.window);
+  if (counts.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window, baseline, flag } = spreadSides(sides, largeOutputs);
+  const guideline = guidelineOf(sides.guidelines.mainLargeOutputs);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_SESSIONS && (window.value ?? 0) > guideline.limit;
+  const phrase = guideline === void 0 ? void 0 : `at most ${guideline.limit} per session`;
+  const read = `read ${count(sum(counts), ["response", "responses"])} over 20,000 characters in the last ${count(window.n, SESSION)}`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
+  const body = `the main thread ${read}, a median of ${window.value ?? 0} per session ${aside(comparedTo, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
+};
+var listed = (sessions) => sessions.flatMap((session) => session.questions === void 0 ? [] : [session.questions]);
+var openTimes = (sessions) => listed(sessions).flatMap((questions) => questions.filter(isNumber));
+var questionOpenTime = (sides) => {
+  const lists = listed(sides.window);
+  if (lists.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window, baseline, flag } = spreadSides(sides, openTimes);
+  const comparedTo = before(sides, baseline, ANSWERED, (evidence) => duration(evidence.value ?? 0));
+  if (window.n === 0) {
+    return { lines: [{ window, baseline, body: `no question of the developer was answered in the last ${count(lists.length, SESSION)} (${comparedTo})` }] };
+  }
+  const body = `the developer's questions were open a median of ${duration(window.value ?? 0)} over ${count(window.n, ANSWERED)} (${comparedTo})`;
+  return { lines: [{ flag, window, baseline, body }] };
+};
+var questionCounts = (sessions) => listed(sessions).map((questions) => questions.length);
+var questionsPerSession = (sides) => {
+  if (listed(sides.window).length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const window = medianOf(questionCounts(sides.window));
+  const baseline = onBaseline(sides, (sessions) => medianOf(questionCounts(sessions)));
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
+  const body = `a median of ${count(window.value ?? 0, ["question", "questions"])} per session (${comparedTo})`;
+  return { lines: [{ window, baseline, body }] };
+};
+var waits = (sessions) => sessions.map((session) => session.waitMs).filter(isNumber);
+var developerWait = (sides) => {
+  const totals = waits(sides.window);
+  if (totals.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window, baseline, flag } = spreadSides(sides, waits);
+  const waited = `waited ${duration(sum(totals))} in the last ${count(window.n, SESSION)}`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => duration(evidence.value ?? 0));
+  const body = `the developer ${waited}, a median of ${duration(window.value ?? 0)} per session (${comparedTo})`;
+  return { lines: [{ flag, window, baseline, body }] };
+};
+var SIGNALS = [
+  { id: "cost-per-pr", area: "delivery", of: costPerPr },
+  { id: "time-to-pr", area: "delivery", of: timeToPr },
+  { id: "cost-per-100-lines", area: "delivery", of: costPer100Lines },
+  { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
+  { id: "second-implementer", area: "implementers", of: secondImplementer },
+  { id: "second-round", area: "review", of: secondRound },
+  { id: "fix-followups", area: "review", of: fixFollowups },
+  // A guideline-only signal: a null limit gives it no line, a not-measured one included.
+  { id: "quiet-reviewer", area: "review", of: quietReviewer, off: (guidelines) => guidelines.quietReviewer === null },
+  { id: "verify-commands", area: "verification", of: verifyCommands },
+  { id: "failed-runs", area: "verification", of: failedRuns },
+  { id: "cache-per-output", area: "tokens", of: cachePerOutput },
+  { id: "main-peak-context", area: "tokens", of: mainPeakContext },
+  { id: "main-cost-share", area: "tokens", of: mainCostShare },
+  { id: "overhead-share", area: "tokens", of: overheadShare },
+  { id: "main-large-outputs", area: "tokens", of: mainLargeOutputs },
+  { id: "question-open-time", area: "questions", of: questionOpenTime },
+  { id: "questions-per-session", area: "questions", of: questionsPerSession },
+  { id: "developer-wait", area: "questions", of: developerWait }
+];
+var outcomesAlone = (signal, read, sides) => {
+  return read.map((entry) => signal.of({ window: [entry.session], baseline: [], comparable: false, minimum: sides.minimum, guidelines: sides.guidelines }));
+};
+var pointOf = (entry, outcome, role) => {
+  const session = entry.session.id;
+  const evidence = "lines" in outcome ? outcome.lines.find((line) => line.role === role)?.window : void 0;
+  if (evidence === void 0) {
+    return { session, value: null, window: entry.window };
+  }
+  const share = evidence.k !== void 0 && evidence.n > 0 ? evidence.k / evidence.n : null;
+  return { session, value: evidence.value ?? share, ...evidence.k === void 0 ? {} : { k: evidence.k }, n: evidence.n, window: entry.window };
+};
+var signalLine = (area, signal, line, series) => ({
+  area,
+  signal,
+  ...line.role === void 0 ? {} : { role: line.role },
+  ...line.flag === void 0 ? {} : { flag: line.flag },
+  ...line.window === void 0 ? {} : { window: line.window },
+  ...line.baseline === void 0 ? {} : { baseline: line.baseline },
+  ...line.guideline === void 0 ? {} : { guideline: line.guideline },
+  series,
+  text: `${AREA_NAMES[area]}: ${line.body}.`
+});
+var notMeasuredOf = (area, lacks, every, sessions) => {
+  const signals = lacks.map((lack) => lack.signal);
+  const reasons = [...new Set(lacks.map((lack) => lack.reason))];
+  const span = `in the last ${count(sessions, WORK_SESSION)}`;
+  let text = `${AREA_NAMES[area]}: not measured: ${reasons[0]} ${span}.`;
+  if (!every || reasons.length > 1) {
+    const parts = reasons.map((reason) => {
+      const names = lacks.filter((lack) => lack.reason === reason).map((lack) => SIGNAL_NAMES[lack.signal]);
+      return `${listText(names)} not measured: ${reason}`;
+    });
+    text = `${AREA_NAMES[area]}: ${parts.join("; ")} ${span}.`;
+  }
+  const unused = every && lacks.every((lack) => lack.runCheck);
+  const notMeasured = { signals, reason: reasons.join("; "), ...unused ? { unused: true } : {} };
+  return { area, signal: signals[0], notMeasured, series: [], text };
+};
+var reportLines = (sides, read) => {
+  const flagged = [];
+  const others = [];
+  for (const area of AREAS) {
+    const signals = SIGNALS.filter((signal) => signal.area === area && signal.off?.(sides.guidelines) !== true);
+    const lacks = [];
+    for (const signal of signals) {
+      const outcome = signal.of(sides);
+      if ("lacks" in outcome) {
+        lacks.push({ signal: signal.id, reason: outcome.lacks, runCheck: outcome.runCheck === true });
+        continue;
+      }
+      const alone = outcome.lines.every((line) => line.series !== void 0) ? [] : outcomesAlone(signal, read, sides);
+      for (const line of outcome.lines) {
+        const series = line.series ?? read.map((entry, index) => pointOf(entry, alone[index], line.role));
+        const insight = signalLine(area, signal.id, line, series);
+        (insight.flag === void 0 ? others : flagged).push(insight);
+      }
+    }
+    if (lacks.length > 0) {
+      others.push(notMeasuredOf(area, lacks, lacks.length === signals.length, sides.window.length));
+    }
+  }
+  return [...flagged, ...others];
+};
+var reportSessionId = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID2 && plainText(id) === id;
+var selectSessions = (aggregates, options, now) => {
+  const at = time(now);
+  const today = new Date(at);
+  const oldest = localDay2(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
+  const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay2(new Date(finished)) >= oldest;
+  const selected = aggregates.filter((aggregate) => aggregate.work === true && reportSessionId(aggregate.id)).map((aggregate) => ({ aggregate, finished: timeOf2(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
+  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished));
+};
+var reportSession = (session) => ({
+  id: session.id,
+  ...session.key === void 0 ? {} : { key: session.key },
+  ...session.title === void 0 ? {} : { title: session.title },
+  finishedAt: new Date(session.finished).toISOString()
+});
+var guidelinesOf = (guidelines) => {
+  const { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cachePerOutput2 } = guidelines;
+  const cache = { main: cachePerOutput2.main, agents: cachePerOutput2.agents };
+  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache };
+};
+var insightsOf = (aggregates, options, now) => {
+  const sessions = selectSessions(aggregates, options, now);
+  const window = sessions.slice(0, options.window);
+  const baseline = sessions.slice(options.window, options.window + options.baseline);
+  const minimum = Math.min(options.minBaseline, options.baseline);
+  const sides = { window, baseline, comparable: baseline.length >= minimum, minimum, guidelines: options.guidelines };
+  const read = [...window, ...baseline];
+  const oldest = [...window.map((session) => ({ session, window: true })), ...baseline.map((session) => ({ session, window: false }))].reverse();
+  const basis = { window: window.length, baseline: baseline.length };
+  let closing = `Based on ${count(0, WORK_SESSION)}.`;
+  if (read.length > 0) {
+    basis.from = localDay2(new Date(read[read.length - 1].finished));
+    basis.to = localDay2(new Date(read[0].finished));
+    closing = `Based on ${count(read.length, WORK_SESSION)} from ${basis.from} to ${basis.to}.`;
+  }
+  const guidelines = guidelinesOf(options.guidelines);
+  const settings = { window: options.window, baseline: options.baseline, minBaseline: options.minBaseline, keepDays: options.keepDays, guidelines };
+  const listed2 = oldest.map((entry) => reportSession(entry.session));
+  const insights = window.length === 0 ? [] : reportLines(sides, oldest);
+  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, closing };
+};
+
+// src/spool/report-keeper.ts
+var newestFirst = (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt) || compareText(a.id, b.id);
+var createReportKeeper = (options) => {
+  const { insights, now, onError } = options;
+  let kept = [];
+  let report = null;
+  let reportFailure;
+  let listenerFailure;
+  const listeners = /* @__PURE__ */ new Set();
+  const tell = () => {
+    let failed = false;
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        failed = true;
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== listenerFailure) {
+          onError(`workflow health report listener failed: ${message}`);
+        }
+        listenerFailure = message;
+      }
+    }
+    if (!failed) {
+      listenerFailure = void 0;
+    }
+  };
+  return {
+    add(lines) {
+      const at = now().getTime();
+      const ids = new Set(lines.map((line) => line.id));
+      const work = lines.filter((line) => line.work === true && reportSessionId(line.id) && !(Date.parse(line.finishedAt) > at));
+      kept = [...kept.filter((line) => !ids.has(line.id)), ...work].sort(newestFirst).slice(0, insights.window + insights.baseline);
+      return work;
+    },
+    drop(cutoff) {
+      kept = kept.filter((line) => Date.parse(line.finishedAt) >= cutoff);
+    },
+    compute() {
+      const before2 = report;
+      try {
+        report = insightsOf(kept, insights, now().toISOString());
+        reportFailure = void 0;
+      } catch (error) {
+        report = null;
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== reportFailure) {
+          onError(`workflow health report not computed: ${message}`);
+        }
+        reportFailure = message;
+      }
+      if (before2 !== null || report !== null) {
+        tell();
+      }
+    },
+    current: () => report,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+};
+
+// src/spool/aggregates.ts
+var AGGREGATES_FILE = "aggregates.ndjson";
+var MAX_AGGREGATES_BYTES = 64 * 1024 * 1024;
+var NEWLINE = 10;
+var CHUNK_BYTES = 1024 * 1024;
+var TEMP_FILE = /^aggregates\.ndjson(?:\.(\d+))?\.tmp$/;
+var LEFT_OVER_TEMP_MS = 10 * 60 * 1e3;
+var MAX_LINE_BYTES = 4 * 1024 * 1024;
+var OVERLONG_LINE = "(a line over 4 MiB)";
+var lineCount = (count2) => count2 === 1 ? "1 line" : `${count2} lines`;
 var withOpened = (path, read) => {
   const opened = openNoFollow(path);
   if (opened === void 0) {
@@ -1232,9 +2140,9 @@ var eachLine = (fd, onLine) => {
   }
 };
 var countLines = (path, counted = () => true) => {
-  let count = 0;
-  withOpened(path, ({ fd }) => eachLine(fd, (line) => count += counted(line) ? 1 : 0));
-  return count;
+  let count2 = 0;
+  withOpened(path, ({ fd }) => eachLine(fd, (line) => count2 += counted(line) ? 1 : 0));
+  return count2;
 };
 var readText = (path) => withOpened(path, ({ fd, stat }) => {
   if (stat.size > MAX_AGGREGATES_BYTES) {
@@ -1382,7 +2290,7 @@ var countForPurge = (path, stat) => {
     return void 0;
   }
 };
-var purgeableAggregates = (dir, before) => {
+var purgeableAggregates = (dir, before2) => {
   const path = join2(dir, AGGREGATES_FILE);
   if (!spoolDirExists(dir)) {
     return 0;
@@ -1391,32 +2299,32 @@ var purgeableAggregates = (dir, before) => {
   if (stat?.isFile() !== true) {
     return 0;
   }
-  if (before === void 0) {
+  if (before2 === void 0) {
     return countForPurge(path, stat);
   }
-  const kept = finishedFrom(dayStart(before));
+  const kept = finishedFrom(dayStart(before2));
   return countLines(path, (line) => !kept(line));
 };
-var purgeAggregates = (dir, before) => {
+var purgeAggregates = (dir, before2) => {
   if (!spoolDirExists(dir)) {
     return 0;
   }
   const path = join2(dir, AGGREGATES_FILE);
   const stat = lstatSync(path, { throwIfNoEntry: false });
-  if (before !== void 0) {
-    const taken = stat?.isFile() ? rewrite(dir, finishedFrom(dayStart(before))) : 0;
+  if (before2 !== void 0) {
+    const taken = stat?.isFile() ? rewrite(dir, finishedFrom(dayStart(before2))) : 0;
     removeTemps(dir);
     return taken;
   }
-  let count = 0;
+  let count2 = 0;
   if (stat?.isFile()) {
-    count = countForPurge(path, stat);
+    count2 = countForPurge(path, stat);
     unlinkSync(path);
   } else if (stat?.isSymbolicLink()) {
     unlinkSync(path);
   }
   removeTemps(dir);
-  return count;
+  return count2;
 };
 var AGGREGATE_SETTLE_MS = 2 * 60 * 1e3;
 var CONTINUING_SOURCES = /* @__PURE__ */ new Set(["resume", "compact"]);
@@ -1426,7 +2334,8 @@ var begunInWindow = (store, session, windowStartMs) => {
   return opened && Date.parse(session.startedAt) >= windowStartMs;
 };
 var createAggregateLog = (options) => {
-  const { dir, keepDays, windowStartMs, onError } = options;
+  const { dir, insights, windowStartMs, onError } = options;
+  const { keepDays } = insights;
   const settleMs = options.settleMs ?? AGGREGATE_SETTLE_MS;
   const now = options.now ?? (() => /* @__PURE__ */ new Date());
   const onInfo = options.onInfo ?? (() => void 0);
@@ -1435,6 +2344,7 @@ var createAggregateLog = (options) => {
   const pending = /* @__PURE__ */ new Map();
   let appendFailure;
   let typical = {};
+  const report = createReportKeeper({ insights, now, onError });
   const recompute = () => {
     try {
       typical = typicalLengths([...known.values()]);
@@ -1446,7 +2356,7 @@ var createAggregateLog = (options) => {
   const keep = ({ id, finishedAt, agents }) => {
     known.set(id, { finishedAt, agents: Array.isArray(agents) ? agents : void 0 });
   };
-  const load = (report) => {
+  const load = (tellRefused) => {
     let refused = false;
     const stored = readAggregates(dir, (message, isRefused) => {
       if (!isRefused) {
@@ -1454,7 +2364,7 @@ var createAggregateLog = (options) => {
         return;
       }
       refused = true;
-      if (report) {
+      if (tellRefused) {
         onError(`${message}; no session aggregate is written to it until it can be read`);
       }
     });
@@ -1464,7 +2374,9 @@ var createAggregateLog = (options) => {
     for (const aggregate of stored) {
       keep(aggregate);
     }
+    report.add(stored);
     recompute();
+    report.compute();
     return true;
   };
   let loaded = load(true);
@@ -1472,21 +2384,21 @@ var createAggregateLog = (options) => {
     const session = store.session(sessionId);
     const finishedAt = session?.finishedAt;
     if (session === void 0 || finishedAt === void 0 || known.get(sessionId)?.finishedAt === finishedAt || !begunInWindow(store, session, windowStartMs)) {
-      return true;
+      return "skipped";
     }
     if (Date.parse(finishedAt) < pruneCutoff(keepDays, now())) {
-      return true;
+      return "skipped";
     }
     let aggregate;
     try {
       aggregate = sessionAggregate(session);
     } catch (error) {
       onError(`session aggregate of ${sessionId} not built: ${error.message}`);
-      return true;
+      return "skipped";
     }
     if (aggregate === void 0) {
       onError(`session aggregate of ${sessionId} not built: the session gave no aggregate`);
-      return true;
+      return "skipped";
     }
     try {
       appendAggregate(dir, aggregate);
@@ -1496,7 +2408,7 @@ var createAggregateLog = (options) => {
         onError(`session aggregate of ${sessionId} not written, tried again at the next check: ${message}`);
       }
       appendFailure = message;
-      return false;
+      return "failed";
     }
     if (appendFailure !== void 0) {
       appendFailure = void 0;
@@ -1504,7 +2416,11 @@ var createAggregateLog = (options) => {
     }
     keep(aggregate);
     recompute();
-    return true;
+    const line = storedAggregate(JSON.stringify(aggregate));
+    if (line !== void 0) {
+      report.add([line.aggregate]);
+    }
+    return "written";
   };
   const flush = (store) => {
     if (!loaded) {
@@ -1518,20 +2434,25 @@ var createAggregateLog = (options) => {
       onError(`session aggregates not checked: ${error.message}`);
       return;
     }
+    let written = false;
     for (const [sessionId, finishedAt] of [...pending].filter(([, at]) => Date.parse(at) <= dueBy)) {
-      let done;
+      let result;
       try {
-        done = write(store, sessionId);
+        result = write(store, sessionId);
       } catch (error) {
         onError(`session aggregate of ${sessionId} not checked, the session dropped: ${error.message}`);
-        done = true;
+        result = "skipped";
       }
-      if (!done) {
-        return;
+      written ||= result === "written";
+      if (result === "failed") {
+        break;
       }
       if (pending.get(sessionId) === finishedAt) {
         pending.delete(sessionId);
       }
+    }
+    if (written) {
+      report.compute();
     }
   };
   return {
@@ -1540,6 +2461,8 @@ var createAggregateLog = (options) => {
     },
     flush,
     typical: () => typical,
+    insights: () => report.current(),
+    subscribeInsights: (listener) => report.subscribe(listener),
     prune(at) {
       try {
         pruneAggregates(dir, keepDays, at);
@@ -1555,7 +2478,10 @@ var createAggregateLog = (options) => {
       if (dropped.length > 0) {
         recompute();
       }
-      if (!loaded && load(false)) {
+      report.drop(cutoff);
+      if (loaded) {
+        report.compute();
+      } else if (load(false)) {
         loaded = true;
         onInfo(`${path} read after the prune; session aggregates are written to it again`);
       }
@@ -1563,322 +2489,100 @@ var createAggregateLog = (options) => {
     close(store) {
       flush(store);
       if (pending.size > 0) {
-        const count = pending.size === 1 ? "1 session aggregate" : `${pending.size} session aggregates`;
-        onInfo(`${count} not written yet at close; the next start writes them from its replay`);
+        const count2 = pending.size === 1 ? "1 session aggregate" : `${pending.size} session aggregates`;
+        onInfo(`${count2} not written yet at close; the next start writes them from its replay`);
       }
     }
   };
 };
 
-// src/server/repositories.ts
-import { closeSync as closeSync2, constants, lstatSync as lstatSync2, openSync, readdirSync as readdirSync2, readSync as readSync2 } from "fs";
-import { join as join3, relative, resolve, sep } from "path";
-var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
-var RECORD_FILE = "repository.json";
-var CONFIG_FILE = "nurselog.config.json";
-var hashDirectories = (base) => {
-  let entries;
-  try {
-    entries = readdirSync2(base, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
-  return entries.filter((entry) => entry.isDirectory() && HASH_DIRECTORY.test(entry.name)).map((entry) => entry.name);
-};
-var recordedRoot = (base, hash) => {
-  const root = readRepositoryRecord(join3(base, hash, RECORD_FILE))?.root;
-  return root !== void 0 && recordedRootValid(root, hash) ? root : void 0;
-};
-var NEWLINE2 = 10;
-var TAIL_CHUNK_BYTES = 64 * 1024;
-var READ_NO_FOLLOW = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
-var activityAt = (text) => {
-  let line;
-  try {
-    line = JSON.parse(text);
-  } catch {
-    return void 0;
-  }
-  const { src, at } = line ?? {};
-  const time2 = typeof at === "string" && src !== "server" ? Date.parse(at) : Number.NaN;
-  return Number.isNaN(time2) ? void 0 : new Date(time2).toISOString();
-};
-var newestActivityIn = (path, from, to) => {
-  const fd = openSync(path, READ_NO_FOLLOW);
-  try {
-    let end = to;
-    let carry = Buffer.alloc(0);
-    while (end > from) {
-      const start = Math.max(from, end - TAIL_CHUNK_BYTES);
-      const chunk = Buffer.alloc(end - start);
-      readSync2(fd, chunk, 0, chunk.length, start);
-      const data = Buffer.concat([chunk, carry]);
-      const cut = start > from ? data.indexOf(NEWLINE2) + 1 : 0;
-      carry = cut > 0 ? Buffer.from(data.subarray(0, cut - 1)) : start > from ? data : Buffer.alloc(0);
-      const lines = cut > 0 || start === from ? data.subarray(cut).toString("utf8").split("\n") : [];
-      for (const text of lines.reverse()) {
-        const at = text.trim() ? activityAt(text) : void 0;
-        if (at !== void 0) {
-          return at;
-        }
-      }
-      end = start;
-    }
-    return void 0;
-  } finally {
-    closeSync2(fd);
-  }
-};
-var scanned = /* @__PURE__ */ new Map();
-var newestActivityOf = (path) => {
-  const stat = lstatSync2(path);
-  if (!stat.isFile() || typeof process.getuid === "function" && stat.uid !== process.getuid()) {
-    return void 0;
-  }
-  const size = stat.size;
-  const known = scanned.get(path);
-  const from = known && known.size <= size ? known.size : 0;
-  const fd = openSync(path, READ_NO_FOLLOW);
-  let to = size;
-  try {
-    const tail = Buffer.alloc(Math.min(size - from, TAIL_CHUNK_BYTES));
-    readSync2(fd, tail, 0, tail.length, size - tail.length);
-    const last = tail.lastIndexOf(NEWLINE2);
-    to = last === -1 ? from : size - tail.length + last + 1;
-  } finally {
-    closeSync2(fd);
-  }
-  const found = to > from ? newestActivityIn(path, from, to) : void 0;
-  const at = found ?? (from > 0 ? known?.at : void 0);
-  scanned.set(path, { size: Math.max(from, to), at });
-  return at;
-};
-var failedLookup = (error) => typeof error.code === "string";
-var lastLineAt = (root, onError) => {
-  let dir;
-  try {
-    dir = spoolDirFor(readHookConfig(root), root);
-  } catch (error) {
-    onError(`its config cannot be read: ${error.message}`);
-    return void 0;
-  }
-  let files;
-  try {
-    files = listSpoolFiles(dir);
-  } catch (error) {
-    onError(`its spool directory ${tildeHome(dir)} cannot be listed: ${error.message}`);
-    return void 0;
-  }
-  try {
-    for (const file of files.reverse()) {
-      const at = newestActivityOf(file.path);
-      if (at !== void 0) {
-        return at;
-      }
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      onError(`its spool directory ${tildeHome(dir)} cannot be read: ${error.message}`);
-    }
-  }
-  return void 0;
-};
-var withinReadDays = (at, readDays, now) => {
-  if (at === void 0) {
-    return false;
-  }
-  const first = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (readDays - 1)));
-  return localDay(new Date(at)) >= first;
-};
-var segmentsOf = (root) => root.split(sep).filter(Boolean);
-var tabNames = (roots) => {
-  const segments = roots.map(segmentsOf);
-  const depths = roots.map(() => 1);
-  for (; ; ) {
-    const names = segments.map((parts, index) => parts.slice(-depths[index]).join("/"));
-    const grows = names.map((name, index) => depths[index] < segments[index].length && names.some((other, at) => at !== index && other === name));
-    if (!grows.includes(true)) {
-      return names;
-    }
-    for (const [index, grow] of grows.entries()) {
-      if (grow) {
-        depths[index] += 1;
-      }
-    }
-  }
-};
-var listRepositories = (onError = () => void 0) => {
-  const base = defaultRoot();
-  const found = [];
-  for (const hash of hashDirectories(base)) {
-    const root = recordedRoot(base, hash);
-    if (root !== void 0) {
-      found.push({ hash, root });
-    }
-  }
-  const names = tabNames(found.map((repository) => repository.root));
-  const repositories = found.map((repository, index) => {
-    const named = { hash: repository.hash, name: names[index] };
-    return { ...repository, name: names[index], lastLineAt: lastLineAt(repository.root, (message) => onError(named, message)) };
-  });
-  return repositories.sort((a, b) => a.name.localeCompare(b.name));
-};
-var reportLookup = (dir, error, onError) => {
-  if (failedLookup(error)) {
-    onError?.(`orphaned spool ${tildeHome(dir)} not listed: ${error.message}`);
-  }
-};
-var newestDayIn = (dir, onError) => {
-  try {
-    return { newest: purgeableDayFiles(dir).at(-1)?.day };
-  } catch (error) {
-    reportLookup(dir, error, onError);
-    return void 0;
-  }
-};
-var holdsAggregates = (dir, onError) => {
-  try {
-    return spoolDirExists(dir) && lstatSync2(join3(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
-  } catch (error) {
-    reportLookup(dir, error, onError);
-    return false;
-  }
-};
-var foreignOwner = (dir, uid) => {
-  if (uid === void 0) {
-    return void 0;
-  }
-  try {
-    const stat = lstatSync2(dir, { throwIfNoEntry: false });
-    return stat?.isDirectory() === true && stat.uid !== uid ? stat.uid : void 0;
-  } catch {
-    return void 0;
-  }
-};
-var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = process.getuid?.()) => {
-  const base = defaultRoot();
-  const today = localDay(now);
-  const orphans = [];
-  for (const hash of hashDirectories(base).sort()) {
-    const dir = join3(base, hash);
-    const root = readRepositoryRecord(join3(dir, RECORD_FILE))?.root;
-    if (root !== void 0 && recordedRootValid(root, hash)) {
-      continue;
-    }
-    const owner = foreignOwner(dir, uid);
-    if (owner !== void 0) {
-      onError?.(`orphaned spool ${tildeHome(dir)} left alone: it belongs to uid ${owner}, not to this user; remove it as that user`);
-      continue;
-    }
-    const listed = newestDayIn(dir, onError);
-    if (listed === void 0) {
-      continue;
-    }
-    const orphaned = listed.newest === void 0 ? holdsAggregates(dir, onError) : listed.newest < today;
-    if (!orphaned) {
-      continue;
-    }
-    orphans.push(root === void 0 ? { hash, dir } : { hash, dir, root });
-  }
-  return orphans;
-};
-var pruneOrphanedSpools = (now, onError) => {
-  const deleted = [];
-  for (const orphan of listOrphanedSpools(now, onError)) {
-    const config = join3(orphan.dir, CONFIG_FILE);
-    const shown = tildeHome(orphan.dir);
+// src/spool/sample-report.ts
+var createSampleReport = (options) => {
+  const { insights } = options;
+  const onError = (message) => {
     try {
-      const keepDays = configKeepDays(config) ?? HOOK_DEFAULTS.spool.keepDays;
-      if (spoolDirExists(orphan.dir)) {
-        const onFailure = (path, error) => {
-          const code = error.code ?? error.message;
-          onError(`orphaned spool ${shown}: ${relative(orphan.dir, path)} not deleted (${code}), the next prune tries it again`);
-        };
-        deleted.push(...pruneSpool(orphan.dir, keepDays, now, onFailure));
-      }
-    } catch (error) {
-      onError(`orphaned spool ${shown} not pruned: ${error.message}`);
-    }
-    try {
-      const keepDays = configKeepDays(config, "insights") ?? DEFAULT_CONFIG.insights.keepDays;
-      if (spoolDirExists(orphan.dir)) {
-        pruneAggregates(orphan.dir, keepDays, now);
-      }
-    } catch (error) {
-      onError(`session aggregates of orphaned spool ${shown} not pruned: ${error.message}`);
-    }
-  }
-  return deleted;
-};
-var pruneAggregatesIn = (dir, keepDays, now, onError) => {
-  try {
-    if (spoolDirExists(dir)) {
-      pruneAggregates(dir, keepDays, now);
-    }
-  } catch (error) {
-    onError(`session aggregates of ${tildeHome(dir)} not pruned: ${error.message}`);
-  }
-};
-var pruneRecordedAggregates = (now, onError) => {
-  const base = defaultRoot();
-  for (const hash of hashDirectories(base).sort()) {
-    const root = recordedRoot(base, hash);
-    if (root === void 0) {
-      continue;
-    }
-    const dir = join3(base, hash);
-    let keepDays = DEFAULT_CONFIG.insights.keepDays;
-    try {
-      keepDays = configKeepDays(userConfigPath(root), "insights") ?? keepDays;
-    } catch (error) {
-      onError(`session aggregates of ${tildeHome(dir)} not pruned: ${error.message}`);
-      continue;
-    }
-    pruneAggregatesIn(dir, keepDays, now, onError);
-    try {
-      const configured = spoolDirFor(readHookConfig(root), root);
-      if (resolve(configured) !== resolve(dir)) {
-        pruneAggregatesIn(configured, keepDays, now, onError);
-      }
-    } catch (error) {
-      onError(`session aggregates of ${tildeHome(dir)} not pruned under its configured spool.dir: ${error.message}`);
-    }
-  }
-};
-var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
-  let prunedDay = "";
-  const passed = /* @__PURE__ */ new Set();
-  const passOnce = (message) => {
-    if (!passed.has(message)) {
-      onError(message);
-      passed.add(message);
+      options.onError(message);
+    } catch {
     }
   };
-  return () => {
-    const at = now();
-    const today = localDay(at);
-    if (today === prunedDay) {
-      return;
-    }
-    prunedDay = today;
+  const { aggregates, skipped, repaired } = parseAggregates(options.text);
+  const newestFinish = Math.max(0, ...aggregates.map((line) => Date.parse(line.finishedAt)));
+  const start = options.startAt === void 0 ? newestFinish : Date.parse(options.startAt);
+  let clock = start;
+  if (Number.isNaN(start)) {
+    onError(`sample report: the start time ${JSON.stringify(options.startAt)} is no time; the clock starts at the sample's newest finish`);
+    clock = newestFinish;
+  }
+  const skippedPart = skipped > 0 ? [`${plural(skipped, "line")} skipped, broken, of another format version or without a date`] : [];
+  const repairedPart = repaired > 0 ? [`${plural(repaired, "line")} repaired, a field of a wrong type dropped`] : [];
+  const problems = [...skippedPart, ...repairedPart];
+  if (problems.length > 0) {
+    onError(`sample aggregate log: ${problems.join("; ")}`);
+  }
+  const keeper = createReportKeeper({ insights, now: () => new Date(clock), onError });
+  const pending = /* @__PURE__ */ new Map();
+  const added = /* @__PURE__ */ new Map();
+  if (keeper.add(aggregates).length === 0) {
+    onError(`sample aggregate log: no line finished before ${new Date(clock).toISOString()}, so the report has no sample sessions`);
+  }
+  keeper.compute();
+  const lineOf = (store, sessionId) => {
     try {
-      pruneOrphanedSpools(at, passOnce);
+      const session = store.session(sessionId);
+      const aggregate = session === void 0 ? void 0 : sessionAggregate(session);
+      return aggregate === void 0 ? void 0 : storedAggregate(JSON.stringify(aggregate))?.aggregate;
     } catch (error) {
-      passOnce(`the orphaned spool directories were not pruned: ${error.message}`);
+      onError(`sample report: session aggregate of ${sessionId} not built: ${error instanceof Error ? error.message : String(error)}`);
+      return void 0;
     }
-    try {
-      pruneRecordedAggregates(at, passOnce);
-    } catch (error) {
-      passOnce(`the session aggregates of the recorded repositories were not pruned: ${error.message}`);
-    }
+  };
+  return {
+    noteFinish(sessionId, finishedAt) {
+      pending.set(sessionId, finishedAt);
+    },
+    noteLine(at, store) {
+      const time2 = at === void 0 ? Number.NaN : Date.parse(at);
+      if (time2 > clock) {
+        clock = time2;
+      }
+      try {
+        store.state();
+      } catch (error) {
+        onError(`sample report: the replay store failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      const due = [];
+      for (const [sessionId, finishedAt] of pending) {
+        if (Date.parse(finishedAt) > clock) {
+          continue;
+        }
+        pending.delete(sessionId);
+        const line = added.get(sessionId) === finishedAt ? void 0 : lineOf(store, sessionId);
+        if (line !== void 0) {
+          due.push({ sessionId, finishedAt, line });
+        }
+      }
+      if (due.length === 0) {
+        return;
+      }
+      const taken = keeper.add(due.map((entry) => entry.line));
+      for (const entry of due) {
+        if (taken.includes(entry.line)) {
+          added.set(entry.sessionId, entry.finishedAt);
+        }
+      }
+      if (taken.length > 0) {
+        keeper.compute();
+      }
+    },
+    current: () => keeper.current(),
+    subscribe: (listener) => keeper.subscribe(listener)
   };
 };
 
 // src/server/context.ts
 var TICK_MS = 60 * 1e3;
+var SAMPLE_AGGREGATES = join3(PACKAGE_ROOT, "fixtures", "aggregates.ndjson");
 var AGGREGATE_CHECK_MS = 60 * 1e3;
 var hasOpenRun = (state) => Object.values(state.runs).some((run) => run.branch !== "" && run.branch !== "?" && run.chip.tone !== "done");
 var stopEach = (stops, warn) => {
@@ -1898,12 +2602,12 @@ var createSpoolContext = (options) => {
   const windowStart = readWindowStart(/* @__PURE__ */ new Date(), config.spool.readDays);
   const first = localDay(windowStart);
   const info = (message) => log("info", stripControlLines(`${name}: ${message}`));
-  const aggregates = createAggregateLog({ dir: spoolDir, keepDays: config.insights.keepDays, windowStartMs: windowStart.getTime(), onError: warn, onInfo: info });
+  const aggregates = createAggregateLog({ dir: spoolDir, insights: config.insights, windowStartMs: windowStart.getTime(), onError: warn, onInfo: info });
   const store = createStore(config, { onFinish: (sessionId, finishedAt) => aggregates.noteFinish(sessionId, finishedAt) });
   const write = (line) => appendEvent(spoolDir, line, config.spool.maxLineBytes);
-  const fixtureWorker = options.fixtureWorker ?? join4(PACKAGE_ROOT, "dist", "fixture-worker.js");
+  const fixtureWorker = options.fixtureWorker ?? join3(PACKAGE_ROOT, "dist", "fixture-worker.js");
   const slowReplayMs = options.slowReplayMs ?? SLOW_REPLAY_MS;
-  const replayWorker = options.replayWorker || join4(PACKAGE_ROOT, "dist", "replay-worker.js");
+  const replayWorker = options.replayWorker || join3(PACKAGE_ROOT, "dist", "replay-worker.js");
   const stops = [];
   const observers = [];
   let lastLineAt2 = options.lastLineAt;
@@ -1913,7 +2617,7 @@ var createSpoolContext = (options) => {
   const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, root, write, run: options.run, log: ghLog, wanted: pollWanted }) : void 0;
   const diffTarget = (agentId) => diffTargetOf(store.peek(), agentId);
   const repoCommonDir = options.facts ? gitCommonDir(root) : void 0;
-  const prices = options.facts ? loadPrices(resolve2(root, expandHome(config.pricesFrom)), log) : {};
+  const prices = options.facts ? loadPrices(resolve(root, expandHome(config.pricesFrom)), log) : {};
   const git = options.facts ? createGitFacts({ config, write, run: options.run, log, repoCommonDir, diffTarget }) : void 0;
   const usage = options.facts ? createUsageFacts({ prices, write, log }) : void 0;
   if (git && usage) {
@@ -2071,8 +2775,11 @@ var createSpoolContext = (options) => {
       return answer.fixture;
     },
     uiConfig: () => ({ ...uiConfig(config, root), repo: name, sessionFixtures: true }),
+    setup: () => workflowSetupOf(config),
     lastLineAt: () => lastLineAt2,
     typical: () => aggregates.typical(),
+    insights: () => aggregates.insights(),
+    subscribeInsights: (listener) => aggregates.subscribeInsights(listener),
     seen(nextName, at) {
       name = nextName;
       lastLineAt2 = at;
@@ -2087,15 +2794,30 @@ var createSpoolContext = (options) => {
     }
   };
 };
+var replaySampleReport = (path, texts, config, warn) => {
+  let text;
+  try {
+    text = readFileSync5(path, "utf8");
+  } catch (error) {
+    warn(`no sample workflow health report: the sample aggregate log cannot be read: ${describeError(error)}`);
+    return void 0;
+  }
+  return createSampleReport({ text, insights: config.insights, startAt: replayStartAt(texts), onError: warn });
+};
 var createReplayContext = (options) => {
-  const store = createStore(options.config);
-  const handle = createLineHandler(store, options.config);
-  let count = 0;
+  const { config, log } = options;
+  const warn = (message) => log("warning", stripControlLines(`${options.name}: ${message}`));
+  const texts = options.fixtures.map((path) => readFileSync5(path, "utf8"));
+  const sample = replaySampleReport(options.sampleAggregates ?? SAMPLE_AGGREGATES, texts, config, warn);
+  const store = createStore(config, { onFinish: (sessionId, finishedAt) => sample?.noteFinish(sessionId, finishedAt) });
+  const handle = createLineHandler(store, config);
+  let count2 = 0;
   let lastLineAt2;
-  const replay = replayFixtures(options.fixtures, options.speed, (text) => {
-    count += 1;
+  const replay = replayFixtureTexts(texts, options.speed, (text) => {
+    count2 += 1;
     handle(text);
     lastLineAt2 = activityAt(text) ?? lastLineAt2;
+    sample?.noteLine(lineAt(text), store);
   });
   return {
     id: options.id,
@@ -2105,12 +2827,569 @@ var createReplayContext = (options) => {
     ready: Promise.resolve(),
     loading: () => false,
     uiConfig: () => options.ui,
+    setup: () => workflowSetupOf(config),
     lastLineAt: () => lastLineAt2,
     typical: () => ({}),
+    insights: () => sample?.current() ?? null,
+    subscribeInsights: (listener) => sample?.subscribe(listener) ?? (() => void 0),
     seen: () => void 0,
-    lines: () => count,
+    lines: () => count2,
     nudge: () => void 0,
     close: () => replay.stop()
+  };
+};
+
+// src/server/repositories.ts
+import { closeSync as closeSync2, constants, lstatSync as lstatSync2, openSync, readdirSync as readdirSync2, readSync as readSync2 } from "fs";
+import { join as join4, relative, resolve as resolve2, sep } from "path";
+var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
+var RECORD_FILE = "repository.json";
+var CONFIG_FILE = "nurselog.config.json";
+var hashDirectories = (base) => {
+  let entries;
+  try {
+    entries = readdirSync2(base, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  return entries.filter((entry) => entry.isDirectory() && HASH_DIRECTORY.test(entry.name)).map((entry) => entry.name);
+};
+var recordedRoot = (base, hash) => {
+  const root = readRepositoryRecord(join4(base, hash, RECORD_FILE))?.root;
+  return root !== void 0 && recordedRootValid(root, hash) ? root : void 0;
+};
+var NEWLINE2 = 10;
+var TAIL_CHUNK_BYTES = 64 * 1024;
+var READ_NO_FOLLOW = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+var newestActivityIn = (path, from, to) => {
+  const fd = openSync(path, READ_NO_FOLLOW);
+  try {
+    let end = to;
+    let carry = Buffer.alloc(0);
+    while (end > from) {
+      const start = Math.max(from, end - TAIL_CHUNK_BYTES);
+      const chunk = Buffer.alloc(end - start);
+      readSync2(fd, chunk, 0, chunk.length, start);
+      const data = Buffer.concat([chunk, carry]);
+      const cut = start > from ? data.indexOf(NEWLINE2) + 1 : 0;
+      carry = cut > 0 ? Buffer.from(data.subarray(0, cut - 1)) : start > from ? data : Buffer.alloc(0);
+      const lines = cut > 0 || start === from ? data.subarray(cut).toString("utf8").split("\n") : [];
+      for (const text of lines.reverse()) {
+        const at = text.trim() ? activityAt(text) : void 0;
+        if (at !== void 0) {
+          return at;
+        }
+      }
+      end = start;
+    }
+    return void 0;
+  } finally {
+    closeSync2(fd);
+  }
+};
+var scanned = /* @__PURE__ */ new Map();
+var newestActivityOf = (path) => {
+  const stat = lstatSync2(path);
+  if (!stat.isFile() || typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+    return void 0;
+  }
+  const size = stat.size;
+  const known = scanned.get(path);
+  const from = known && known.size <= size ? known.size : 0;
+  const fd = openSync(path, READ_NO_FOLLOW);
+  let to = size;
+  try {
+    const tail = Buffer.alloc(Math.min(size - from, TAIL_CHUNK_BYTES));
+    readSync2(fd, tail, 0, tail.length, size - tail.length);
+    const last = tail.lastIndexOf(NEWLINE2);
+    to = last === -1 ? from : size - tail.length + last + 1;
+  } finally {
+    closeSync2(fd);
+  }
+  const found = to > from ? newestActivityIn(path, from, to) : void 0;
+  const at = found ?? (from > 0 ? known?.at : void 0);
+  scanned.set(path, { size: Math.max(from, to), at });
+  return at;
+};
+var failedLookup = (error) => typeof error.code === "string";
+var lastLineAt = (root, onError) => {
+  let dir;
+  try {
+    dir = spoolDirFor(readHookConfig(root), root);
+  } catch (error) {
+    onError(`its config cannot be read: ${error.message}`);
+    return void 0;
+  }
+  let files;
+  try {
+    files = listSpoolFiles(dir);
+  } catch (error) {
+    onError(`its spool directory ${tildeHome(dir)} cannot be listed: ${error.message}`);
+    return void 0;
+  }
+  try {
+    for (const file of files.reverse()) {
+      const at = newestActivityOf(file.path);
+      if (at !== void 0) {
+        return at;
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      onError(`its spool directory ${tildeHome(dir)} cannot be read: ${error.message}`);
+    }
+  }
+  return void 0;
+};
+var withinReadDays = (at, readDays, now) => {
+  if (at === void 0) {
+    return false;
+  }
+  const first = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (readDays - 1)));
+  return localDay(new Date(at)) >= first;
+};
+var segmentsOf = (root) => root.split(sep).filter(Boolean);
+var tabNames = (roots) => {
+  const segments = roots.map(segmentsOf);
+  const depths = roots.map(() => 1);
+  for (; ; ) {
+    const names = segments.map((parts, index) => parts.slice(-depths[index]).join("/"));
+    const grows = names.map((name, index) => depths[index] < segments[index].length && names.some((other, at) => at !== index && other === name));
+    if (!grows.includes(true)) {
+      return names;
+    }
+    for (const [index, grow] of grows.entries()) {
+      if (grow) {
+        depths[index] += 1;
+      }
+    }
+  }
+};
+var listRepositories = (onError = () => void 0) => {
+  const base = defaultRoot();
+  const found = [];
+  for (const hash of hashDirectories(base)) {
+    const root = recordedRoot(base, hash);
+    if (root !== void 0) {
+      found.push({ hash, root });
+    }
+  }
+  const names = tabNames(found.map((repository) => repository.root));
+  const repositories = found.map((repository, index) => {
+    const named = { hash: repository.hash, name: names[index] };
+    return { ...repository, name: names[index], lastLineAt: lastLineAt(repository.root, (message) => onError(named, message)) };
+  });
+  return repositories.sort((a, b) => a.name.localeCompare(b.name));
+};
+var reportLookup = (dir, error, onError) => {
+  if (failedLookup(error)) {
+    onError?.(`orphaned spool ${tildeHome(dir)} not listed: ${error.message}`);
+  }
+};
+var newestDayIn = (dir, onError) => {
+  try {
+    return { newest: purgeableDayFiles(dir).at(-1)?.day };
+  } catch (error) {
+    reportLookup(dir, error, onError);
+    return void 0;
+  }
+};
+var holdsAggregates = (dir, onError) => {
+  try {
+    return spoolDirExists(dir) && lstatSync2(join4(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
+  } catch (error) {
+    reportLookup(dir, error, onError);
+    return false;
+  }
+};
+var foreignOwner = (dir, uid) => {
+  if (uid === void 0) {
+    return void 0;
+  }
+  try {
+    const stat = lstatSync2(dir, { throwIfNoEntry: false });
+    return stat?.isDirectory() === true && stat.uid !== uid ? stat.uid : void 0;
+  } catch {
+    return void 0;
+  }
+};
+var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = process.getuid?.()) => {
+  const base = defaultRoot();
+  const today = localDay(now);
+  const orphans = [];
+  for (const hash of hashDirectories(base).sort()) {
+    const dir = join4(base, hash);
+    const root = readRepositoryRecord(join4(dir, RECORD_FILE))?.root;
+    if (root !== void 0 && recordedRootValid(root, hash)) {
+      continue;
+    }
+    const owner = foreignOwner(dir, uid);
+    if (owner !== void 0) {
+      onError?.(`orphaned spool ${tildeHome(dir)} left alone: it belongs to uid ${owner}, not to this user; remove it as that user`);
+      continue;
+    }
+    const listed2 = newestDayIn(dir, onError);
+    if (listed2 === void 0) {
+      continue;
+    }
+    const orphaned = listed2.newest === void 0 ? holdsAggregates(dir, onError) : listed2.newest < today;
+    if (!orphaned) {
+      continue;
+    }
+    orphans.push(root === void 0 ? { hash, dir } : { hash, dir, root });
+  }
+  return orphans;
+};
+var pruneOrphanedSpools = (now, onError) => {
+  const deleted = [];
+  for (const orphan of listOrphanedSpools(now, onError)) {
+    const config = join4(orphan.dir, CONFIG_FILE);
+    const shown = tildeHome(orphan.dir);
+    try {
+      const keepDays = configKeepDays(config) ?? HOOK_DEFAULTS.spool.keepDays;
+      if (spoolDirExists(orphan.dir)) {
+        const onFailure = (path, error) => {
+          const code = error.code ?? error.message;
+          onError(`orphaned spool ${shown}: ${relative(orphan.dir, path)} not deleted (${code}), the next prune tries it again`);
+        };
+        deleted.push(...pruneSpool(orphan.dir, keepDays, now, onFailure));
+      }
+    } catch (error) {
+      onError(`orphaned spool ${shown} not pruned: ${error.message}`);
+    }
+    try {
+      const keepDays = configKeepDays(config, "insights") ?? DEFAULT_CONFIG.insights.keepDays;
+      if (spoolDirExists(orphan.dir)) {
+        pruneAggregates(orphan.dir, keepDays, now);
+      }
+    } catch (error) {
+      onError(`session aggregates of orphaned spool ${shown} not pruned: ${error.message}`);
+    }
+  }
+  return deleted;
+};
+var pruneAggregatesIn = (dir, keepDays, now, onError) => {
+  try {
+    if (spoolDirExists(dir)) {
+      pruneAggregates(dir, keepDays, now);
+    }
+  } catch (error) {
+    onError(`session aggregates of ${tildeHome(dir)} not pruned: ${error.message}`);
+  }
+};
+var pruneRecordedAggregates = (now, onError) => {
+  const base = defaultRoot();
+  for (const hash of hashDirectories(base).sort()) {
+    const root = recordedRoot(base, hash);
+    if (root === void 0) {
+      continue;
+    }
+    const dir = join4(base, hash);
+    let keepDays = DEFAULT_CONFIG.insights.keepDays;
+    try {
+      keepDays = configKeepDays(userConfigPath(root), "insights") ?? keepDays;
+    } catch (error) {
+      onError(`session aggregates of ${tildeHome(dir)} not pruned: ${error.message}`);
+      continue;
+    }
+    pruneAggregatesIn(dir, keepDays, now, onError);
+    try {
+      const configured = spoolDirFor(readHookConfig(root), root);
+      if (resolve2(configured) !== resolve2(dir)) {
+        pruneAggregatesIn(configured, keepDays, now, onError);
+      }
+    } catch (error) {
+      onError(`session aggregates of ${tildeHome(dir)} not pruned under its configured spool.dir: ${error.message}`);
+    }
+  }
+};
+var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
+  let prunedDay = "";
+  const passed = /* @__PURE__ */ new Set();
+  const passOnce = (message) => {
+    if (!passed.has(message)) {
+      onError(message);
+      passed.add(message);
+    }
+  };
+  return () => {
+    const at = now();
+    const today = localDay(at);
+    if (today === prunedDay) {
+      return;
+    }
+    prunedDay = today;
+    try {
+      pruneOrphanedSpools(at, passOnce);
+    } catch (error) {
+      passOnce(`the orphaned spool directories were not pruned: ${error.message}`);
+    }
+    try {
+      pruneRecordedAggregates(at, passOnce);
+    } catch (error) {
+      passOnce(`the session aggregates of the recorded repositories were not pruned: ${error.message}`);
+    }
+  };
+};
+
+// src/server/update-check.ts
+import { isAbsolute, join as join5 } from "path";
+var UPDATE_COMMAND = "claude plugin update nurselog@nurselog";
+var MARKETPLACE = "nurselog";
+var FIRST_CHECK_MS = 5 * 1e3;
+var CHECK_EVERY_MS = 6 * 60 * 60 * 1e3;
+var REQUEST_TIMEOUT_MS = 10 * 1e3;
+var MAX_FILE_BYTES = 256 * 1024;
+var MAX_ITEM_CHARS = 300;
+var MAX_NOTICE_ITEMS = 60;
+var MAX_NOTICE_VERSIONS = 20;
+var MAX_REDIRECTS = 3;
+var RAW_HOST = "raw.githubusercontent.com";
+var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
+var UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+var VERSION = /^(\d{1,9})\.(\d{1,9})\.(\d{1,9})$/;
+var SECTION_HEAD = /^## (\d{1,9}\.\d{1,9}\.\d{1,9})(?:\s|$)/;
+var GITHUB_OWNER = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+var GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+var GIT_REF = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
+var MAX_REF_CHARS = 200;
+var parseVersion = (value) => {
+  const match = typeof value === "string" ? VERSION.exec(value) : null;
+  return match === null ? void 0 : match.slice(1).map(Number);
+};
+var compareVersions = (a, b) => {
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) {
+      return a[index] - b[index];
+    }
+  }
+  return 0;
+};
+var cleanItem = (text) => {
+  const plain = text.replace(UNSAFE_CHARS, "").trim();
+  if (plain.length <= MAX_ITEM_CHARS) {
+    return plain;
+  }
+  const lastKept = plain.charCodeAt(MAX_ITEM_CHARS - 2);
+  const end = lastKept >= 55296 && lastKept <= 56319 ? MAX_ITEM_CHARS - 2 : MAX_ITEM_CHARS - 1;
+  return `${plain.slice(0, end)}\u2026`;
+};
+var parseChangelog = (text) => {
+  const notes = [];
+  let section;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith("## ")) {
+      const version = SECTION_HEAD.exec(line)?.[1];
+      section = version === void 0 ? void 0 : { version, items: [] };
+      if (section) {
+        notes.push(section);
+      }
+      continue;
+    }
+    const item = section && line.startsWith("- ") ? cleanItem(line.slice(2)) : "";
+    if (section && item !== "") {
+      section.items.push(item);
+    }
+  }
+  return notes;
+};
+var noticeOf = (current, latest, changelog, changesUrl) => {
+  const from = parseVersion(current);
+  const to = parseVersion(latest);
+  if (!from || !to || compareVersions(to, from) <= 0) {
+    return null;
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const between = [];
+  for (const notes of changelog) {
+    const parsed = parseVersion(notes.version);
+    if (parsed && !seen.has(notes.version) && compareVersions(parsed, from) > 0 && compareVersions(parsed, to) <= 0) {
+      seen.add(notes.version);
+      between.push({ notes, parsed });
+    }
+  }
+  between.sort((a, b) => compareVersions(b.parsed, a.parsed));
+  let room = MAX_NOTICE_ITEMS;
+  const kept = between.slice(0, MAX_NOTICE_VERSIONS).map(({ notes }) => {
+    const items = notes.items.slice(0, room);
+    room -= items.length;
+    return { version: notes.version, items };
+  });
+  return { current, latest, command: UPDATE_COMMAND, notes: kept, ...changesUrl === void 0 ? {} : { changesUrl } };
+};
+var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var refValid = (ref) => ref.length <= MAX_REF_CHARS && GIT_REF.test(ref) && !ref.includes("..");
+var marketplaceSourceOf = (text) => {
+  const record = JSON.parse(text);
+  const entry = isRecord2(record) && Object.hasOwn(record, MARKETPLACE) ? record[MARKETPLACE] : void 0;
+  const source = isRecord2(entry) ? entry.source : void 0;
+  if (!isRecord2(source) || typeof source.source !== "string") {
+    throw new Error(`the marketplace record has no source of the marketplace ${MARKETPLACE}`);
+  }
+  if (source.source === "github") {
+    const [owner, name, ...rest] = typeof source.repo === "string" ? source.repo.split("/") : [];
+    if (rest.length > 0 || !GITHUB_OWNER.test(owner ?? "") || !GITHUB_NAME.test(name ?? "") || name === "." || name === "..") {
+      throw new Error(`the marketplace ${MARKETPLACE} names no valid GitHub repository`);
+    }
+    if (source.ref !== void 0 && (typeof source.ref !== "string" || !refValid(source.ref))) {
+      throw new Error(`the marketplace ${MARKETPLACE} names no valid Git ref`);
+    }
+    return { kind: "github", owner, name, ref: source.ref };
+  }
+  if (source.source === "directory") {
+    if (typeof source.path !== "string" || !isAbsolute(source.path) || stripControl(source.path) !== source.path) {
+      throw new Error(`the marketplace ${MARKETPLACE} names no absolute directory`);
+    }
+    return { kind: "directory", path: source.path };
+  }
+  return { kind: "other", source: stripControl(source.source).slice(0, 40) };
+};
+var versionIn = (text, what) => {
+  const manifest = JSON.parse(text);
+  const version = isRecord2(manifest) ? manifest.version : void 0;
+  if (typeof version !== "string" || parseVersion(version) === void 0) {
+    throw new Error(`${what} holds no x.y.z version`);
+  }
+  return version;
+};
+var readCapped = async (response, maxBytes) => {
+  if (!response.body) {
+    return "";
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  while (length < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return Buffer.concat(chunks).toString("utf8");
+    }
+    chunks.push(value);
+    length += value.byteLength;
+  }
+  await reader.cancel();
+  return Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
+};
+var onRawHost = (url) => {
+  const parsed = URL.canParse(url) ? new URL(url) : void 0;
+  return parsed?.protocol === "https:" && parsed.hostname === RAW_HOST && parsed.port === "" && parsed.username === "" && parsed.password === "";
+};
+var redirectTarget = (response, from) => {
+  const location = REDIRECT_STATUSES.has(response.status) ? response.headers.get("location") : null;
+  return location !== null && URL.canParse(location, from) ? new URL(location, from).href : void 0;
+};
+var fetchText = async (fetcher, url, signal) => {
+  let at = url;
+  for (let redirects = 0; ; redirects += 1) {
+    const response = await fetcher(at, { credentials: "omit", redirect: "manual", signal, headers: { accept: "text/plain, application/json" } });
+    if (response.status === 200 && onRawHost(response.url)) {
+      return readCapped(response, MAX_FILE_BYTES);
+    }
+    await response.body?.cancel();
+    if (response.status === 200) {
+      throw new Error(`${url} answered from a URL that is not https on ${RAW_HOST}`);
+    }
+    const next = redirectTarget(response, at);
+    if (next === void 0) {
+      throw new Error(`${url} answered with status ${response.status}`);
+    }
+    if (!onRawHost(next)) {
+      throw new Error(`${url} redirected to a URL that is not https on ${RAW_HOST}`);
+    }
+    if (redirects >= MAX_REDIRECTS) {
+      throw new Error(`${url} redirected more than ${MAX_REDIRECTS} times`);
+    }
+    at = next;
+  }
+};
+var githubFiles = (source, fetcher, signal) => {
+  const repository = `${source.owner}/${source.name}`;
+  const ref = source.ref ?? "HEAD";
+  return {
+    plugin: () => fetchText(fetcher, `https://${RAW_HOST}/${repository}/${ref}/.claude-plugin/plugin.json`, signal()),
+    changelog: () => fetchText(fetcher, `https://${RAW_HOST}/${repository}/${ref}/CHANGELOG.md`, signal()),
+    changesUrl: `https://github.com/${repository}/blob/${ref}/CHANGELOG.md`
+  };
+};
+var directoryFiles = (path) => ({
+  plugin: () => readSmallFile(join5(path, ".claude-plugin", "plugin.json"), MAX_FILE_BYTES),
+  changelog: () => readSmallFile(join5(path, "CHANGELOG.md"), MAX_FILE_BYTES, { head: true })
+});
+var isNewer = (latest, current) => noticeOf(current, latest, []) !== null;
+var startUpdateCheck = (options = {}) => {
+  const packageRoot = options.packageRoot ?? PACKAGE_ROOT;
+  const cacheDir = cacheDirOf(packageRoot);
+  const env = options.env ?? process.env;
+  if (cacheDir === void 0 || env.NURSELOG_UPDATE_CHECK === "0") {
+    return void 0;
+  }
+  const recordFile = options.recordFile ?? join5(cacheDir, "..", "..", "..", "known_marketplaces.json");
+  const fetcher = options.fetch ?? fetch;
+  const log = options.log ?? (() => void 0);
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const stopping = new AbortController();
+  const signal = () => AbortSignal.any([stopping.signal, AbortSignal.timeout(timeoutMs)]);
+  let notice = null;
+  let running;
+  const reported = /* @__PURE__ */ new Map();
+  const problem = (kind, level, message) => {
+    if (!stopping.signal.aborted && reported.get(kind) !== message) {
+      reported.set(kind, message);
+      log(level, message);
+    }
+  };
+  const changelogOf = async (files) => {
+    try {
+      const notes = parseChangelog(await files.changelog());
+      reported.delete("changelog");
+      return notes;
+    } catch (error) {
+      problem("changelog", "warning", `the update check read no changelog: ${describeError(error)}`);
+      return void 0;
+    }
+  };
+  const run = async () => {
+    const current = versionIn(readSmallFile(join5(packageRoot, "package.json"), MAX_FILE_BYTES), "the package.json of the running copy");
+    const source = marketplaceSourceOf(readSmallFile(recordFile, MAX_FILE_BYTES));
+    if (source.kind === "other") {
+      notice = null;
+      problem("check", "info", `the update check skips the marketplace ${MARKETPLACE}: its source kind ${source.source} is not read`);
+      return;
+    }
+    const files = source.kind === "github" ? githubFiles(source, fetcher, signal) : directoryFiles(source.path);
+    const latest = versionIn(await files.plugin(), "the marketplace's plugin.json");
+    const changelog = isNewer(latest, current) ? await changelogOf(files) : [];
+    if (stopping.signal.aborted) {
+      return;
+    }
+    const earlier = notice?.latest === latest ? notice.notes : [];
+    notice = noticeOf(current, latest, changelog ?? earlier, files.changesUrl);
+    reported.delete("check");
+  };
+  const check = () => {
+    running ??= run().catch((error) => problem("check", "warning", `the update check failed: ${describeError(error)}`)).finally(() => {
+      running = void 0;
+    });
+    return running;
+  };
+  let every;
+  const first = setTimeout(() => {
+    void check();
+    every = setInterval(() => void check(), options.everyMs ?? CHECK_EVERY_MS);
+    every.unref();
+  }, options.firstMs ?? FIRST_CHECK_MS);
+  first.unref();
+  return {
+    notice: () => notice,
+    check,
+    stop: () => {
+      clearTimeout(first);
+      clearInterval(every);
+      stopping.abort();
+    }
   };
 };
 
@@ -2166,8 +3445,8 @@ var START_TICKET_MS = 10 * 60 * 1e3;
 var LOCK_STALE_MS = 10 * 1e3;
 var LOCK_RETRY_MS = 25;
 var SCAN_MS = 10 * 1e3;
-var PACKAGE_FILE = join5(PACKAGE_ROOT, "src", "ui", "index.html");
-var ORPHAN_MARKER = join5(PACKAGE_ROOT, ".orphaned_at");
+var PACKAGE_FILE = join6(PACKAGE_ROOT, "src", "ui", "index.html");
+var ORPHAN_MARKER = join6(PACKAGE_ROOT, ".orphaned_at");
 var packageGone = (path) => {
   try {
     statSync(path);
@@ -2196,16 +3475,16 @@ var lockAge = (lock) => {
   }
 };
 var takeStaleLock = (lock) => {
-  const aside = `${lock}.${process.pid}-${randomBytes2(4).toString("hex")}.stale`;
+  const aside2 = `${lock}.${process.pid}-${randomBytes2(4).toString("hex")}.stale`;
   try {
-    renameSync2(lock, aside);
+    renameSync2(lock, aside2);
   } catch (error) {
     if (error.code === "ENOENT") {
       return;
     }
     throw error;
   }
-  rmSync2(aside, { recursive: true, force: true });
+  rmSync2(aside2, { recursive: true, force: true });
 };
 var withLock = async (lock, work) => {
   for (; ; ) {
@@ -2265,20 +3544,22 @@ var startNurselog = async (options = {}) => {
   if (live && existsSync(orphanMarker)) {
     throw new OrphanedCopyError(orphanMarker);
   }
-  const token = live ? ensureBoardToken(join5(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
+  const token = live ? ensureBoardToken(join6(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
   const speed = options.replay?.speed ?? 1;
   const contexts = /* @__PURE__ */ new Map();
   const setups = /* @__PURE__ */ new Map();
   const failures = /* @__PURE__ */ new Map();
   const stops = [];
   const repositories = () => [...contexts.values()].sort((a, b) => a.name.localeCompare(b.name));
-  const lines = () => [...contexts.values()].reduce((sum, context) => sum + context.lines(), 0);
+  const lines = () => [...contexts.values()].reduce((sum2, context) => sum2 + context.lines(), 0);
+  let updates;
   const create = (port2) => createBoardServer({
     host: "127.0.0.1",
     port: port2,
     token,
     repositories,
     health: () => ({ startedAt, mode: live ? "spool" : "replay", lines: lines(), ...live ? {} : { speed } }),
+    update: () => updates?.notice() ?? null,
     onClient: () => {
       for (const context of contexts.values()) {
         context.nudge();
@@ -2346,10 +3627,10 @@ var startNurselog = async (options = {}) => {
   let unlisted = /* @__PURE__ */ new Map();
   const scan = () => {
     pruneOrphans();
-    let listed;
+    let listed2;
     const reasons = /* @__PURE__ */ new Map();
     try {
-      listed = listRepositories((repository, message) => reasons.set(repository.hash, `${nameOf(repository)} is not served: ${message}`));
+      listed2 = listRepositories((repository, message) => reasons.set(repository.hash, `${nameOf(repository)} is not served: ${message}`));
     } catch (error) {
       warn(`the repositories were not listed: ${error.message}`);
       return;
@@ -2362,7 +3643,7 @@ var startNurselog = async (options = {}) => {
     unlisted = reasons;
     const now = /* @__PURE__ */ new Date();
     const served = /* @__PURE__ */ new Map();
-    for (const repository of listed) {
+    for (const repository of listed2) {
       if (!withinReadDays(repository.lastLineAt, MAX_READ_DAYS, now)) {
         continue;
       }
@@ -2468,12 +3749,16 @@ var startNurselog = async (options = {}) => {
       const root = resolve3(options.replay.root);
       const ui = uiConfig(config, repositoryRoot(root));
       const id = repoHash(root);
-      contexts.set(id, createReplayContext({ id, name: ui.repo || "replay", root, config, ui, fixtures, speed }));
+      contexts.set(id, createReplayContext({ id, name: ui.repo || "replay", root, config, ui, fixtures, speed, log }));
       server.update();
     } else {
       scan();
       const timer = setInterval(tick, options.scanMs ?? SCAN_MS);
       stops.push(() => clearInterval(timer));
+      updates = options.updateCheck === false ? void 0 : startUpdateCheck({ log, ...options.updateCheck });
+      if (updates) {
+        stops.push(updates.stop);
+      }
     }
   } catch (error) {
     stopAll();
@@ -2494,8 +3779,8 @@ var startNurselog = async (options = {}) => {
 
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
-import { closeSync as closeSync3, constants as constants2, existsSync as existsSync2, fstatSync, openSync as openSync2, readFileSync as readFileSync5, readSync as readSync3 } from "fs";
-import { join as join6, resolve as resolve4 } from "path";
+import { closeSync as closeSync3, constants as constants2, existsSync as existsSync2, fstatSync, openSync as openSync2, readFileSync as readFileSync6, readSync as readSync3 } from "fs";
+import { join as join7, resolve as resolve4 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
   start [--replay <fixture>] [--speed <n>] [--port <n>]  start the one board for every repository, or print the repository's tab while it runs (the default command; builds the package once when dist/ is missing)
@@ -2626,7 +3911,7 @@ var questionMarker = (args, readStdin) => {
   return { ...result, data: { ...result.data, id }, output: id };
 };
 var MARKERS = { plan: planMarker, gate: gateMarker, question: questionMarker };
-var readStandardInput = () => readFileSync5(0, "utf8");
+var readStandardInput = () => readFileSync6(0, "utf8");
 var parseMarker = (kind, args, readStdin = readStandardInput) => {
   const marker = Object.hasOwn(MARKERS, kind) ? MARKERS[kind] : void 0;
   if (!marker) {
@@ -2775,7 +4060,7 @@ ${USAGE}`);
   const stateFile = serverStatePath();
   const state = readServerState(stateFile);
   const dir = spoolDirFor(config, root);
-  const today = join6(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
+  const today = join7(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
   const lines = linesToday(today);
   const board = await checkBoard(stateFile, RUNNING_CHECK_MS);
   const running = state !== void 0 && board.status !== "none";
@@ -2859,7 +4144,8 @@ export {
   shiftTimes,
   mergeFixtures,
   replayFixtures,
-  percentile,
+  plainText,
+  insightsOf,
   readAggregates,
   purgeableAggregates,
   purgeAggregates,
