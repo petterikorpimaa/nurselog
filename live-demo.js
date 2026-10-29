@@ -337,14 +337,14 @@ var keyInput = (text2, ignoreCase) => {
 var keyMatches = (text2, pattern, ignoreCase) => {
   const input = keyInput(text2, ignoreCase);
   const keys2 = [];
-  let count = 0;
+  let count2 = 0;
   for (const match of input.matchAll(pattern)) {
     const end = match.index + match[0].length;
     if (KEY_FOLLOWER.test(input.slice(end, end + 2))) {
       keys2.push(match[1]);
     }
-    count += 1;
-    if (count >= MAX_KEY_MATCHES) {
+    count2 += 1;
+    if (count2 >= MAX_KEY_MATCHES) {
       break;
     }
   }
@@ -371,387 +371,6 @@ var branchKey = (branch, key, ignoreCase) => {
     }
   }
   return void 0;
-};
-
-// src/config-core.ts
-var defaultJoinPattern = (trunk) => `git diff (?:origin/)?${escapeRegExp(trunk)}\\.\\.\\.[^\\s>]+\\s*>`;
-var trunkJoinPattern = (config) => {
-  const branches2 = config.branches;
-  const trunk = isPlainObject(branches2) ? branches2.trunk : void 0;
-  return typeof trunk === "string" ? defaultJoinPattern(trunk) : DEFAULT_CONFIG.join.pattern;
-};
-var DEFAULT_CONFIG = {
-  keyPattern: "",
-  keyIgnoreCase: false,
-  keyUrl: "",
-  branches: { trunk: "main", promote: [] },
-  github: { repo: "", accountPattern: "", pollSeconds: 60, mergeBy: "developer", promoteTitlePrefix: {} },
-  packages: [],
-  stageColors: { plan: "#aeb4bf", implement: "#8fa6cc", review: "#7dd8d0", fix: "#ff9a7a", pr: "#e8eaef", docs: "#e9d28c", wait: "#ffffff" },
-  roles: structuredClone(DEFAULT_ROLES),
-  docs: { roles: ["doc-updater"], tools: [] },
-  modelLetters: { "claude-haiku": "H", "claude-sonnet": "S", "claude-opus": "O", "claude-fable": "F" },
-  budgets: {
-    warnAt: 0.8,
-    default: { toolCalls: null, verifyRounds: null },
-    roles: { implementer: { toolCalls: 80, verifyRounds: 3 } },
-    /** The current Opus, Sonnet, Fable and Haiku 5 models have a 1M context window; older models fall back to 200k. */
-    contextLimits: { default: 2e5, "claude-opus": 1e6, "claude-sonnet": 1e6, "claude-fable": 1e6, "claude-haiku-5": 1e6 }
-  },
-  verification: { runners: [...VERIFICATION_RUNNERS], kinds: { ...VERIFICATION_KINDS }, failPatterns: { ...VERIFICATION_FAIL_PATTERNS }, fullRunOnly: true },
-  join: { pattern: defaultJoinPattern("main") },
-  // The Node config (`src/config.ts`) gives `prices.json` of this package; the browser-safe core reads no file.
-  pricesFrom: "",
-  spool: { dir: "~/.local/share/nurselog", readDays: 7, keepDays: 14, maxLineBytes: 65536 },
-  insights: { window: 5, baseline: 20, minBaseline: 10, keepDays: 365 },
-  retention: { indexHours: 6 },
-  server: { host: "127.0.0.1" },
-  features: { answerFromUi: false }
-};
-var isPlainObject = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
-var mergeConfig = (base, override) => {
-  if (!isPlainObject(base) || !isPlainObject(override)) {
-    return override === void 0 ? base : override;
-  }
-  const merged = { ...base };
-  for (const [key, value2] of Object.entries(override)) {
-    const current = Object.hasOwn(merged, key) ? merged[key] : void 0;
-    Object.defineProperty(merged, key, { value: mergeConfig(current, value2), enumerable: true, writable: true, configurable: true });
-  }
-  return merged;
-};
-var LEGACY_STAGE_COLORS = [["brief", "plan"], ["build", "implement"]];
-var readLegacyStageColor = (parsed) => {
-  const colors = parsed.stageColors;
-  if (!isPlainObject(colors)) {
-    return;
-  }
-  for (const [old, current] of LEGACY_STAGE_COLORS) {
-    if (!Object.hasOwn(colors, old)) {
-      continue;
-    }
-    if (!Object.hasOwn(colors, current)) {
-      colors[current] = colors[old];
-    }
-    delete colors[old];
-  }
-};
-var readLegacyRoleStages = (parsed) => {
-  const roles = parsed.roles;
-  if (!isPlainObject(roles)) {
-    return;
-  }
-  for (const role of Object.values(roles)) {
-    if (isPlainObject(role) && role.stage === LEGACY_ROLE_STAGE) {
-      role.stage = "implement";
-    }
-  }
-};
-var readLegacyNames = (parsed) => {
-  readLegacyStageColor(parsed);
-  readLegacyRoleStages(parsed);
-};
-var KIND_NAMES = Object.keys(VERIFICATION_KINDS);
-var BRANCH_NAME = /^[\w][\w./-]*$/;
-var isBranchName = (name) => typeof name === "string" && BRANCH_NAME.test(name) && !name.includes("..") && !name.endsWith(".lock") && !name.endsWith("/");
-var MIN_POLL_SECONDS = 10;
-var MAX_POLL_SECONDS = 3600;
-var ROLE_STAGES = ["implement", "review", "pr", "other"];
-var OBJECT = "an object";
-var STRING_LIST = "a list of strings";
-var LIMIT = "null or an integer of 0 or more";
-var isBoolean = (value2) => typeof value2 === "boolean";
-var isStringList = (value2) => Array.isArray(value2) && value2.every((item2) => typeof item2 === "string");
-var isPositive = (value2) => typeof value2 === "number" && Number.isFinite(value2) && value2 > 0;
-var isPollSeconds = (value2) => Number.isInteger(value2) && value2 >= MIN_POLL_SECONDS && value2 <= MAX_POLL_SECONDS;
-var isMergeBy = (value2) => value2 === "developer" || value2 === "agent";
-var isFraction = (value2) => typeof value2 === "number" && value2 >= 0 && value2 <= 1;
-var isLimit = (value2) => value2 === null || Number.isInteger(value2) && value2 >= 0;
-var isRole = (value2) => isPlainObject(value2) && ROLE_STAGES.includes(value2.stage) && (value2.short === void 0 || typeof value2.short === "string");
-var isRoleBudget = (value2) => isPlainObject(value2) && [value2.toolCalls, value2.verifyRounds].every((limit) => limit === void 0 || isLimit(limit));
-var isKeyUrl = (value2) => {
-  if (value2 === "") {
-    return true;
-  }
-  if (typeof value2 !== "string" || !value2.includes("{key}") || !URL.canParse(value2)) {
-    return false;
-  }
-  const url = new URL(value2);
-  return url.protocol === "https:" && !url.host.includes("{");
-};
-var isIntegerIn = (min, max) => (value2) => Number.isInteger(value2) && value2 >= min && value2 <= max;
-var DEFAULTED_KEYS = [
-  ["keyIgnoreCase", "true or false", isBoolean],
-  ["keyUrl", "empty or an https: URL that contains {key} outside its host", isKeyUrl],
-  ["github", OBJECT, isPlainObject],
-  ["github.pollSeconds", `an integer from ${MIN_POLL_SECONDS} to ${MAX_POLL_SECONDS}`, isPollSeconds],
-  ["github.mergeBy", "developer or agent", isMergeBy],
-  ["roles", OBJECT, isPlainObject],
-  ["roles.*", "an object with a stage of implement, review, pr or other and an optional string short", isRole],
-  ["docs", OBJECT, isPlainObject],
-  ["docs.roles", STRING_LIST, isStringList],
-  ["docs.tools", STRING_LIST, isStringList],
-  ["budgets", OBJECT, isPlainObject],
-  ["budgets.warnAt", "a number from 0 to 1", isFraction],
-  ["budgets.default", OBJECT, isPlainObject],
-  ["budgets.default.toolCalls", LIMIT, isLimit],
-  ["budgets.default.verifyRounds", LIMIT, isLimit],
-  ["budgets.roles", OBJECT, isPlainObject],
-  ["budgets.roles.*", `an object whose toolCalls and verifyRounds are each ${LIMIT}`, isRoleBudget],
-  ["budgets.contextLimits", OBJECT, isPlainObject],
-  ["budgets.contextLimits.*", "a positive number", isPositive],
-  ["verification", OBJECT, isPlainObject],
-  ["verification.runners", STRING_LIST, isStringList],
-  ["verification.kinds", OBJECT, isPlainObject],
-  ["verification.failPatterns", OBJECT, isPlainObject],
-  ["retention", OBJECT, isPlainObject],
-  ["retention.indexHours", "a positive number", isPositive],
-  ["insights", OBJECT, isPlainObject],
-  ["insights.window", "an integer from 1 to 100", isIntegerIn(1, 100)],
-  ["insights.baseline", "an integer from 1 to 1000", isIntegerIn(1, 1e3)],
-  ["insights.minBaseline", "an integer from 1 to 1000", isIntegerIn(1, 1e3)],
-  ["insights.keepDays", "an integer from 1 to 3650", isIntegerIn(1, 3650)]
-];
-var valueAt = (root, path) => {
-  let value2 = root;
-  for (const key of path) {
-    if (!isPlainObject(value2) || !Object.hasOwn(value2, key)) {
-      return void 0;
-    }
-    value2 = value2[key];
-  }
-  return value2;
-};
-var pathsOf = (config, key) => {
-  let paths = [[]];
-  for (const step of key.split(".")) {
-    paths = paths.flatMap((path) => {
-      if (step !== "*") {
-        return [[...path, step]];
-      }
-      const value2 = valueAt(config, path);
-      return isPlainObject(value2) ? Object.keys(value2).map((own) => [...path, own]) : [];
-    });
-  }
-  return paths;
-};
-var restoreDefault = (config, path) => {
-  const parent = valueAt(config, path.slice(0, -1));
-  const key = path[path.length - 1];
-  const standard = valueAt(DEFAULT_CONFIG, path);
-  if (!isPlainObject(parent)) {
-    return;
-  }
-  if (standard === void 0) {
-    delete parent[key];
-  } else {
-    Object.defineProperty(parent, key, { value: structuredClone(standard), enumerable: true, writable: true, configurable: true });
-  }
-};
-var restoreBadKeys = (config) => {
-  const warnings = [];
-  for (const [key, rule, valid] of DEFAULTED_KEYS) {
-    for (const path of pathsOf(config, key)) {
-      if (!valid(valueAt(config, path))) {
-        restoreDefault(config, path);
-        warnings.push(stripControl(`${path.join(".")} must be ${rule}; the default is used`));
-      }
-    }
-  }
-  return warnings;
-};
-var KEY_IGNORE_CASE_WARNING = "keyIgnoreCase is ignored without keyPattern: the built-in branch key pattern matches upper case only";
-var NON_LITERAL_ESCAPES = /* @__PURE__ */ new Set([..."dDwWsSbBnrtvf"]);
-var UPPER_CLASS_ESCAPES = /* @__PURE__ */ new Set(["w", "D", "S"]);
-var HEX_DIGITS = /* @__PURE__ */ new Map([["x", 2], ["u", 4]]);
-var HEX = /^[0-9A-Fa-f]+$/;
-var CONTROL_LETTER = /^[A-Za-z]$/;
-var LOOKBEHIND_MARKS = /* @__PURE__ */ new Set(["=", "!"]);
-var LOWER_A = 97;
-var LOWER_Z = 122;
-var UPPER_A = 65;
-var UPPER_Z = 90;
-var atomAt = (pattern, at) => {
-  if (pattern.charAt(at) !== "\\") {
-    return { end: at + 1, code: pattern.charCodeAt(at) };
-  }
-  const letter = pattern.charAt(at + 1);
-  if (NON_LITERAL_ESCAPES.has(letter)) {
-    return { end: at + 2, upper: UPPER_CLASS_ESCAPES.has(letter) };
-  }
-  if (letter === "c" && CONTROL_LETTER.test(pattern.charAt(at + 2))) {
-    return { end: at + 3 };
-  }
-  const digits = HEX_DIGITS.get(letter);
-  const hex = digits === void 0 ? "" : pattern.slice(at + 2, at + 2 + digits);
-  if (digits !== void 0 && hex.length === digits && HEX.test(hex)) {
-    return { end: at + 2 + digits, code: Number.parseInt(hex, 16) };
-  }
-  return { end: at + 2, code: pattern.charCodeAt(at + 1) };
-};
-var noteRange = (scan, low, high) => {
-  scan.upper ||= low <= UPPER_Z && high >= UPPER_A;
-  if (scan.lower === void 0 && low <= LOWER_Z && high >= LOWER_A) {
-    scan.lower = Math.max(low, LOWER_A);
-  }
-};
-var noteAtom = (scan, atom) => {
-  if (atom.code === void 0) {
-    scan.upper ||= atom.upper === true;
-  } else {
-    noteRange(scan, atom.code, atom.code);
-  }
-};
-var classLetter = (pattern, at) => {
-  const negated = pattern.charAt(at + 1) === "^";
-  const scan = { upper: false };
-  let index = negated ? at + 2 : at + 1;
-  while (index < pattern.length && pattern.charAt(index) !== "]") {
-    const first = atomAt(pattern, index);
-    const ranged = pattern.charAt(first.end) === "-" && first.end + 1 < pattern.length && pattern.charAt(first.end + 1) !== "]";
-    const last = ranged ? atomAt(pattern, first.end + 1) : void 0;
-    if (last?.code !== void 0 && first.code !== void 0) {
-      noteRange(scan, first.code, last.code);
-    } else {
-      noteAtom(scan, first);
-      if (last) {
-        noteAtom(scan, last);
-      }
-    }
-    index = last ? last.end : first.end;
-  }
-  const letter = negated || scan.upper || scan.lower === void 0 ? void 0 : String.fromCharCode(scan.lower);
-  return { end: index + 1, letter };
-};
-var lowerCaseLetter = (pattern) => {
-  let at = 0;
-  while (at < pattern.length) {
-    const named = pattern.startsWith("(?<", at) && !LOOKBEHIND_MARKS.has(pattern.charAt(at + 3));
-    let letter;
-    if (named) {
-      const close = pattern.indexOf(">", at + 3);
-      at = close < 0 ? pattern.length : close + 1;
-    } else if (pattern.charAt(at) === "[") {
-      const scanned = classLetter(pattern, at);
-      letter = scanned.letter;
-      at = scanned.end;
-    } else {
-      const { code, end } = atomAt(pattern, at);
-      letter = code !== void 0 && code >= LOWER_A && code <= LOWER_Z ? String.fromCharCode(code) : void 0;
-      at = end;
-    }
-    if (letter !== void 0) {
-      return letter;
-    }
-  }
-  return void 0;
-};
-var keyCaseWarnings = (config) => {
-  if (config.keyIgnoreCase !== true) {
-    return [];
-  }
-  if (config.keyPattern === "") {
-    return [KEY_IGNORE_CASE_WARNING];
-  }
-  const letter = typeof config.keyPattern === "string" ? lowerCaseLetter(config.keyPattern) : void 0;
-  if (letter === void 0) {
-    return [];
-  }
-  return [`keyPattern holds the lower-case letter ${letter}, which matches nothing with keyIgnoreCase (the text is upper-cased first); write the pattern in upper case`];
-};
-var mergeOverDefaults = (parsed, defaults2 = DEFAULT_CONFIG) => {
-  const config = mergeConfig(structuredClone(defaults2), parsed);
-  const join = config.join;
-  const configured = isPlainObject(parsed.join) && parsed.join.pattern !== void 0;
-  if (isPlainObject(join) && !configured) {
-    join.pattern = trunkJoinPattern(config);
-  }
-  return config;
-};
-var CONFIG_NOT_OBJECT = "the config must be a JSON object";
-var configOf = (parsed, warn2 = () => {
-}, defaults2 = DEFAULT_CONFIG) => {
-  if (!isPlainObject(parsed)) {
-    throw new Error(CONFIG_NOT_OBJECT);
-  }
-  readLegacyNames(parsed);
-  const config = mergeOverDefaults(parsed, defaults2);
-  const warnings = [...restoreBadKeys(config), ...keyCaseWarnings(config)];
-  for (const warning of warnings) {
-    warn2(warning);
-  }
-  return config;
-};
-var lastSegment = (path) => path.replace(/\/+$/, "").split("/").pop() ?? "";
-var uiConfig = (config, root) => {
-  const packages = config.packages.map((pkg) => ({ id: pkg.id, label: pkg.label ?? pkg.id, color: pkg.color }));
-  const roleShorts = Object.fromEntries(Object.entries(config.roles).flatMap(([type, role]) => role.short ? [[type, role.short]] : []));
-  const docs = config.docs.roles.length > 0 || config.docs.tools.length > 0;
-  return {
-    repo: root ? lastSegment(root) : "",
-    packages,
-    stageColors: { ...config.stageColors },
-    modelLetters: { ...config.modelLetters },
-    roleShorts,
-    warnAt: config.budgets.warnAt,
-    promote: [...config.branches.promote],
-    docs,
-    features: { answerFromUi: config.features.answerFromUi },
-    keyUrl: config.keyUrl,
-    sessionFixtures: false
-  };
-};
-
-// src/model/display-state.ts
-var MAIN_AGENT = "main";
-var openPermission = (agent) => {
-  if (agent.now?.permission === "waiting") {
-    return agent.now;
-  }
-  for (let index = agent.recent.length - 1; index >= 0; index -= 1) {
-    const call = agent.recent[index];
-    if (call.permission === "waiting" && !call.endedAt) {
-      return call;
-    }
-  }
-  return void 0;
-};
-var runOver = (run) => run.chip.tone === "done" || run.endedAt !== void 0;
-var mainWaits = (run, agent) => run.chip.tone === "you" && (agent.now === void 0 || agent.now.tool === "AskUserQuestion");
-var mainState = (run, agent) => {
-  if (runOver(run)) {
-    return "done";
-  }
-  if (openPermission(agent) || mainWaits(run, agent)) {
-    return "waiting";
-  }
-  return agent.idleSince ? "idle" : "running";
-};
-var subagentState = (agent) => {
-  if (agent.state === "running" && openPermission(agent)) {
-    return "waiting";
-  }
-  return agent.state === "running" && agent.staleSince ? "stale" : agent.state;
-};
-var displayState = (run, agent) => {
-  if (agent.id === MAIN_AGENT && agent.state === "running") {
-    return mainState(run, agent);
-  }
-  return subagentState(agent);
-};
-var sessionMainWords = (session) => {
-  if (session.plan.state === "done") {
-    return "ended";
-  }
-  if (session.plan.state === "waiting") {
-    return "waiting for you";
-  }
-  if (session.plan.state === "running") {
-    return "working";
-  }
-  const subagents = Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT);
-  const busy = subagents.some((agent) => agent.state === "running" || agent.state === "waiting");
-  return busy ? "waiting on agents" : "idle";
 };
 
 // src/model/paths.ts
@@ -954,6 +573,417 @@ var gitArgs = (words) => {
   return words.slice(at);
 };
 
+// src/config-core.ts
+var defaultJoinPattern = (trunk) => `git diff (?:origin/)?${escapeRegExp(trunk)}\\.\\.\\.[^\\s>]+\\s*>`;
+var trunkJoinPattern = (config) => {
+  const branches2 = config.branches;
+  const trunk = isPlainObject(branches2) ? branches2.trunk : void 0;
+  return typeof trunk === "string" ? defaultJoinPattern(trunk) : DEFAULT_CONFIG.join.pattern;
+};
+var DEFAULT_CONFIG = {
+  keyPattern: "",
+  keyIgnoreCase: false,
+  keyUrl: "",
+  branches: { trunk: "main", promote: [] },
+  github: { repo: "", accountPattern: "", pollSeconds: 60, mergeBy: "developer", promoteTitlePrefix: {} },
+  packages: [],
+  stageColors: { plan: "#aeb4bf", implement: "#8fa6cc", review: "#7dd8d0", fix: "#ff9a7a", pr: "#e8eaef", docs: "#e9d28c", wait: "#ffffff" },
+  roles: structuredClone(DEFAULT_ROLES),
+  docs: { roles: ["doc-updater"], tools: [] },
+  modelLetters: { "claude-haiku": "H", "claude-sonnet": "S", "claude-opus": "O", "claude-fable": "F" },
+  budgets: {
+    warnAt: 0.8,
+    default: { toolCalls: null, verifyRounds: null },
+    roles: { implementer: { toolCalls: 80, verifyRounds: 3 } },
+    /** The current Opus, Sonnet, Fable and Haiku 5 models have a 1M context window; older models fall back to 200k. */
+    contextLimits: { default: 2e5, "claude-opus": 1e6, "claude-sonnet": 1e6, "claude-fable": 1e6, "claude-haiku-5": 1e6 }
+  },
+  verification: { runners: [...VERIFICATION_RUNNERS], kinds: { ...VERIFICATION_KINDS }, failPatterns: { ...VERIFICATION_FAIL_PATTERNS }, fullRunOnly: true },
+  join: { pattern: defaultJoinPattern("main") },
+  // The Node config (`src/config.ts`) gives `prices.json` of this package; the browser-safe core reads no file.
+  pricesFrom: "",
+  spool: { dir: "~/.local/share/nurselog", readDays: 7, keepDays: 14, maxLineBytes: 65536 },
+  insights: {
+    window: 5,
+    baseline: 20,
+    minBaseline: 10,
+    keepDays: 365,
+    guidelines: { budgetFirstStop: 0.3, quietReviewer: 0.3, overheadShare: 0.01, mainPeakContext: 0.4, mainLargeOutputs: 2, cachePerOutput: { main: 350, agents: 100 } }
+  },
+  retention: { indexHours: 6 },
+  server: { host: "127.0.0.1" },
+  features: { answerFromUi: false }
+};
+var isPlainObject = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var mergeConfig = (base, override) => {
+  if (!isPlainObject(base) || !isPlainObject(override)) {
+    return override === void 0 ? base : override;
+  }
+  const merged = { ...base };
+  for (const [key, value2] of Object.entries(override)) {
+    const current = Object.hasOwn(merged, key) ? merged[key] : void 0;
+    Object.defineProperty(merged, key, { value: mergeConfig(current, value2), enumerable: true, writable: true, configurable: true });
+  }
+  return merged;
+};
+var LEGACY_STAGE_COLORS = [["brief", "plan"], ["build", "implement"]];
+var readLegacyStageColor = (parsed) => {
+  const colors = parsed.stageColors;
+  if (!isPlainObject(colors)) {
+    return;
+  }
+  for (const [old, current] of LEGACY_STAGE_COLORS) {
+    if (!Object.hasOwn(colors, old)) {
+      continue;
+    }
+    if (!Object.hasOwn(colors, current)) {
+      colors[current] = colors[old];
+    }
+    delete colors[old];
+  }
+};
+var readLegacyRoleStages = (parsed) => {
+  const roles = parsed.roles;
+  if (!isPlainObject(roles)) {
+    return;
+  }
+  for (const role of Object.values(roles)) {
+    if (isPlainObject(role) && role.stage === LEGACY_ROLE_STAGE) {
+      role.stage = "implement";
+    }
+  }
+};
+var readLegacyNames = (parsed) => {
+  readLegacyStageColor(parsed);
+  readLegacyRoleStages(parsed);
+};
+var KIND_NAMES = Object.keys(VERIFICATION_KINDS);
+var BRANCH_NAME = /^[\w][\w./-]*$/;
+var isBranchName = (name) => typeof name === "string" && BRANCH_NAME.test(name) && !name.includes("..") && !name.endsWith(".lock") && !name.endsWith("/");
+var MIN_POLL_SECONDS = 10;
+var MAX_POLL_SECONDS = 3600;
+var ROLE_STAGES = ["implement", "review", "pr", "other"];
+var OBJECT = "an object";
+var STRING_LIST = "a list of strings";
+var LIMIT = "null or an integer of 0 or more";
+var SHARE_LIMIT = "null or a number from 0 to 1";
+var POSITIVE_LIMIT = "null or a positive number";
+var isBoolean = (value2) => typeof value2 === "boolean";
+var isStringList = (value2) => Array.isArray(value2) && value2.every((item2) => typeof item2 === "string");
+var isPositive = (value2) => typeof value2 === "number" && Number.isFinite(value2) && value2 > 0;
+var isPollSeconds = (value2) => Number.isInteger(value2) && value2 >= MIN_POLL_SECONDS && value2 <= MAX_POLL_SECONDS;
+var isMergeBy = (value2) => value2 === "developer" || value2 === "agent";
+var isFraction = (value2) => typeof value2 === "number" && value2 >= 0 && value2 <= 1;
+var isLimit = (value2) => value2 === null || Number.isInteger(value2) && value2 >= 0;
+var isShareLimit = (value2) => value2 === null || isFraction(value2);
+var isPositiveLimit = (value2) => value2 === null || isPositive(value2);
+var isRole = (value2) => isPlainObject(value2) && ROLE_STAGES.includes(value2.stage) && (value2.short === void 0 || typeof value2.short === "string");
+var isRoleBudget = (value2) => isPlainObject(value2) && [value2.toolCalls, value2.verifyRounds].every((limit) => limit === void 0 || isLimit(limit));
+var isKeyUrl = (value2) => {
+  if (value2 === "") {
+    return true;
+  }
+  if (typeof value2 !== "string" || !value2.includes("{key}") || !URL.canParse(value2)) {
+    return false;
+  }
+  const url = new URL(value2);
+  return url.protocol === "https:" && !url.host.includes("{");
+};
+var isIntegerIn = (min, max) => (value2) => Number.isInteger(value2) && value2 >= min && value2 <= max;
+var DEFAULTED_KEYS = [
+  ["keyIgnoreCase", "true or false", isBoolean],
+  ["keyUrl", "empty or an https: URL that contains {key} outside its host", isKeyUrl],
+  ["github", OBJECT, isPlainObject],
+  ["github.pollSeconds", `an integer from ${MIN_POLL_SECONDS} to ${MAX_POLL_SECONDS}`, isPollSeconds],
+  ["github.mergeBy", "developer or agent", isMergeBy],
+  ["roles", OBJECT, isPlainObject],
+  ["roles.*", "an object with a stage of implement, review, pr or other and an optional string short", isRole],
+  ["docs", OBJECT, isPlainObject],
+  ["docs.roles", STRING_LIST, isStringList],
+  ["docs.tools", STRING_LIST, isStringList],
+  ["budgets", OBJECT, isPlainObject],
+  ["budgets.warnAt", "a number from 0 to 1", isFraction],
+  ["budgets.default", OBJECT, isPlainObject],
+  ["budgets.default.toolCalls", LIMIT, isLimit],
+  ["budgets.default.verifyRounds", LIMIT, isLimit],
+  ["budgets.roles", OBJECT, isPlainObject],
+  ["budgets.roles.*", `an object whose toolCalls and verifyRounds are each ${LIMIT}`, isRoleBudget],
+  ["budgets.contextLimits", OBJECT, isPlainObject],
+  ["budgets.contextLimits.*", "a positive number", isPositive],
+  ["verification", OBJECT, isPlainObject],
+  ["verification.runners", STRING_LIST, isStringList],
+  ["verification.kinds", OBJECT, isPlainObject],
+  ["verification.failPatterns", OBJECT, isPlainObject],
+  ["retention", OBJECT, isPlainObject],
+  ["retention.indexHours", "a positive number", isPositive],
+  ["insights", OBJECT, isPlainObject],
+  ["insights.window", "an integer from 1 to 100", isIntegerIn(1, 100)],
+  ["insights.baseline", "an integer from 1 to 1000", isIntegerIn(1, 1e3)],
+  ["insights.minBaseline", "an integer from 1 to 1000", isIntegerIn(1, 1e3)],
+  ["insights.keepDays", "an integer from 1 to 3650", isIntegerIn(1, 3650)],
+  ["insights.guidelines", OBJECT, isPlainObject],
+  ["insights.guidelines.budgetFirstStop", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.quietReviewer", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.overheadShare", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.mainPeakContext", SHARE_LIMIT, isShareLimit],
+  ["insights.guidelines.mainLargeOutputs", LIMIT, isLimit],
+  ["insights.guidelines.cachePerOutput", OBJECT, isPlainObject],
+  ["insights.guidelines.cachePerOutput.main", POSITIVE_LIMIT, isPositiveLimit],
+  ["insights.guidelines.cachePerOutput.agents", POSITIVE_LIMIT, isPositiveLimit]
+];
+var valueAt = (root, path) => {
+  let value2 = root;
+  for (const key of path) {
+    if (!isPlainObject(value2) || !Object.hasOwn(value2, key)) {
+      return void 0;
+    }
+    value2 = value2[key];
+  }
+  return value2;
+};
+var pathsOf = (config, key) => {
+  let paths = [[]];
+  for (const step of key.split(".")) {
+    paths = paths.flatMap((path) => {
+      if (step !== "*") {
+        return [[...path, step]];
+      }
+      const value2 = valueAt(config, path);
+      return isPlainObject(value2) ? Object.keys(value2).map((own) => [...path, own]) : [];
+    });
+  }
+  return paths;
+};
+var restoreDefault = (config, path) => {
+  const parent = valueAt(config, path.slice(0, -1));
+  const key = path[path.length - 1];
+  const standard = valueAt(DEFAULT_CONFIG, path);
+  if (!isPlainObject(parent)) {
+    return;
+  }
+  if (standard === void 0) {
+    delete parent[key];
+  } else {
+    Object.defineProperty(parent, key, { value: structuredClone(standard), enumerable: true, writable: true, configurable: true });
+  }
+};
+var restoreBadKeys = (config) => {
+  const warnings = [];
+  for (const [key, rule, valid] of DEFAULTED_KEYS) {
+    for (const path of pathsOf(config, key)) {
+      if (!valid(valueAt(config, path))) {
+        restoreDefault(config, path);
+        warnings.push(stripControl(`${path.join(".")} must be ${rule}; the default is used`));
+      }
+    }
+  }
+  return warnings;
+};
+var KEY_IGNORE_CASE_WARNING = "keyIgnoreCase is ignored without keyPattern: the built-in branch key pattern matches upper case only";
+var NON_LITERAL_ESCAPES = /* @__PURE__ */ new Set([..."dDwWsSbBnrtvf"]);
+var UPPER_CLASS_ESCAPES = /* @__PURE__ */ new Set(["w", "D", "S"]);
+var HEX_DIGITS = /* @__PURE__ */ new Map([["x", 2], ["u", 4]]);
+var HEX = /^[0-9A-Fa-f]+$/;
+var CONTROL_LETTER = /^[A-Za-z]$/;
+var LOOKBEHIND_MARKS = /* @__PURE__ */ new Set(["=", "!"]);
+var LOWER_A = 97;
+var LOWER_Z = 122;
+var UPPER_A = 65;
+var UPPER_Z = 90;
+var atomAt = (pattern, at) => {
+  if (pattern.charAt(at) !== "\\") {
+    return { end: at + 1, code: pattern.charCodeAt(at) };
+  }
+  const letter = pattern.charAt(at + 1);
+  if (NON_LITERAL_ESCAPES.has(letter)) {
+    return { end: at + 2, upper: UPPER_CLASS_ESCAPES.has(letter) };
+  }
+  if (letter === "c" && CONTROL_LETTER.test(pattern.charAt(at + 2))) {
+    return { end: at + 3 };
+  }
+  const digits = HEX_DIGITS.get(letter);
+  const hex = digits === void 0 ? "" : pattern.slice(at + 2, at + 2 + digits);
+  if (digits !== void 0 && hex.length === digits && HEX.test(hex)) {
+    return { end: at + 2 + digits, code: Number.parseInt(hex, 16) };
+  }
+  return { end: at + 2, code: pattern.charCodeAt(at + 1) };
+};
+var noteRange = (scan, low, high) => {
+  scan.upper ||= low <= UPPER_Z && high >= UPPER_A;
+  if (scan.lower === void 0 && low <= LOWER_Z && high >= LOWER_A) {
+    scan.lower = Math.max(low, LOWER_A);
+  }
+};
+var noteAtom = (scan, atom) => {
+  if (atom.code === void 0) {
+    scan.upper ||= atom.upper === true;
+  } else {
+    noteRange(scan, atom.code, atom.code);
+  }
+};
+var classLetter = (pattern, at) => {
+  const negated = pattern.charAt(at + 1) === "^";
+  const scan = { upper: false };
+  let index = negated ? at + 2 : at + 1;
+  while (index < pattern.length && pattern.charAt(index) !== "]") {
+    const first = atomAt(pattern, index);
+    const ranged = pattern.charAt(first.end) === "-" && first.end + 1 < pattern.length && pattern.charAt(first.end + 1) !== "]";
+    const last = ranged ? atomAt(pattern, first.end + 1) : void 0;
+    if (last?.code !== void 0 && first.code !== void 0) {
+      noteRange(scan, first.code, last.code);
+    } else {
+      noteAtom(scan, first);
+      if (last) {
+        noteAtom(scan, last);
+      }
+    }
+    index = last ? last.end : first.end;
+  }
+  const letter = negated || scan.upper || scan.lower === void 0 ? void 0 : String.fromCharCode(scan.lower);
+  return { end: index + 1, letter };
+};
+var lowerCaseLetter = (pattern) => {
+  let at = 0;
+  while (at < pattern.length) {
+    const named = pattern.startsWith("(?<", at) && !LOOKBEHIND_MARKS.has(pattern.charAt(at + 3));
+    let letter;
+    if (named) {
+      const close = pattern.indexOf(">", at + 3);
+      at = close < 0 ? pattern.length : close + 1;
+    } else if (pattern.charAt(at) === "[") {
+      const scanned = classLetter(pattern, at);
+      letter = scanned.letter;
+      at = scanned.end;
+    } else {
+      const { code, end } = atomAt(pattern, at);
+      letter = code !== void 0 && code >= LOWER_A && code <= LOWER_Z ? String.fromCharCode(code) : void 0;
+      at = end;
+    }
+    if (letter !== void 0) {
+      return letter;
+    }
+  }
+  return void 0;
+};
+var keyCaseWarnings = (config) => {
+  if (config.keyIgnoreCase !== true) {
+    return [];
+  }
+  if (config.keyPattern === "") {
+    return [KEY_IGNORE_CASE_WARNING];
+  }
+  const letter = typeof config.keyPattern === "string" ? lowerCaseLetter(config.keyPattern) : void 0;
+  if (letter === void 0) {
+    return [];
+  }
+  return [`keyPattern holds the lower-case letter ${letter}, which matches nothing with keyIgnoreCase (the text is upper-cased first); write the pattern in upper case`];
+};
+var mergeOverDefaults = (parsed, defaults2 = DEFAULT_CONFIG) => {
+  const config = mergeConfig(structuredClone(defaults2), parsed);
+  const join = config.join;
+  const configured = isPlainObject(parsed.join) && parsed.join.pattern !== void 0;
+  if (isPlainObject(join) && !configured) {
+    join.pattern = trunkJoinPattern(config);
+  }
+  return config;
+};
+var CONFIG_NOT_OBJECT = "the config must be a JSON object";
+var configOf = (parsed, warn2 = () => {
+}, defaults2 = DEFAULT_CONFIG) => {
+  if (!isPlainObject(parsed)) {
+    throw new Error(CONFIG_NOT_OBJECT);
+  }
+  readLegacyNames(parsed);
+  const config = mergeOverDefaults(parsed, defaults2);
+  const warnings = [...restoreBadKeys(config), ...keyCaseWarnings(config)];
+  for (const warning of warnings) {
+    warn2(warning);
+  }
+  return config;
+};
+var lastSegment = (path) => path.replace(/\/+$/, "").split("/").pop() ?? "";
+var uiConfig = (config, root) => {
+  const packages = config.packages.map((pkg) => ({ id: pkg.id, label: pkg.label ?? pkg.id, color: pkg.color }));
+  const roleShorts = Object.fromEntries(Object.entries(config.roles).flatMap(([type, role]) => role.short ? [[type, role.short]] : []));
+  const docs = config.docs.roles.length > 0 || config.docs.tools.length > 0;
+  return {
+    repo: root ? lastSegment(root) : "",
+    packages,
+    stageColors: { ...config.stageColors },
+    modelLetters: { ...config.modelLetters },
+    roleShorts,
+    warnAt: config.budgets.warnAt,
+    promote: [...config.branches.promote],
+    docs,
+    features: { answerFromUi: config.features.answerFromUi },
+    keyUrl: config.keyUrl,
+    sessionFixtures: false
+  };
+};
+var SETUP_KINDS = ["typecheck", "lint", "test"];
+var workflowSetupOf = (config) => {
+  const roles = Object.entries(config.roles).map(([role, entry]) => {
+    const limits = ownValue(config.budgets.roles, role) ?? {};
+    const resolved = limits.toolCalls === void 0 ? config.budgets.default.toolCalls : limits.toolCalls;
+    const toolCalls = resolved === 0 ? null : resolved;
+    return { role, stage: entry.stage, toolCalls };
+  });
+  const verification = SETUP_KINDS.filter((kind) => config.verification.kinds[kind] !== "");
+  return { roles, verification, mergeBy: config.github.mergeBy };
+};
+
+// src/model/display-state.ts
+var MAIN_AGENT = "main";
+var openPermission = (agent) => {
+  if (agent.now?.permission === "waiting") {
+    return agent.now;
+  }
+  for (let index = agent.recent.length - 1; index >= 0; index -= 1) {
+    const call = agent.recent[index];
+    if (call.permission === "waiting" && !call.endedAt) {
+      return call;
+    }
+  }
+  return void 0;
+};
+var runOver = (run) => run.chip.tone === "done" || run.endedAt !== void 0;
+var mainWaits = (run, agent) => run.chip.tone === "you" && (agent.now === void 0 || agent.now.tool === "AskUserQuestion");
+var mainState = (run, agent) => {
+  if (runOver(run)) {
+    return "done";
+  }
+  if (openPermission(agent) || mainWaits(run, agent)) {
+    return "waiting";
+  }
+  return agent.idleSince ? "idle" : "running";
+};
+var subagentState = (agent) => {
+  if (agent.state === "running" && openPermission(agent)) {
+    return "waiting";
+  }
+  return agent.state === "running" && agent.staleSince ? "stale" : agent.state;
+};
+var displayState = (run, agent) => {
+  if (agent.id === MAIN_AGENT && agent.state === "running") {
+    return mainState(run, agent);
+  }
+  return subagentState(agent);
+};
+var sessionMainWords = (session) => {
+  if (session.plan.state === "done") {
+    return "ended";
+  }
+  if (session.plan.state === "waiting") {
+    return "waiting for you";
+  }
+  if (session.plan.state === "running") {
+    return "working";
+  }
+  const subagents = Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT);
+  const busy = subagents.some((agent) => agent.state === "running" || agent.state === "waiting");
+  return busy ? "waiting on agents" : "idle";
+};
+
 // src/model/counts.ts
 var isCount = (value2) => typeof value2 === "number" && Number.isSafeInteger(value2) && value2 >= 0;
 var isAmount = (value2) => typeof value2 === "number" && Number.isFinite(value2) && value2 >= 0;
@@ -1083,7 +1113,11 @@ var ghProblem = (data) => {
     return problem;
   }
   const timeProblem = ["mergedAt", "closedAt"].find((field) => pr[field] !== null && !isOptional(pr[field], isTime));
-  return timeProblem ? `data.pr.${timeProblem} must be an ISO time` : void 0;
+  if (timeProblem) {
+    return `data.pr.${timeProblem} must be an ISO time`;
+  }
+  const sizeProblem = ["additions", "deletions"].find((field) => !isOptional(pr[field], isCount));
+  return sizeProblem ? `data.pr.${sizeProblem} must be a whole number of at least 0` : void 0;
 };
 var USAGE_NUMBERS = ["input", "cacheWrite", "cacheWrite1h", "cacheRead", "output", "usd"];
 var usageProblem = (data) => {
@@ -1563,7 +1597,7 @@ var newRun = (id, worktree, branch, at) => ({
 });
 var keepNewest = (messages, size) => {
   let start = Math.max(0, messages.length - MESSAGE_CAP);
-  let total = messages.slice(start).reduce((sum, message) => sum + size(message), 0);
+  let total = messages.slice(start).reduce((sum2, message) => sum2 + size(message), 0);
   while (start < messages.length - 1 && total > MESSAGE_TEXT_BUDGET) {
     total -= size(messages[start]);
     start += 1;
@@ -2694,12 +2728,12 @@ var entryOf = (map, key, create) => {
 };
 var roleMetrics = (role, agents) => {
   const models = [...new Set(agents.flatMap((agent) => agent.model === void 0 ? [] : [agent.model]))];
-  const sum = (value2) => agents.reduce((total, agent) => total + value2(agent), 0);
+  const sum2 = (value2) => agents.reduce((total, agent) => total + value2(agent), 0);
   const peakContext = Math.max(0, ...agents.map((agent) => agent.budget.context.used));
-  const requests = sum((agent) => agent.budget.requests);
-  const cacheRead = sum((agent) => agent.budget.tokens.cacheRead);
-  const output = sum((agent) => agent.budget.tokens.output);
-  return { role, models, runs: agents.length, requests, cacheRead, output, peakContext, usd: sum((agent) => agent.budget.costUsd) };
+  const requests = sum2((agent) => agent.budget.requests);
+  const cacheRead = sum2((agent) => agent.budget.tokens.cacheRead);
+  const output = sum2((agent) => agent.budget.tokens.output);
+  return { role, models, runs: agents.length, requests, cacheRead, output, peakContext, usd: sum2((agent) => agent.budget.costUsd) };
 };
 var totalOf = (roles) => {
   const total = { runs: 0, requests: 0, cacheRead: 0, output: 0, peakContext: 0, usd: 0 };
@@ -2732,10 +2766,10 @@ var toolMetrics = (agents) => {
   const tools = /* @__PURE__ */ new Map();
   for (const agent of agents) {
     for (const [tool, output] of Object.entries(agent.budget.toolOutput)) {
-      const sum = entryOf(tools, tool, () => ({ tool, calls: 0, chars: 0, maxChars: 0 }));
-      sum.calls += output.calls;
-      sum.chars += output.chars;
-      sum.maxChars = Math.max(sum.maxChars, output.maxChars);
+      const sum2 = entryOf(tools, tool, () => ({ tool, calls: 0, chars: 0, maxChars: 0 }));
+      sum2.calls += output.calls;
+      sum2.chars += output.chars;
+      sum2.maxChars = Math.max(sum2.maxChars, output.maxChars);
     }
   }
   return [...tools.values()].sort((a, b) => b.chars - a.chars || compareText(a.tool, b.tool));
@@ -2750,7 +2784,7 @@ var verificationMetrics = (role, agents) => {
       failed[kind] += rounds.results[kind].filter((result) => result === "fail").length;
     }
   }
-  const all = VERIFY_KINDS.reduce((sum, kind) => sum + commands[kind], 0);
+  const all = VERIFY_KINDS.reduce((sum2, kind) => sum2 + commands[kind], 0);
   if (all === 0) {
     return void 0;
   }
@@ -2784,7 +2818,7 @@ var overheadMetrics = (overhead, sessionUsd) => {
 };
 var resumeMetrics = (resumes) => {
   const expired = resumes.filter((entry) => entry.cacheLikelyExpired === true).length;
-  const cacheWriteUsd = resumes.reduce((sum, entry) => sum + (entry.cacheWriteUsd ?? 0), 0);
+  const cacheWriteUsd = resumes.reduce((sum2, entry) => sum2 + (entry.cacheWriteUsd ?? 0), 0);
   return { count: resumes.length, expired, cacheWriteUsd, items: structuredClone(resumes) };
 };
 
@@ -2814,10 +2848,10 @@ var addCounts = (target, source) => {
 };
 var addToolOutput = (target, source) => {
   for (const [tool, output] of Object.entries(source)) {
-    const sum = ownEntry(target, tool, () => ({ calls: 0, chars: 0, maxChars: 0 }));
-    sum.calls += output.calls;
-    sum.chars += output.chars;
-    sum.maxChars = Math.max(sum.maxChars, output.maxChars);
+    const sum2 = ownEntry(target, tool, () => ({ calls: 0, chars: 0, maxChars: 0 }));
+    sum2.calls += output.calls;
+    sum2.chars += output.chars;
+    sum2.maxChars = Math.max(sum2.maxChars, output.maxChars);
   }
 };
 var mergeBudget = (lead, rest, warnAt) => {
@@ -3189,8 +3223,8 @@ var rawAnswers = (result) => {
   });
 };
 var questionAnswers = (result) => {
-  const listed = Array.isArray(result.answers) ? objects(result.answers).flatMap((item2) => questionAnswer(item2.question, item2.answer, item2.notes)) : void 0;
-  const answers = (listed ?? rawAnswers(result)).slice(0, ANSWERS_CAP);
+  const listed2 = Array.isArray(result.answers) ? objects(result.answers).flatMap((item2) => questionAnswer(item2.question, item2.answer, item2.notes)) : void 0;
+  const answers = (listed2 ?? rawAnswers(result)).slice(0, ANSWERS_CAP);
   return answers.length > 0 ? answers : void 0;
 };
 var backgroundTasks = (value2) => {
@@ -3343,8 +3377,8 @@ var hookPayloadToMarker = (payload, options) => {
 var ensureSession = (state, event) => ownEntry(state.index.sessions, event.sessionId, () => {
   const tokens2 = { points: [], byStage: {}, total: emptyCounts() };
   const cwd = normalizePath(event.cwd);
-  const developerWait = { waits: 0, totalMs: 0, breaks: 0 };
-  return { startCwd: cwd, cwd, agentWorktrees: {}, runIds: [], startedAt: event.at, prompts: [], plans: [], branchWork: [], agentIds: [], messages: [], developerMessages: [], tokens: tokens2, developerWait, resumes: [] };
+  const developerWait2 = { waits: 0, totalMs: 0, breaks: 0 };
+  return { startCwd: cwd, cwd, agentWorktrees: {}, runIds: [], startedAt: event.at, prompts: [], plans: [], branchWork: [], agentIds: [], messages: [], developerMessages: [], tokens: tokens2, developerWait: developerWait2, resumes: [] };
 });
 var aliasRecord = (state, path) => {
   const real = ownValue(state.index.worktreeAliases, path);
@@ -3654,9 +3688,9 @@ var worktreeFromPaths = (state, paths, config) => {
   }
   let best;
   let bestScore = -1;
-  for (const [worktree, count] of counts) {
+  for (const [worktree, count2] of counts) {
     const branch = ownValue(state.index.worktrees, worktree)?.branch;
-    const score = count + (branch && !isTrunkLike(branch, config) ? 1e3 : 0);
+    const score = count2 + (branch && !isTrunkLike(branch, config) ? 1e3 : 0);
     if (score > bestScore) {
       best = worktree;
       bestScore = score;
@@ -3948,9 +3982,9 @@ var branchRun = (state, branch) => {
 var namesPath = (entry, path) => entry.startsWith(path) && /^[.,)-]*$/.test(entry.slice(path.length));
 var mentionsPath = (text2, path) => {
   for (let at = text2.indexOf(path); at >= 0; at = text2.indexOf(path, at + 1)) {
-    const before = text2[at - 1] ?? " ";
+    const before2 = text2[at - 1] ?? " ";
     const after = text2[at + path.length] ?? " ";
-    if (!/[\w./-]/.test(before) && !/[\w./-]/.test(after)) {
+    if (!/[\w./-]/.test(before2) && !/[\w./-]/.test(after)) {
       return true;
     }
   }
@@ -4178,10 +4212,10 @@ var closestQuestion = (candidates, text2) => {
   let best;
   let bestShared = 0;
   for (const item2 of candidates) {
-    const count = shared(item2);
-    if (count > bestShared) {
+    const count2 = shared(item2);
+    if (count2 > bestShared) {
       best = item2;
-      bestShared = count;
+      bestShared = count2;
     }
   }
   return best;
@@ -4701,10 +4735,10 @@ var setFixItems = (entry, agent, target, aliases) => {
     }
     return;
   }
-  const before = matchedPaths(entry, aliases);
+  const before2 = matchedPaths(entry, aliases);
   entry.worktree = target.worktree;
   entry.items = target.items;
-  entry.matched = matchesOf(target.worktree, target.items, before, aliases);
+  entry.matched = matchesOf(target.worktree, target.items, before2, aliases);
   agent.progress = itemsProgress("fixes", entry.matched);
 };
 var beginLeg = (state, run, agentId, at, config) => {
@@ -4906,6 +4940,14 @@ var noteClosed = (current, pr, at) => {
     current.closedAt = at;
   }
 };
+var noteSize = (current, pr) => {
+  if (typeof pr.additions === "number") {
+    current.additions = pr.additions;
+  }
+  if (typeof pr.deletions === "number") {
+    current.deletions = pr.deletions;
+  }
+};
 var onTrunkPr = (state, pr, at, config) => {
   const runs = Object.values(state.board.runs).filter((run) => run.branch === pr.headRefName);
   for (const run of runs) {
@@ -4938,6 +4980,7 @@ var onTrunkPr = (state, pr, at, config) => {
     }
     if (current.number === pr.number) {
       noteClosed(current, pr, at);
+      noteSize(current, pr);
     }
   }
   if (pr.state === "MERGED") {
@@ -5302,8 +5345,8 @@ var rowReviewers = (ctx, runs, fixes) => {
 };
 var answeredReviewer = (fix, reviewers) => {
   const reReview = reviewers.find((reviewer) => reviewer.agentId === fix.reReview?.agentId);
-  const before = (reviewer) => !reReview || byNodeStart(reviewer, reReview) < 0;
-  const answered = reviewers.filter((reviewer) => reviewer.reviewerId === fix.reviewerId && reviewer !== reReview && before(reviewer));
+  const before2 = (reviewer) => !reReview || byNodeStart(reviewer, reReview) < 0;
+  const answered = reviewers.filter((reviewer) => reviewer.reviewerId === fix.reviewerId && reviewer !== reReview && before2(reviewer));
   return answered.at(-1)?.agentId;
 };
 var rowFixes = (ctx, fixes, reviewers) => fixes.map((fix) => {
@@ -5946,7 +5989,7 @@ var pipelinesOf = (drafts, prompts, key, agents, planAgents) => {
     const branches2 = draft.rows.map((row2) => row2.branch);
     const onBranches = subagents.filter((agent) => !plan.has(agent.id) && agent.branch !== void 0 && branches2.includes(agent.branch));
     const exploring = subagents.some((agent) => plan.has(agent.id) && agent.pipeline === draft.index && ACTIVE_STATES.has(agent.state));
-    const prNumbers = [...new Set(draft.rows.flatMap((row2) => row2.pr?.pr ? [row2.pr.pr.number] : []))];
+    const prNumbers2 = [...new Set(draft.rows.flatMap((row2) => row2.pr?.pr ? [row2.pr.pr.number] : []))];
     const title = pipelineTitle(draft, prompts, key);
     return {
       index: draft.index,
@@ -5956,8 +5999,8 @@ var pipelinesOf = (drafts, prompts, key, agents, planAgents) => {
       settled: draft.rows.length > 0 && draft.rows.every((row2) => row2.settledAt !== void 0),
       live: draft.rows.some((row2) => row2.live) || exploring,
       agentCount: onBranches.length,
-      costUsd: onBranches.reduce((sum, agent) => sum + agent.budget.costUsd, 0),
-      prNumbers
+      costUsd: onBranches.reduce((sum2, agent) => sum2 + agent.budget.costUsd, 0),
+      prNumbers: prNumbers2
     };
   });
 };
@@ -5965,11 +6008,11 @@ var blockingForYou = (question) => question.state === "open" && question.blockin
 var onPlanGate = (place2) => place2.kind === "plan" || place2.kind === "gate" && place2.gate === "plan";
 var planNodeOf = (session, questions, planGateWaits, prompts) => {
   const main = session.main;
-  const waits = questions.some(blockingForYou) || planGateWaits || main !== void 0 && openPermission(main) !== void 0;
+  const waits2 = questions.some(blockingForYou) || planGateWaits || main !== void 0 && openPermission(main) !== void 0;
   let state = "running";
   if (session.endedAt !== void 0) {
     state = "done";
-  } else if (waits) {
+  } else if (waits2) {
     state = "waiting";
   } else if (main?.idleSince !== void 0) {
     state = "idle";
@@ -6010,13 +6053,13 @@ var outcomeRowText = (rows, pushedToTrunk) => {
     }
     return `PR #${pr.number} ${pr.state}`;
   }
-  const count = (state) => prs.filter((pr) => pr.state === state).length;
-  const merged = count("merged");
+  const count2 = (state) => prs.filter((pr) => pr.state === state).length;
+  const merged = count2("merged");
   if (merged === prs.length) {
     return `${prs.length} PRs merged`;
   }
-  const open2 = count("open");
-  const closed = count("closed");
+  const open2 = count2("open");
+  const closed = count2("closed");
   const openText = open2 > 0 ? ` \xB7 ${open2} open` : "";
   const closedText = closed > 0 ? ` \xB7 ${closed} closed` : "";
   return `${merged} of ${prs.length} PRs merged${openText}${closedText}`;
@@ -6085,7 +6128,7 @@ var fixing = (row2) => {
   const latest = [...new Map(row2.reviewers.map((reviewer) => [reviewer.reviewerId, reviewer])).values()];
   return row2.stage === "fix" || row2.fixes.some((fix) => ACTIVE_STATES.has(fix.state)) || latest.some((reviewer) => reviewer.state === "changes");
 };
-var branches = (count) => `${count} ${count === 1 ? "branch" : "branches"}`;
+var branches = (count2) => `${count2} ${count2 === 1 ? "branch" : "branches"}`;
 var CHIP_STAGES = { worktree: "implement", implement: "implement", implemented: "implement", join: "join", review: "review", fix: "fix", pr: "pr", merge: "merge" };
 var stageChip = (state, rows, open2) => {
   const amber = open2.some((row2) => !rowPastImplement(state, row2) && row2.streams.some(handedOpen));
@@ -6538,12 +6581,12 @@ var onUsage = (state, event, config) => {
 };
 var addSessionTokens = (state, event, previous, counts, stage, config) => {
   const beforeId = previous?.sessionStage === void 0 ? void 0 : previous.sessionId;
-  const before = beforeId === void 0 ? void 0 : recordOf(state, beforeId);
-  if (previous?.sessionStage && before) {
-    addSeriesTokens(before.tokens, previous.sessionStage, previous.tokens, -1);
+  const before2 = beforeId === void 0 ? void 0 : recordOf(state, beforeId);
+  if (previous?.sessionStage && before2) {
+    addSeriesTokens(before2.tokens, previous.sessionStage, previous.tokens, -1);
   }
-  if (previous?.agentKey === "main" && before?.main) {
-    addAgentTokens(before.main, previous.tokens, -1);
+  if (previous?.agentKey === "main" && before2?.main) {
+    addAgentTokens(before2.main, previous.tokens, -1);
   }
   const sessionId = requestSessionId(state, event);
   const session = recordOf(state, sessionId);
@@ -6560,7 +6603,7 @@ var addSessionTokens = (state, event, previous, counts, stage, config) => {
   }
   addSeriesTokens(session.tokens, key, counts, 1);
   onOverheadRequest(session, event, previous?.sessionStage === void 0);
-  const recounted = before === session ? previous : void 0;
+  const recounted = before2 === session ? previous : void 0;
   const tokens2 = processedTokens(counts) - (recounted ? processedTokens(recounted.tokens) : 0);
   addPoint(session.tokens.points, { at: data.at, stage: key, agentId: event.agentId ?? "main", tokens: tokens2, usd: counts.usd - (recounted?.tokens.usd ?? 0) });
   if (!own) {
@@ -6583,8 +6626,8 @@ var rankEntry = (key, runs) => {
       }
     }
   }
-  const tokens2 = runs.reduce((sum, run) => sum + processedTokens(run.tokens.total), 0);
-  const usd = runs.reduce((sum, run) => sum + run.costUsd, 0);
+  const tokens2 = runs.reduce((sum2, run) => sum2 + processedTokens(run.tokens.total), 0);
+  const usd = runs.reduce((sum2, run) => sum2 + run.costUsd, 0);
   const finished = runs.every((run) => run.pr?.state === "merged");
   const title = runs.find((run) => run.title)?.title;
   const entry = { key, runIds: runs.map((run) => run.id), finished, byStage, tokens: tokens2, usd };
@@ -6674,29 +6717,37 @@ var trimSession = (session) => {
 var sessionView = (view, now) => {
   const nowMs = Date.parse(now ?? "");
   const gateWaits = (session) => session.promote?.state === "waiting" || session.docs?.state === "waiting";
-  const waits = (session) => session.chip.tone === "you" || gateWaits(session) || session.questions.some(blockingForYou);
+  const waits2 = (session) => session.chip.tone === "you" || gateWaits(session) || session.questions.some(blockingForYou);
   const past = (session) => session.finishedAt !== void 0 && nowMs - Date.parse(session.finishedAt) > SUMMARY_AFTER_MS;
   const entries = Object.entries(view.sessions);
-  const summarised = new Set(entries.filter(([, session]) => past(session) && !waits(session)).map(([id]) => id));
+  const summarised = new Set(entries.filter(([, session]) => past(session) && !waits2(session)).map(([id]) => id));
   const sessions = Object.fromEntries(entries.filter(([id]) => !summarised.has(id)).map(([id, session]) => [id, trimSession(session)]));
   const summaries = view.sessionOrder.filter((id) => summarised.has(id)).map((id) => sessionSummary(view.sessions[id]));
   summaries.sort((a, b) => Date.parse(b.finishedAt ?? "") - Date.parse(a.finishedAt ?? "") || compareText(a.id, b.id));
   return { ...view, sessions, sessionOrder: view.sessionOrder.filter((id) => !summarised.has(id)), summaries };
 };
-var withList = (body, listText, typicalText2 = "") => `${body.slice(0, -1)},"repositories":${listText}${typicalText2 === "" ? "" : `,"typical":${typicalText2}`}}`;
+var withList = (body, listText2, typicalText2 = "", insightsText = "") => {
+  const typical = typicalText2 === "" ? "" : `,"typical":${typicalText2}`;
+  const insightsAt = insightsText === "" ? "" : `,"insightsAt":${insightsText}`;
+  return `${body.slice(0, -1)},"repositories":${listText2}${typical}${insightsAt}}`;
+};
 var typicalTextOf = (repository, view) => {
   const typical = view === "sessions" ? repository.typical?.() : void 0;
   return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
+};
+var insightsTextOf = (repository, view) => {
+  const report = view === "sessions" ? repository.insights?.() : void 0;
+  return report === void 0 || report === null ? "" : JSON.stringify(report.generatedAt);
 };
 var repositorySummary = (repository, counts = countsOf(repository.store.state().board)) => {
   const { id, name } = repository;
   return { id, name, lastLineAt: repository.lastLineAt(), ...counts };
 };
 var viewBody = (store, view) => view === "runs" ? JSON.stringify(store.snapshot()) : JSON.stringify(sessionView(store.sessions(), store.state().index.now));
-var snapshotText = (repository, view, listText, body) => {
-  const list = listText ?? JSON.stringify([repositorySummary(repository)]);
+var snapshotText = (repository, view, listText2, body) => {
+  const list = listText2 ?? JSON.stringify([repositorySummary(repository)]);
   const viewText = body ?? viewBody(repository.store, view);
-  return withList(viewText, list, typicalTextOf(repository, view));
+  return withList(viewText, list, typicalTextOf(repository, view), insightsTextOf(repository, view));
 };
 var sessionBody = (store, id, agentId = null) => {
   const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
@@ -6921,9 +6972,9 @@ var byTime = (a, b) => time(a.at) - time(b.at) || Number(a.id > b.id) - Number(a
 var addSessionMessage = (session, runs, message, from, to) => {
   const own = (sessionId) => sessionId === message.sessionId;
   const asks = runs.some((item2) => item2.questions.some((question) => own(question.sessionId) && isOpenMainAsk(question) && within(question.createdAt, from, to)));
-  const waits = runs.some((item2) => Object.values(item2.gates).some((gate) => own(gate.sessionId) && gate.state === "waiting" && within(gate.waitingSince, from, to)));
+  const waits2 = runs.some((item2) => Object.values(item2.gates).some((gate) => own(gate.sessionId) && gate.state === "waiting" && within(gate.waitingSince, from, to)));
   const planned = session.plans.some((plan) => within(plan.at, from, to));
-  const copy = { ...message, kind: kindOf2(asks || waits, planned) };
+  const copy = { ...message, kind: kindOf2(asks || waits2, planned) };
   const messages = [...session.messages.filter((item2) => item2.id !== copy.id), copy].sort(byTime);
   session.messages = keepMessages(messages);
   const dropped = messages.slice(0, messages.length - session.messages.length);
@@ -6943,9 +6994,9 @@ var addMainMessage = (state, event, run) => {
   const to = time(event.at);
   const runs = sessionRuns2(state, session);
   const asks = runs.flatMap((item2) => item2.questions.filter((question) => isOpenMainAsk(question) && within(question.createdAt, from, to)));
-  const waits = runs.some((item2) => Object.values(item2.gates).some((gate) => gate.state === "waiting" && within(gate.waitingSince, from, to)));
+  const waits2 = runs.some((item2) => Object.values(item2.gates).some((gate) => gate.state === "waiting" && within(gate.waitingSince, from, to)));
   const planned = runs.some((item2) => within(item2.plan?.at, from, to));
-  const kind = kindOf2(waits || asks.length > 0, planned);
+  const kind = kindOf2(waits2 || asks.length > 0, planned);
   const text2 = event.data.lastMessage;
   const truncated = event.data.lastMessageTruncated === true;
   const message = { id: event.id, sessionId: event.sessionId, turnStartedAt, at: event.at, text: text2, truncated, kind };
@@ -7027,7 +7078,7 @@ var finalizeReviewer = (run, agent, at) => {
   }
   if (reviewer) {
     const rounds = Object.values(run.agents).filter((item2) => item2.reviewerId === reviewer.id && item2.state !== "running");
-    reviewer.fixCount = rounds.reduce((sum, item2) => sum + fixFollowups(item2), 0);
+    reviewer.fixCount = rounds.reduce((sum2, item2) => sum2 + fixFollowups(item2), 0);
   }
   for (const item2 of run.fixes) {
     if (item2.reReview?.agentId === agent.id && ACTIVE_STATES.has(item2.reReview.state)) {
@@ -7088,7 +7139,7 @@ var settleNodes = (run, agent, line, config) => {
   if (ended && !agent.report) {
     return false;
   }
-  const before = agent.state;
+  const before2 = agent.state;
   agent.endedAt = agent.endedAt ?? at;
   agent.budget.toolCallsAtFirstStop = agent.budget.toolCallsAtFirstStop ?? agent.budget.toolCalls.used;
   delete agent.now;
@@ -7098,7 +7149,7 @@ var settleNodes = (run, agent, line, config) => {
   } else {
     finalizeWorker(run, agent, at, config);
   }
-  if (!ended || agent.state !== before) {
+  if (!ended || agent.state !== before2) {
     const final = finalLogLine(run, agent);
     logRun(run, line, final.text, final.tone, agent.id);
   }
@@ -8320,8 +8371,8 @@ var createStore = (config, options = {}) => {
       }
     }
   };
-  const reindex = (sessionId, before, after) => {
-    for (const target of before) {
+  const reindex = (sessionId, before2, after) => {
+    for (const target of before2) {
       const referrers = namedBy.get(target);
       referrers?.delete(sessionId);
       if (referrers?.size === 0) {
@@ -8341,7 +8392,7 @@ var createStore = (config, options = {}) => {
       if (next === void 0 && Object.hasOwn(live.index.sessions, sessionId)) {
         throw new Error("the projection gave nothing");
       }
-      const before = linksOf(previous);
+      const before2 = linksOf(previous);
       const after = linksOf(next);
       reindex(sessionId, namesOf(previous), namesOf(next));
       if (next) {
@@ -8351,7 +8402,7 @@ var createStore = (config, options = {}) => {
       }
       failures.delete(sessionId);
       reportFinish(sessionId, previous, next);
-      return { up: [...before.up, ...after.up], down: [...before.down, ...after.down] };
+      return { up: [...before2.up, ...after.up], down: [...before2.down, ...after.down] };
     } catch (error) {
       const message = messageOf(error);
       if (failures.get(sessionId)?.message !== message) {
@@ -8812,6 +8863,24 @@ var applyEvent = (state, event, config) => {
   }
 };
 
+// src/spool/activity.ts
+var readLine = (text2) => {
+  let line;
+  try {
+    line = JSON.parse(text2);
+  } catch {
+    return { src: void 0, at: void 0 };
+  }
+  const { src, at } = line ?? {};
+  const time2 = typeof at === "string" ? Date.parse(at) : Number.NaN;
+  return { src, at: Number.isNaN(time2) ? void 0 : new Date(time2).toISOString() };
+};
+var activityAt = (text2) => {
+  const { src, at } = readLine(text2);
+  return src === "server" ? void 0 : at;
+};
+var lineAt = (text2) => readLine(text2).at;
+
 // src/spool/sha1.ts
 var ROUND_CONSTANTS = [1518500249, 1859775393, 2400959708, 3395469782];
 var INITIAL_STATE = [1732584193, 4023233417, 2562383102, 271733878, 3285377520];
@@ -8979,6 +9048,19 @@ var mergeFixtures = (fixtures) => {
     next[pick] += 1;
   }
 };
+var firstTime = (lines) => {
+  for (const text2 of lines) {
+    const time2 = timeOf2(text2);
+    if (time2 !== void 0) {
+      return time2;
+    }
+  }
+  return void 0;
+};
+var replayStartAt = (texts) => {
+  const starts = texts.map((text2) => firstTime(fixtureLines(text2))).filter((time2) => time2 !== void 0);
+  return starts.length > 0 ? new Date(Math.min(...starts)).toISOString() : void 0;
+};
 var replayFixtureTexts = (texts, speed, onLine) => {
   const contents = texts.map(fixtureLines);
   const lines = contents.length === 1 ? contents[0].map((text2) => ({ text: text2, time: timeOf2(text2) })) : mergeFixtures(contents);
@@ -9014,6 +9096,1184 @@ var replayFixtureTexts = (texts, speed, onLine) => {
   };
 };
 
+// src/model/aggregate.ts
+var WORK_SESSION_CALLS = 5;
+var DIALOG_ORIGINS = /* @__PURE__ */ new Set(["marker", "ask-tool", "permission"]);
+var isDialog = (question) => question.audience === "user" && DIALOG_ORIGINS.has(question.origin);
+var allSubagents = (session) => Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT).sort(byStart);
+var subagentsOf = (session, stage) => allSubagents(session).filter((agent) => agent.stage === stage);
+var implementOf = (agent) => {
+  const { toolCalls, verifyRounds: verifyRounds2 } = agent.budget;
+  const commands = VERIFY_KINDS.reduce((sum2, kind) => sum2 + verifyRounds2.commands[kind], 0);
+  const failed = VERIFY_KINDS.reduce((sum2, kind) => sum2 + verifyRounds2.results[kind].filter((result) => result === "fail").length, 0);
+  const callLimit = toolCalls.limit > 0 ? toolCalls.limit : null;
+  return { role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, callLimit, commands, failed };
+};
+var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null });
+var reviewOf = (agent) => {
+  const block = agent.report?.block;
+  const fixItems2 = block ? block.followups.filter((item2) => item2.type === "fix").length : null;
+  return { role: agent.role, startedAt: agent.startedAt, fixItems: fixItems2, usd: agent.budget.costUsd };
+};
+var branchOf = (row2) => row2.runIds.includes(row2.branch) ? "?" : row2.branch;
+var metricsBranchOf = (branch) => branch.includes(":") ? "?" : branch;
+var rowOf = (row2) => {
+  const rounds = row2.reviewers.map((reviewer) => reviewer.round);
+  const reviewRound = rounds.length > 0 ? Math.max(...rounds) : null;
+  const streamRuns2 = row2.streams.filter((stream) => stream.runs.length > 0).map((stream) => stream.runs.length);
+  const pr = row2.pr?.pr;
+  return {
+    branch: branchOf(row2),
+    owner: row2.owner,
+    prNumber: pr?.number ?? null,
+    reviewRound,
+    streamRuns: streamRuns2,
+    firstWorkAt: row2.firstWorkAt,
+    prOpenedAt: pr?.createdAt ?? null,
+    additions: pr?.additions ?? null,
+    deletions: pr?.deletions ?? null
+  };
+};
+var sameCall = (head, question) => question.origin === "ask-tool" && head.origin === "ask-tool" && question.id.startsWith(`${head.id}-`) && question.createdAt === head.createdAt && question.source.agentId === head.source.agentId;
+var questionsOf = (session) => {
+  const dialogs = session.questions.filter(isDialog);
+  const heads = [];
+  for (const question of [...dialogs].sort((a, b) => compareText(a.id, b.id))) {
+    if (!heads.some((head) => sameCall(head, question))) {
+      heads.push(question);
+    }
+  }
+  heads.sort((a, b) => time(a.createdAt) - time(b.createdAt) || compareText(a.id, b.id));
+  return heads.map((question) => {
+    const answeredAt = question.state === "answered" && question.resolvedAt !== void 0 ? question.resolvedAt : null;
+    return { origin: question.origin, askedAt: question.createdAt, answeredAt };
+  });
+};
+var sessionAggregate = (session) => {
+  const { endedAt, finishedAt } = session;
+  if (endedAt === void 0 || finishedAt === void 0 || Object.values(session.agents).some((agent) => agent.trimmed)) {
+    return void 0;
+  }
+  const main = Object.hasOwn(session.agents, MAIN_AGENT) ? session.agents[MAIN_AGENT] : void 0;
+  const limit = main?.budget.context.limit;
+  const contextLimit2 = limit !== void 0 && limit > 0 ? limit : null;
+  const toolCalls = main?.budget.toolCalls.used ?? 0;
+  const { waits: waits2, totalMs, breaks } = session.developerWait;
+  const metrics = sessionMetrics(session);
+  const branches2 = metrics.branches.map((entry) => ({ ...entry, branch: metricsBranchOf(entry.branch) }));
+  const { count: count2, expired, cacheWriteUsd } = metrics.resumes;
+  return {
+    v: 1,
+    id: session.id,
+    ...session.key === void 0 ? {} : { key: session.key },
+    ...session.title === void 0 ? {} : { title: session.title },
+    kind: session.kind,
+    startedAt: session.startedAt,
+    endedAt,
+    finishedAt,
+    work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
+    metrics: { ...metrics, branches: branches2, resumes: { count: count2, expired, cacheWriteUsd } },
+    main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit: contextLimit2 },
+    builds: subagentsOf(session, "implement").map(implementOf),
+    reviews: subagentsOf(session, "review").map(reviewOf),
+    agents: allSubagents(session).map(agentOf),
+    rows: session.rows.map(rowOf),
+    questions: questionsOf(session),
+    developerWait: { waits: waits2, totalMs, breaks }
+  };
+};
+
+// src/ui/format.ts
+var pad = (value2) => String(value2).padStart(2, "0");
+var elapsed = (ms) => {
+  const seconds = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1e3)) : 0;
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours > 0) {
+    return `${hours}h ${pad(minutes % 60)}m`;
+  }
+  return `${minutes}m ${pad(seconds % 60)}s`;
+};
+var cost = (usd) => `$${(Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)}`;
+var tokens = (count2) => {
+  const value2 = Number.isFinite(count2) ? Math.max(0, count2) : 0;
+  if (value2 >= 999500) {
+    return `${Number((value2 / 1e6).toFixed(2))}M`;
+  }
+  if (value2 >= 99950) {
+    return `${Math.round(value2 / 1e3)}k`;
+  }
+  if (value2 >= 999.5) {
+    return `${(value2 / 1e3).toFixed(1)}k`;
+  }
+  return String(Math.round(value2));
+};
+var duration = (ms) => {
+  const seconds = Math.round(Math.max(0, ms) / 1e3);
+  if (seconds < 60) {
+    return `${seconds} s`;
+  }
+  const tenthMinutes = Math.round(seconds / 6);
+  if (tenthMinutes < 100) {
+    return `${(tenthMinutes / 10).toFixed(1)} min`;
+  }
+  const minutes = Math.round(seconds / 60);
+  return minutes < 120 ? `${minutes} min` : `${(Math.round(seconds / 360) / 10).toFixed(1)} h`;
+};
+var ago = (ms) => {
+  const seconds = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1e3)) : 0;
+  if (seconds < 5) {
+    return "just now";
+  }
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+};
+var modelLetter = (model, letters) => {
+  let best;
+  for (const prefix of Object.keys(letters)) {
+    if (model?.startsWith(prefix) && prefix.length > (best?.length ?? -1)) {
+      best = prefix;
+    }
+  }
+  return best === void 0 ? "?" : letters[best];
+};
+var streamCount = (count2) => {
+  if (count2 === 0) {
+    return "";
+  }
+  return count2 === 1 ? "1 stream" : `${count2} streams`;
+};
+var plural = (count2, noun3) => `${count2} ${noun3}${count2 === 1 ? "" : "s"}`;
+var githubStatus = (github) => {
+  const checked = github.polling || github.checkedAt !== void 0;
+  if (github.error) {
+    return { text: `gh: ${github.error}`, tone: "bad" };
+  }
+  if (checked && !github.accountOk) {
+    return { text: github.activeAccount ? `gh account mismatch: ${github.activeAccount}` : "gh account mismatch", tone: "bad" };
+  }
+  if (github.repoMismatch) {
+    return { text: `gh repo mismatch: github.repo ${github.repoMismatch.repo}, remotes ${github.repoMismatch.remotes.join(", ")}`, tone: "bad" };
+  }
+  if (!github.polling) {
+    return { text: "gh polling off", tone: "off" };
+  }
+  return { text: github.activeAccount ? `gh ok: ${github.activeAccount}` : "gh ok", tone: "ok" };
+};
+var connectionLabel = (state, replay, speed) => {
+  if (state === "disconnected") {
+    return state;
+  }
+  if (state !== "connected") {
+    return `${state}\u2026`;
+  }
+  return replay ? `replay x${speed}` : "live";
+};
+var escapeRegExp4 = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var cardTitle = (run) => {
+  const title = run.title?.trim() ?? "";
+  if (!run.key) {
+    return title || run.branch;
+  }
+  const key = escapeRegExp4(run.key);
+  const leading = new RegExp(`^${key}(?:\\s*[:-]\\s*|\\s+|$)`, "i");
+  const trailing = new RegExp(`\\s*\\(${key}\\)$`, "i");
+  const stripped = title.replace(leading, "").replace(trailing, "").trim();
+  return stripped || run.branch;
+};
+var ticketUrl = (template, key) => {
+  if (!template || !key || !template.includes("{key}") || !URL.canParse(template)) {
+    return void 0;
+  }
+  const url = template.replaceAll("{key}", encodeURIComponent(key));
+  if (!URL.canParse(url)) {
+    return void 0;
+  }
+  const parsed = new URL(url);
+  return parsed.protocol === "https:" && parsed.host === new URL(template).host ? url : void 0;
+};
+var rowTitle = (run) => {
+  if (run.title?.trim()) {
+    return cardTitle(run);
+  }
+  const parts = run.worktree.split("/").filter((part) => part !== "");
+  return parts[parts.length - 1] ?? run.branch;
+};
+var sessionHeading = (session) => {
+  const fallback = session.rows?.[0]?.branch ?? `Session ${session.id.slice(0, 8)}`;
+  return cardTitle({ title: session.title, key: session.key, branch: fallback });
+};
+var labelText = (label) => `${label.role} \xB7 ${label.description}`;
+var labelTitle = (label, branch) => label === void 0 ? branch : `${labelText(label)}
+${branch}`;
+
+// src/spool/aggregate-parse.ts
+var isPlainObject2 = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var isString2 = (value2) => typeof value2 === "string";
+var isDate = (value2) => typeof value2 === "string" && !Number.isNaN(Date.parse(value2));
+var OPTIONAL_FIELDS = [
+  ["key", isString2],
+  ["title", isString2],
+  ["kind", isString2],
+  ["endedAt", isString2],
+  ["metrics", isPlainObject2],
+  ["main", isPlainObject2],
+  ["developerWait", isPlainObject2],
+  ["builds", Array.isArray],
+  ["reviews", Array.isArray],
+  ["rows", Array.isArray],
+  ["questions", Array.isArray],
+  ["agents", Array.isArray]
+];
+var completeLines = (text2) => text2.split("\n").slice(0, -1).filter((line) => line.trim() !== "");
+var parseObject = (line) => {
+  try {
+    const value2 = JSON.parse(line);
+    return isPlainObject2(value2) ? value2 : void 0;
+  } catch {
+    return void 0;
+  }
+};
+var storedAggregate = (line) => {
+  const entry = parseObject(line);
+  if (entry === void 0 || entry.v !== 1 || typeof entry.id !== "string" || typeof entry.work !== "boolean") {
+    return void 0;
+  }
+  if (!isDate(entry.startedAt) || !isDate(entry.finishedAt)) {
+    return void 0;
+  }
+  let repaired = false;
+  for (const [field, valid] of OPTIONAL_FIELDS) {
+    if (Object.hasOwn(entry, field) && !valid(entry[field])) {
+      delete entry[field];
+      repaired = true;
+    }
+  }
+  return { aggregate: entry, repaired };
+};
+var parseAggregates = (text2) => {
+  const newest3 = /* @__PURE__ */ new Map();
+  let skipped = 0;
+  let repaired = 0;
+  for (const line of completeLines(text2)) {
+    const stored = storedAggregate(line);
+    if (stored === void 0) {
+      skipped += 1;
+      continue;
+    }
+    repaired += stored.repaired ? 1 : 0;
+    newest3.delete(stored.aggregate.id);
+    newest3.set(stored.aggregate.id, stored.aggregate);
+  }
+  return { aggregates: [...newest3.values()], skipped, repaired };
+};
+
+// src/insights/percentile.ts
+var percentile = (values, p) => {
+  if (values.length === 0) {
+    return void 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(p / 100 * sorted.length) - 1)];
+};
+
+// src/insights/insights.ts
+var AREAS = ["delivery", "implementers", "review", "verification", "tokens", "questions"];
+var AREA_NAMES = {
+  delivery: "Delivery",
+  implementers: "Implementers",
+  review: "Review",
+  verification: "Verification",
+  tokens: "Token economy",
+  questions: "Questions and waits"
+};
+var SIGNAL_NAMES = {
+  "cost-per-pr": "cost per PR",
+  "time-to-pr": "time to PR",
+  "cost-per-100-lines": "cost per 100 changed lines",
+  "budget-first-stop": "budget at the first stop",
+  "second-implementer": "second implement runs",
+  "second-round": "second review rounds",
+  "fix-followups": "fix follow-ups",
+  "quiet-reviewer": "quiet review roles",
+  "verify-commands": "verification commands",
+  "failed-runs": "failed runs",
+  "cache-per-output": "cache read per output token",
+  "main-peak-context": "main-thread peak context",
+  "main-cost-share": "main-thread cost share",
+  "overhead-share": "Nurselog overhead share",
+  "main-large-outputs": "main-thread large outputs",
+  "question-open-time": "question open time",
+  "questions-per-session": "questions per session",
+  "developer-wait": "developer wait"
+};
+var FACTOR = 1.5;
+var BUDGET_RUNS = 5;
+var QUIET_RUNS = 10;
+var GUIDELINE_SESSIONS = 3;
+var SPREAD_VALUES = 3;
+var MAIN_ROLE = "main";
+var MAX_SESSION_ID = 256;
+var MAX_SHOWN_TEXT = 200;
+var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+var plainText = (text2) => text2.replace(CONTROL, "");
+var NO_IMPLEMENT_RUNS = "no subagent of an implement-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
+var NO_BUDGET = "no tool-call budget is set for the roles of the implement runs (budgets.roles.<role>.toolCalls)";
+var NO_FIRST_STOP = "no implement run with a tool-call budget stopped";
+var NO_STREAM = "no implement run was on a stream";
+var NO_REVIEWS = "no subagent of a review-stage role ran (roles.<role>.stage)";
+var NO_ROUND = "no review-stage role reviewed a branch";
+var NO_BLOCK = "no review-stage agent wrote a report block";
+var NO_COMMAND = "no command matched verification.kinds";
+var NO_REQUESTS = "no requests were recorded (usage facts come from the transcripts)";
+var NO_LIMIT = "no context limit is known for the main thread's model (budgets.contextLimits)";
+var NO_OVERHEAD = "no session recorded the Nurselog overhead (its hook or board predates the count)";
+var NOT_STORED = "the session aggregates lack it (an older board wrote them)";
+var NO_PR = "no work session opened a PR (PRs come from the gh poll of github.repo)";
+var NO_PR_AFTER_WORK = "no PR was opened after the session's first work on its branch";
+var NO_PR_SIZE = "no PR size is known (the gh poll of github.repo reads it)";
+var NO_CHANGED_LINE = "the PRs changed no line";
+var PR = ["PR", "PRs"];
+var LINE = ["line", "lines"];
+var IMPLEMENT_RUN = ["implement run", "implement runs"];
+var STREAM = ["stream", "streams"];
+var BRANCH = ["branch", "branches"];
+var RUN = ["run", "runs"];
+var SESSION = ["session", "sessions"];
+var WORK_SESSION = ["work session", "work sessions"];
+var ANSWERED = ["answered question", "answered questions"];
+var isRecord = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var fieldsOf = (value2) => isRecord(value2) ? value2 : {};
+var entriesOf = (value2) => Array.isArray(value2) ? value2.filter(isRecord) : void 0;
+var numberOf = (value2) => typeof value2 === "number" && Number.isFinite(value2) ? value2 : null;
+var timeOf3 = (value2) => typeof value2 === "string" ? time(value2) : Number.NaN;
+var isNumber2 = (value2) => value2 !== null;
+var lineCountOf = (value2) => typeof value2 === "number" && Number.isInteger(value2) && value2 >= 0 ? value2 : null;
+var implementRun = (entry) => ({
+  callsAtFirstStop: numberOf(entry.callsAtFirstStop),
+  callLimit: numberOf(entry.callLimit),
+  commands: numberOf(entry.commands),
+  failed: numberOf(entry.failed)
+});
+var reviewRuns = (entries, session) => {
+  const runs = [];
+  entries.forEach((entry, index) => {
+    if (typeof entry.role === "string") {
+      const start = timeOf3(entry.startedAt);
+      runs.push({ role: plainText(entry.role), session, start: Number.isFinite(start) ? start : 0, index, fixItems: numberOf(entry.fixItems), usd: numberOf(entry.usd) });
+    }
+  });
+  return runs;
+};
+var rowNumbers = (entry) => {
+  const streamRuns2 = Array.isArray(entry.streamRuns) ? entry.streamRuns.map(numberOf).filter(isNumber2) : [];
+  return {
+    owned: entry.owner === true,
+    ownerKnown: typeof entry.owner === "boolean",
+    reviewRound: numberOf(entry.reviewRound),
+    streamRuns: streamRuns2,
+    prNumber: numberOf(entry.prNumber),
+    firstWork: timeOf3(entry.firstWorkAt),
+    prOpened: timeOf3(entry.prOpenedAt),
+    additions: lineCountOf(entry.additions),
+    deletions: lineCountOf(entry.deletions)
+  };
+};
+var roleNumbers = (entries) => entries.flatMap((entry) => {
+  if (typeof entry.role !== "string") {
+    return [];
+  }
+  const role = plainText(entry.role);
+  return [{ role, runs: numberOf(entry.runs), cacheRead: numberOf(entry.cacheRead), output: numberOf(entry.output), peakContext: numberOf(entry.peakContext), usd: numberOf(entry.usd) }];
+});
+var openTime = (entry) => {
+  const asked = timeOf3(entry.askedAt);
+  const answered = timeOf3(entry.answeredAt);
+  return Number.isFinite(asked) && Number.isFinite(answered) ? Math.max(0, answered - asked) : null;
+};
+var shownText = (value2) => {
+  if (typeof value2 !== "string") {
+    return void 0;
+  }
+  const text2 = plainText(value2);
+  return text2 !== "" && text2.length <= MAX_SHOWN_TEXT ? text2 : void 0;
+};
+var readSession = (aggregate, finished) => {
+  const main = fieldsOf(aggregate.main);
+  const metrics = fieldsOf(aggregate.metrics);
+  const roles = entriesOf(metrics.roles);
+  const reviews = entriesOf(aggregate.reviews);
+  return {
+    id: aggregate.id,
+    key: shownText(aggregate.key),
+    title: shownText(aggregate.title),
+    finished,
+    builds: entriesOf(aggregate.builds)?.map(implementRun),
+    reviews: reviews === void 0 ? void 0 : reviewRuns(reviews, aggregate.id),
+    rows: entriesOf(aggregate.rows)?.map(rowNumbers),
+    roles: roles === void 0 ? void 0 : roleNumbers(roles),
+    totalUsd: numberOf(fieldsOf(metrics.total).usd),
+    overheadUsd: numberOf(fieldsOf(metrics.overhead).usd),
+    largeOutputs: numberOf(main.largeOutputs),
+    contextLimit: numberOf(main.contextLimit),
+    questions: entriesOf(aggregate.questions)?.map(openTime),
+    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs)
+  };
+};
+var pad2 = (value2) => String(value2).padStart(2, "0");
+var localDay = (date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+var sum = (values) => values.reduce((total, value2) => total + value2, 0);
+var median = (values) => percentile(values, 50);
+var count = (value2, noun3) => `${value2} ${value2 === 1 ? noun3[0] : noun3[1]}`;
+var groupedCount = (value2, noun3) => `${value2.toLocaleString("en-US")} ${value2 === 1 ? noun3[0] : noun3[1]}`;
+var percent = (fraction) => Math.round(fraction * 100);
+var percentTenths = (fraction) => (fraction * 100).toFixed(1);
+var listText = (items) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+var noRuns = (reason) => ({ lacks: reason, runCheck: true });
+var onBaseline = (sides, of) => sides.comparable ? of(sides.baseline) : void 0;
+var kOfN = (units, hit) => ({ n: units.length, k: units.filter(hit).length });
+var valueOver = (n2, value2) => value2 === void 0 ? { n: n2 } : { n: n2, value: value2 };
+var medianOf = (values) => valueOver(values.length, median(values));
+var rateFlag = (window2, baseline) => {
+  if (baseline === void 0 || baseline.n === 0) {
+    return false;
+  }
+  const k = window2.k ?? 0;
+  return k >= 2 && k * baseline.n >= FACTOR * (baseline.k ?? 0) * window2.n;
+};
+var factorFlag = (window2, baseline) => {
+  if (window2.value === void 0 || baseline?.value === void 0) {
+    return false;
+  }
+  return window2.value > 0 && window2.value >= FACTOR * baseline.value;
+};
+var spreadFlag = (window2, baseline) => {
+  const middle = median(window2);
+  const high = baseline === void 0 ? void 0 : percentile(baseline, 75);
+  return window2.length >= SPREAD_VALUES && middle !== void 0 && high !== void 0 && middle > high;
+};
+var comparison = (flagged) => flagged ? "comparison" : void 0;
+var guidelineOf = (limit, worse = "above") => limit === null ? void 0 : { limit, worse };
+var flagOf = (broken, compared) => broken ? "guideline" : comparison(compared);
+var aside = (comparedTo, phrase) => phrase === void 0 ? `(${comparedTo})` : `(${comparedTo}; guideline: ${phrase})`;
+var before = (sides, baseline, noun3, text2) => {
+  if (baseline === void 0) {
+    return `before: fewer than ${count(sides.minimum, WORK_SESSION)}`;
+  }
+  return baseline.n === 0 ? `before: no ${noun3[1]}` : `before: ${text2(baseline)}`;
+};
+var kOfNText = (evidence) => `${evidence.k ?? 0} of ${evidence.n}`;
+var rateLine = (sides, units, hit, noun3, phrase) => {
+  const window2 = kOfN(units(sides.window), hit);
+  const baseline = onBaseline(sides, (sessions) => kOfN(units(sessions), hit));
+  const body = `${window2.k ?? 0} of the last ${count(window2.n, noun3)} ${phrase} (${before(sides, baseline, noun3, kOfNText)})`;
+  return { flag: comparison(rateFlag(window2, baseline)), window: window2, baseline, body };
+};
+var spreadSides = (sides, values) => {
+  const windowValues = values(sides.window);
+  const baselineValues = onBaseline(sides, values);
+  const baseline = baselineValues === void 0 ? void 0 : medianOf(baselineValues);
+  return { window: medianOf(windowValues), baseline, flag: comparison(spreadFlag(windowValues, baselineValues)) };
+};
+var rolesByRuns = (runs) => {
+  const counts = /* @__PURE__ */ new Map();
+  for (const run of runs) {
+    const added = run.runs === void 0 ? 1 : run.runs ?? 0;
+    counts.set(run.role, (counts.get(run.role) ?? 0) + added);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || compareText(a[0], b[0])).map(([role]) => role);
+};
+var ownedRows = (sessions) => sessions.flatMap((session) => (session.rows ?? []).filter((row2) => row2.owned));
+var prsOf = (session) => (session.rows ?? []).filter((row2) => row2.owned && row2.prNumber !== null);
+var prsIn = (sessions) => sessions.flatMap(prsOf);
+var prOwnerLacks = (sessions) => {
+  const numbered = sessions.flatMap((session) => session.rows ?? []).filter((row2) => row2.prNumber !== null);
+  return numbered.length > 0 && numbered.every((row2) => !row2.ownerKnown);
+};
+var noPrOutcome = (sessions) => prOwnerLacks(sessions) ? { lacks: NOT_STORED } : noRuns(NO_PR);
+var costed = (sessions) => sessions.filter((session) => session.totalUsd !== null);
+var costOf = (sessions) => sum(sessions.map((session) => session.totalUsd ?? 0));
+var prNumbers = (sessions) => new Set(prsIn(sessions).map((row2) => row2.prNumber));
+var prCost = (sessions) => {
+  const priced = costed(sessions);
+  const prs = prNumbers(priced).size;
+  return valueOver(prs, prs === 0 ? void 0 : costOf(priced) / prs);
+};
+var costPerPr = (sides) => {
+  if (prsIn(sides.window).length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  const window2 = prCost(sides.window);
+  if (window2.n === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const baseline = onBaseline(sides, prCost);
+  const priced = costed(sides.window);
+  const comparedTo = before(sides, baseline, PR, (evidence) => cost(evidence.value ?? 0));
+  const spent = `the last ${count(priced.length, WORK_SESSION)} cost ${cost(costOf(priced))} for ${count(window2.n, PR)}`;
+  const body = `${spent}, ${cost(window2.value ?? 0)} per PR (${comparedTo})`;
+  return { lines: [{ flag: comparison(factorFlag(window2, baseline)), window: window2, baseline, body }] };
+};
+var isTimed = (row2) => Number.isFinite(row2.firstWork) && Number.isFinite(row2.prOpened);
+var openedAfterWork = (row2) => isTimed(row2) && row2.prOpened >= row2.firstWork;
+var prTimes = (sessions) => {
+  const oldest = /* @__PURE__ */ new Map();
+  for (const row2 of prsIn(sessions).filter(openedAfterWork)) {
+    oldest.set(row2.prNumber, row2);
+  }
+  return [...oldest.values()].map((row2) => row2.prOpened - row2.firstWork);
+};
+var timeToPr = (sides) => {
+  const prs = prsIn(sides.window);
+  if (prs.length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  if (prTimes(sides.window).length === 0) {
+    return { lacks: prs.some(isTimed) ? NO_PR_AFTER_WORK : NOT_STORED };
+  }
+  const { window: window2, baseline, flag } = spreadSides(sides, prTimes);
+  const comparedTo = before(sides, baseline, PR, (evidence) => duration(evidence.value ?? 0));
+  const body = `a PR opened a median of ${duration(window2.value ?? 0)} after the first work on its branch, over ${count(window2.n, PR)} (${comparedTo})`;
+  return { lines: [{ flag, window: window2, baseline, body }] };
+};
+var changedLines = (row2) => row2.additions === null || row2.deletions === null ? null : row2.additions + row2.deletions;
+var prSizes = (sessions) => {
+  const sizes = /* @__PURE__ */ new Map();
+  for (const row2 of prsIn(sessions)) {
+    if (!sizes.has(row2.prNumber)) {
+      sizes.set(row2.prNumber, changedLines(row2));
+    }
+  }
+  return sizes;
+};
+var sizedPrs = (sessions) => {
+  const priced = costed(sessions);
+  const sizes = prSizes(priced);
+  const sized = priced.filter((session) => prsOf(session).every((row2) => typeof sizes.get(row2.prNumber) === "number"));
+  const numbers = [...prNumbers(sized)];
+  return { prs: numbers.length, lines: sum(numbers.map((number) => sizes.get(number) ?? 0)), usd: costOf(sized) };
+};
+var linesCost = (sessions) => {
+  const { prs, lines, usd } = sizedPrs(sessions);
+  return valueOver(prs, lines > 0 ? 100 * usd / lines : void 0);
+};
+var costPer100Lines = (sides) => {
+  if (prsIn(sides.window).length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  if (prsIn(costed(sides.window)).length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const sized = sizedPrs(sides.window);
+  if (sized.prs === 0) {
+    return { lacks: NO_PR_SIZE };
+  }
+  if (sized.lines === 0) {
+    return { lacks: NO_CHANGED_LINE };
+  }
+  const window2 = linesCost(sides.window);
+  const baseline = onBaseline(sides, linesCost);
+  const comparedTo = before(sides, baseline, PR, (evidence) => evidence.value === void 0 ? "no changed lines" : cost(evidence.value));
+  const body = `100 changed lines cost ${cost(window2.value ?? 0)}, over ${count(window2.n, PR)} of ${groupedCount(sized.lines, LINE)} (${comparedTo})`;
+  return { lines: [{ flag: comparison(factorFlag(window2, baseline)), window: window2, baseline, body }] };
+};
+var buildsOf = (sessions) => sessions.flatMap((session) => session.builds ?? []);
+var budgetRuns = (sessions) => {
+  const runs = [];
+  for (const run of buildsOf(sessions)) {
+    if (run.callsAtFirstStop !== null && run.callLimit !== null && run.callLimit > 0) {
+      runs.push({ calls: run.callsAtFirstStop, limit: run.callLimit });
+    }
+  }
+  return runs;
+};
+var atBudget2 = (run) => run.calls >= run.limit;
+var budgetFirstStop = (sides) => {
+  const builds = buildsOf(sides.window);
+  const window2 = kOfN(budgetRuns(sides.window), atBudget2);
+  if (builds.length === 0) {
+    return noRuns(NO_IMPLEMENT_RUNS);
+  }
+  if (window2.n === 0) {
+    const limited = builds.some((run) => run.callLimit !== null && run.callLimit > 0);
+    return { lacks: limited ? NO_FIRST_STOP : NO_BUDGET };
+  }
+  const baseline = onBaseline(sides, (sessions) => kOfN(budgetRuns(sessions), atBudget2));
+  const k = window2.k ?? 0;
+  const floored = Math.floor(k * 100 / window2.n);
+  const guideline = guidelineOf(sides.guidelines.budgetFirstStop);
+  const broken = guideline !== void 0 && window2.n >= BUDGET_RUNS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, kOfNText);
+  const share2 = `${floored}%; ${comparedTo}`;
+  const body = `${k} of the last ${count(window2.n, IMPLEMENT_RUN)} reached their tool-call budget by their first stop ${aside(share2, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, rateFlag(window2, baseline)), window: window2, baseline, guideline, body }] };
+};
+var streamRuns = (sessions) => ownedRows(sessions).flatMap((row2) => row2.streamRuns);
+var ownerLacks = (sessions) => {
+  const rows = sessions.flatMap((session) => session.rows ?? []);
+  return rows.length > 0 && rows.every((row2) => !row2.ownerKnown);
+};
+var secondImplementer = (sides) => {
+  if (streamRuns(sides.window).length === 0) {
+    if (buildsOf(sides.window).length === 0) {
+      return noRuns(NO_IMPLEMENT_RUNS);
+    }
+    return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_STREAM };
+  }
+  return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second implement run")] };
+};
+var reviewsOf = (sessions) => sessions.flatMap((session) => session.reviews ?? []);
+var blockRuns = (sessions) => reviewsOf(sessions).filter((run) => run.fixItems !== null);
+var reviewRounds = (sessions) => ownedRows(sessions).map((row2) => row2.reviewRound).filter(isNumber2);
+var secondRound = (sides) => {
+  if (reviewRounds(sides.window).length === 0) {
+    if (reviewsOf(sides.window).length === 0) {
+      return noRuns(NO_REVIEWS);
+    }
+    return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_ROUND };
+  }
+  return { lines: [rateLine(sides, reviewRounds, (round4) => round4 >= 2, BRANCH, "ran a second review round")] };
+};
+var blockLacks = (sides) => {
+  if (blockRuns(sides.window).length > 0) {
+    return void 0;
+  }
+  return reviewsOf(sides.window).length === 0 ? noRuns(NO_REVIEWS) : { lacks: NO_BLOCK };
+};
+var perRunText = (evidence) => `${(evidence.value ?? 0).toFixed(1)} over ${evidence.n}`;
+var fixFollowups2 = (sides) => {
+  const lacks = blockLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  const lines = rolesByRuns(blockRuns(sides.window)).map((role) => {
+    const of = (sessions) => {
+      const runs = blockRuns(sessions).filter((run) => run.role === role);
+      return valueOver(runs.length, runs.length === 0 ? void 0 : sum(runs.map((run) => run.fixItems ?? 0)) / runs.length);
+    };
+    const window2 = of(sides.window);
+    const baseline = onBaseline(sides, of);
+    const comparedTo = before(sides, baseline, RUN, perRunText);
+    const body = `${role} reported ${(window2.value ?? 0).toFixed(1)} fix follow-ups per run over ${count(window2.n, RUN)} (${comparedTo})`;
+    return { role, window: window2, baseline, body };
+  });
+  return { lines };
+};
+var newestRuns = (sessions) => reviewsOf(sessions).sort((a, b) => b.start - a.start || b.index - a.index);
+var quietRuns = (newest3, role) => newest3.filter((run) => run.role === role && run.fixItems !== null);
+var quietSeries = (newest3) => {
+  const points = newest3.map((run, index) => ({ session: run.session, value: run.fixItems, k: (run.fixItems ?? 0) >= 1 ? 1 : 0, n: 1, window: index < QUIET_RUNS }));
+  return points.reverse();
+};
+var quietLeast = (limit) => {
+  let least = 0;
+  while (least < QUIET_RUNS && least / QUIET_RUNS < limit) {
+    least += 1;
+  }
+  return least;
+};
+var quietReviewer = (sides) => {
+  const guideline = guidelineOf(sides.guidelines.quietReviewer, "below");
+  if (guideline === void 0) {
+    return { lines: [] };
+  }
+  const lacks = blockLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  const newest3 = newestRuns([...sides.window, ...sides.baseline]);
+  const phrase = `at least ${quietLeast(guideline.limit)} of ${QUIET_RUNS}`;
+  const lines = [];
+  for (const role of rolesByRuns(reviewsOf(sides.window))) {
+    const runs = quietRuns(newest3, role);
+    const last = runs.slice(0, QUIET_RUNS);
+    const k = last.filter((run) => (run.fixItems ?? 0) >= 1).length;
+    if (last.length === QUIET_RUNS && k / QUIET_RUNS < guideline.limit) {
+      const usd = sum(last.map((run) => run.usd ?? 0));
+      const body = `${role} had a fix follow-up in ${k} of its last ${QUIET_RUNS} runs, which cost ${cost(usd)} (guideline: ${phrase})`;
+      lines.push({ role, flag: "guideline", window: { n: last.length, k, value: usd }, guideline, series: quietSeries(runs), body });
+    }
+  }
+  return { lines };
+};
+var commandCounts = (sessions) => buildsOf(sessions).map((run) => run.commands).filter(isNumber2);
+var verifiedRuns = (sessions) => buildsOf(sessions).filter((run) => run.commands !== null && run.commands > 0);
+var commandLacks = (sides) => {
+  if (verifiedRuns(sides.window).length > 0) {
+    return void 0;
+  }
+  return buildsOf(sides.window).length === 0 ? noRuns(NO_IMPLEMENT_RUNS) : { lacks: NO_COMMAND };
+};
+var verifyCommands = (sides) => {
+  const lacks = commandLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  const window2 = medianOf(commandCounts(sides.window));
+  const baseline = onBaseline(sides, (sessions) => medianOf(commandCounts(sessions)));
+  const commands = count(window2.value ?? 0, ["verification command", "verification commands"]);
+  const comparedTo = before(sides, baseline, IMPLEMENT_RUN, (evidence) => String(evidence.value ?? 0));
+  const body = `implement runs ran a median of ${commands} over ${count(window2.n, RUN)} (${comparedTo})`;
+  return { lines: [{ window: window2, baseline, body }] };
+};
+var failedUnits = (sessions) => verifiedRuns(sessions).filter((run) => run.failed !== null);
+var failedRuns = (sides) => {
+  const lacks = commandLacks(sides);
+  if (lacks !== void 0) {
+    return lacks;
+  }
+  if (failedUnits(sides.window).length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENT_RUN, "had a failed full-package command")] };
+};
+var outputRoles = (sessions, role) => {
+  const entries = sessions.flatMap((session) => session.roles ?? []);
+  return entries.filter((entry) => entry.output !== null && entry.output > 0 && (role === void 0 || entry.role === role));
+};
+var cacheEntries = (sessions, role) => {
+  const entries = [];
+  for (const entry of outputRoles(sessions, role)) {
+    if (entry.cacheRead !== null && entry.output !== null) {
+      entries.push({ role: entry.role, runs: entry.runs, cacheRead: entry.cacheRead, output: entry.output });
+    }
+  }
+  return entries;
+};
+var cachePerOutput = (sides) => {
+  const entries = cacheEntries(sides.window);
+  if (entries.length === 0) {
+    return { lacks: outputRoles(sides.window).length === 0 ? NO_REQUESTS : NOT_STORED };
+  }
+  const ranked = rolesByRuns(entries);
+  const limits = sides.guidelines.cachePerOutput;
+  const roles = [...ranked.filter((role) => role === MAIN_ROLE), ...ranked.filter((role) => role !== MAIN_ROLE)];
+  const lines = roles.map((role) => {
+    const of = (sessions) => {
+      const found = cacheEntries(sessions, role);
+      return valueOver(found.length, found.length === 0 ? void 0 : sum(found.map((entry) => entry.cacheRead)) / sum(found.map((entry) => entry.output)));
+    };
+    const window2 = of(sides.window);
+    const baseline = onBaseline(sides, of);
+    const perOutput = Math.round(window2.value ?? 0);
+    const guideline = guidelineOf(role === MAIN_ROLE ? limits.main : limits.agents);
+    const broken = guideline !== void 0 && window2.n >= GUIDELINE_SESSIONS && perOutput > Math.round(guideline.limit);
+    const phrase = guideline === void 0 ? void 0 : `at most ${Math.round(guideline.limit)}`;
+    const cached = count(perOutput, ["cached token", "cached tokens"]);
+    const comparedTo = before(sides, baseline, SESSION, (evidence) => String(Math.round(evidence.value ?? 0)));
+    const body = `${role} read ${cached} per output token ${aside(comparedTo, phrase)}`;
+    return { role, flag: flagOf(broken, factorFlag(window2, baseline)), window: window2, baseline, guideline, body };
+  });
+  return { lines };
+};
+var mainPeaks = (sessions) => {
+  const peaks = [];
+  for (const session of sessions) {
+    const peak = session.roles?.find((entry) => entry.role === MAIN_ROLE)?.peakContext ?? null;
+    if (peak !== null && session.contextLimit !== null && session.contextLimit > 0) {
+      peaks.push({ peak, limit: session.contextLimit });
+    }
+  }
+  return peaks;
+};
+var overShare = (peaks, share2) => peaks.filter((entry) => entry.peak > entry.limit * share2).length;
+var mainPeakContext = (sides) => {
+  const peaks = mainPeaks(sides.window);
+  if (peaks.length === 0) {
+    return { lacks: outputRoles(sides.window, MAIN_ROLE).length === 0 ? NO_REQUESTS : NO_LIMIT };
+  }
+  const guideline = guidelineOf(sides.guidelines.mainPeakContext);
+  const share2 = guideline?.limit ?? 0.5;
+  const spread = spreadSides(sides, (sessions) => mainPeaks(sessions).map((entry) => entry.peak));
+  const window2 = { ...spread.window, k: overShare(peaks, share2) };
+  const baseline = spread.baseline === void 0 ? void 0 : { ...spread.baseline, k: overShare(mainPeaks(sides.baseline), share2) };
+  const ratio = median(peaks.map((entry) => entry.peak / entry.limit));
+  const broken = guideline !== void 0 && peaks.length >= GUIDELINE_SESSIONS && ratio !== void 0 && percent(ratio) > percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `at most ${percent(guideline.limit)}% of the context limit`;
+  const limitText = guideline === void 0 ? "half" : `${percent(guideline.limit)}% of`;
+  const over = `${window2.k} of ${count(window2.n, SESSION)} over ${limitText} the model's context limit`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => tokens(evidence.value ?? 0));
+  const body = `the main thread's peak context had a median of ${tokens(window2.value ?? 0)} per session, ${over} ${aside(comparedTo, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, spread.flag !== void 0), window: window2, baseline, guideline, body }] };
+};
+var mainShares = (sessions) => {
+  const shares = [];
+  for (const session of sessions) {
+    const usd = session.roles?.find((entry) => entry.role === MAIN_ROLE)?.usd ?? null;
+    if (usd !== null && session.totalUsd !== null && session.totalUsd > 0) {
+      shares.push(usd / session.totalUsd);
+    }
+  }
+  return shares;
+};
+var mainCostShare = (sides) => {
+  if (mainShares(sides.window).length === 0) {
+    return { lacks: NO_REQUESTS };
+  }
+  const { window: window2, baseline, flag } = spreadSides(sides, mainShares);
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percent(evidence.value ?? 0)}%`);
+  const body = `the main thread took a median of ${percent(window2.value ?? 0)}% of a session's cost (${comparedTo})`;
+  return { lines: [{ flag, window: window2, baseline, body }] };
+};
+var overheadShares = (sessions) => {
+  const shares = [];
+  for (const session of sessions) {
+    if (session.overheadUsd !== null && session.totalUsd !== null && session.totalUsd > 0) {
+      shares.push(session.overheadUsd / session.totalUsd);
+    }
+  }
+  return shares;
+};
+var meanOf = (values) => valueOver(values.length, values.length === 0 ? void 0 : sum(values) / values.length);
+var overheadShare = (sides) => {
+  const shares = overheadShares(sides.window);
+  if (shares.length === 0) {
+    return { lacks: NO_OVERHEAD };
+  }
+  const window2 = meanOf(shares);
+  const baseline = onBaseline(sides, (sessions) => meanOf(overheadShares(sessions)));
+  const guideline = guidelineOf(sides.guidelines.overheadShare);
+  const broken = guideline !== void 0 && Number(percentTenths(window2.value ?? 0)) > Number(percentTenths(guideline.limit));
+  const phrase = guideline === void 0 ? void 0 : `at most ${percentTenths(guideline.limit)}%`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percentTenths(evidence.value ?? 0)}%`);
+  const took = `took a mean of ${percentTenths(window2.value ?? 0)}% of a session's cost, at most ${percentTenths(Math.max(...shares))}%`;
+  return { lines: [{ flag: flagOf(broken, false), window: window2, baseline, guideline, body: `the Nurselog overhead ${took} ${aside(comparedTo, phrase)}` }] };
+};
+var largeOutputs = (sessions) => sessions.map((session) => session.largeOutputs).filter(isNumber2);
+var mainLargeOutputs = (sides) => {
+  const counts = largeOutputs(sides.window);
+  if (counts.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window: window2, baseline, flag } = spreadSides(sides, largeOutputs);
+  const guideline = guidelineOf(sides.guidelines.mainLargeOutputs);
+  const broken = guideline !== void 0 && window2.n >= GUIDELINE_SESSIONS && (window2.value ?? 0) > guideline.limit;
+  const phrase = guideline === void 0 ? void 0 : `at most ${guideline.limit} per session`;
+  const read = `read ${count(sum(counts), ["response", "responses"])} over 20,000 characters in the last ${count(window2.n, SESSION)}`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
+  const body = `the main thread ${read}, a median of ${window2.value ?? 0} per session ${aside(comparedTo, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, flag !== void 0), window: window2, baseline, guideline, body }] };
+};
+var listed = (sessions) => sessions.flatMap((session) => session.questions === void 0 ? [] : [session.questions]);
+var openTimes = (sessions) => listed(sessions).flatMap((questions) => questions.filter(isNumber2));
+var questionOpenTime = (sides) => {
+  const lists = listed(sides.window);
+  if (lists.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window: window2, baseline, flag } = spreadSides(sides, openTimes);
+  const comparedTo = before(sides, baseline, ANSWERED, (evidence) => duration(evidence.value ?? 0));
+  if (window2.n === 0) {
+    return { lines: [{ window: window2, baseline, body: `no question of the developer was answered in the last ${count(lists.length, SESSION)} (${comparedTo})` }] };
+  }
+  const body = `the developer's questions were open a median of ${duration(window2.value ?? 0)} over ${count(window2.n, ANSWERED)} (${comparedTo})`;
+  return { lines: [{ flag, window: window2, baseline, body }] };
+};
+var questionCounts = (sessions) => listed(sessions).map((questions) => questions.length);
+var questionsPerSession = (sides) => {
+  if (listed(sides.window).length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const window2 = medianOf(questionCounts(sides.window));
+  const baseline = onBaseline(sides, (sessions) => medianOf(questionCounts(sessions)));
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
+  const body = `a median of ${count(window2.value ?? 0, ["question", "questions"])} per session (${comparedTo})`;
+  return { lines: [{ window: window2, baseline, body }] };
+};
+var waits = (sessions) => sessions.map((session) => session.waitMs).filter(isNumber2);
+var developerWait = (sides) => {
+  const totals = waits(sides.window);
+  if (totals.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window: window2, baseline, flag } = spreadSides(sides, waits);
+  const waited = `waited ${duration(sum(totals))} in the last ${count(window2.n, SESSION)}`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => duration(evidence.value ?? 0));
+  const body = `the developer ${waited}, a median of ${duration(window2.value ?? 0)} per session (${comparedTo})`;
+  return { lines: [{ flag, window: window2, baseline, body }] };
+};
+var SIGNALS = [
+  { id: "cost-per-pr", area: "delivery", of: costPerPr },
+  { id: "time-to-pr", area: "delivery", of: timeToPr },
+  { id: "cost-per-100-lines", area: "delivery", of: costPer100Lines },
+  { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
+  { id: "second-implementer", area: "implementers", of: secondImplementer },
+  { id: "second-round", area: "review", of: secondRound },
+  { id: "fix-followups", area: "review", of: fixFollowups2 },
+  // A guideline-only signal: a null limit gives it no line, a not-measured one included.
+  { id: "quiet-reviewer", area: "review", of: quietReviewer, off: (guidelines) => guidelines.quietReviewer === null },
+  { id: "verify-commands", area: "verification", of: verifyCommands },
+  { id: "failed-runs", area: "verification", of: failedRuns },
+  { id: "cache-per-output", area: "tokens", of: cachePerOutput },
+  { id: "main-peak-context", area: "tokens", of: mainPeakContext },
+  { id: "main-cost-share", area: "tokens", of: mainCostShare },
+  { id: "overhead-share", area: "tokens", of: overheadShare },
+  { id: "main-large-outputs", area: "tokens", of: mainLargeOutputs },
+  { id: "question-open-time", area: "questions", of: questionOpenTime },
+  { id: "questions-per-session", area: "questions", of: questionsPerSession },
+  { id: "developer-wait", area: "questions", of: developerWait }
+];
+var outcomesAlone = (signal, read, sides) => {
+  return read.map((entry) => signal.of({ window: [entry.session], baseline: [], comparable: false, minimum: sides.minimum, guidelines: sides.guidelines }));
+};
+var pointOf = (entry, outcome, role) => {
+  const session = entry.session.id;
+  const evidence = "lines" in outcome ? outcome.lines.find((line) => line.role === role)?.window : void 0;
+  if (evidence === void 0) {
+    return { session, value: null, window: entry.window };
+  }
+  const share2 = evidence.k !== void 0 && evidence.n > 0 ? evidence.k / evidence.n : null;
+  return { session, value: evidence.value ?? share2, ...evidence.k === void 0 ? {} : { k: evidence.k }, n: evidence.n, window: entry.window };
+};
+var signalLine = (area, signal, line, series) => ({
+  area,
+  signal,
+  ...line.role === void 0 ? {} : { role: line.role },
+  ...line.flag === void 0 ? {} : { flag: line.flag },
+  ...line.window === void 0 ? {} : { window: line.window },
+  ...line.baseline === void 0 ? {} : { baseline: line.baseline },
+  ...line.guideline === void 0 ? {} : { guideline: line.guideline },
+  series,
+  text: `${AREA_NAMES[area]}: ${line.body}.`
+});
+var notMeasuredOf = (area, lacks, every, sessions) => {
+  const signals = lacks.map((lack) => lack.signal);
+  const reasons = [...new Set(lacks.map((lack) => lack.reason))];
+  const span = `in the last ${count(sessions, WORK_SESSION)}`;
+  let text2 = `${AREA_NAMES[area]}: not measured: ${reasons[0]} ${span}.`;
+  if (!every || reasons.length > 1) {
+    const parts = reasons.map((reason) => {
+      const names = lacks.filter((lack) => lack.reason === reason).map((lack) => SIGNAL_NAMES[lack.signal]);
+      return `${listText(names)} not measured: ${reason}`;
+    });
+    text2 = `${AREA_NAMES[area]}: ${parts.join("; ")} ${span}.`;
+  }
+  const unused = every && lacks.every((lack) => lack.runCheck);
+  const notMeasured = { signals, reason: reasons.join("; "), ...unused ? { unused: true } : {} };
+  return { area, signal: signals[0], notMeasured, series: [], text: text2 };
+};
+var reportLines = (sides, read) => {
+  const flagged = [];
+  const others = [];
+  for (const area of AREAS) {
+    const signals = SIGNALS.filter((signal) => signal.area === area && signal.off?.(sides.guidelines) !== true);
+    const lacks = [];
+    for (const signal of signals) {
+      const outcome = signal.of(sides);
+      if ("lacks" in outcome) {
+        lacks.push({ signal: signal.id, reason: outcome.lacks, runCheck: outcome.runCheck === true });
+        continue;
+      }
+      const alone = outcome.lines.every((line) => line.series !== void 0) ? [] : outcomesAlone(signal, read, sides);
+      for (const line of outcome.lines) {
+        const series = line.series ?? read.map((entry, index) => pointOf(entry, alone[index], line.role));
+        const insight = signalLine(area, signal.id, line, series);
+        (insight.flag === void 0 ? others : flagged).push(insight);
+      }
+    }
+    if (lacks.length > 0) {
+      others.push(notMeasuredOf(area, lacks, lacks.length === signals.length, sides.window.length));
+    }
+  }
+  return [...flagged, ...others];
+};
+var reportSessionId = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID && plainText(id) === id;
+var selectSessions = (aggregates, options, now) => {
+  const at = time(now);
+  const today = new Date(at);
+  const oldest = localDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
+  const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay(new Date(finished)) >= oldest;
+  const selected = aggregates.filter((aggregate) => aggregate.work === true && reportSessionId(aggregate.id)).map((aggregate) => ({ aggregate, finished: timeOf3(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
+  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished));
+};
+var reportSession = (session) => ({
+  id: session.id,
+  ...session.key === void 0 ? {} : { key: session.key },
+  ...session.title === void 0 ? {} : { title: session.title },
+  finishedAt: new Date(session.finished).toISOString()
+});
+var guidelinesOf = (guidelines) => {
+  const { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cachePerOutput2 } = guidelines;
+  const cache = { main: cachePerOutput2.main, agents: cachePerOutput2.agents };
+  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache };
+};
+var insightsOf = (aggregates, options, now) => {
+  const sessions = selectSessions(aggregates, options, now);
+  const window2 = sessions.slice(0, options.window);
+  const baseline = sessions.slice(options.window, options.window + options.baseline);
+  const minimum = Math.min(options.minBaseline, options.baseline);
+  const sides = { window: window2, baseline, comparable: baseline.length >= minimum, minimum, guidelines: options.guidelines };
+  const read = [...window2, ...baseline];
+  const oldest = [...window2.map((session) => ({ session, window: true })), ...baseline.map((session) => ({ session, window: false }))].reverse();
+  const basis = { window: window2.length, baseline: baseline.length };
+  let closing = `Based on ${count(0, WORK_SESSION)}.`;
+  if (read.length > 0) {
+    basis.from = localDay(new Date(read[read.length - 1].finished));
+    basis.to = localDay(new Date(read[0].finished));
+    closing = `Based on ${count(read.length, WORK_SESSION)} from ${basis.from} to ${basis.to}.`;
+  }
+  const guidelines = guidelinesOf(options.guidelines);
+  const settings = { window: options.window, baseline: options.baseline, minBaseline: options.minBaseline, keepDays: options.keepDays, guidelines };
+  const listed2 = oldest.map((entry) => reportSession(entry.session));
+  const insights = window2.length === 0 ? [] : reportLines(sides, oldest);
+  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, closing };
+};
+
+// src/spool/report-keeper.ts
+var newestFirst = (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt) || compareText(a.id, b.id);
+var createReportKeeper = (options) => {
+  const { insights, now, onError } = options;
+  let kept = [];
+  let report = null;
+  let reportFailure;
+  let listenerFailure;
+  const listeners = /* @__PURE__ */ new Set();
+  const tell = () => {
+    let failed = false;
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        failed = true;
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== listenerFailure) {
+          onError(`workflow health report listener failed: ${message}`);
+        }
+        listenerFailure = message;
+      }
+    }
+    if (!failed) {
+      listenerFailure = void 0;
+    }
+  };
+  return {
+    add(lines) {
+      const at = now().getTime();
+      const ids = new Set(lines.map((line) => line.id));
+      const work = lines.filter((line) => line.work === true && reportSessionId(line.id) && !(Date.parse(line.finishedAt) > at));
+      kept = [...kept.filter((line) => !ids.has(line.id)), ...work].sort(newestFirst).slice(0, insights.window + insights.baseline);
+      return work;
+    },
+    drop(cutoff) {
+      kept = kept.filter((line) => Date.parse(line.finishedAt) >= cutoff);
+    },
+    compute() {
+      const before2 = report;
+      try {
+        report = insightsOf(kept, insights, now().toISOString());
+        reportFailure = void 0;
+      } catch (error) {
+        report = null;
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== reportFailure) {
+          onError(`workflow health report not computed: ${message}`);
+        }
+        reportFailure = message;
+      }
+      if (before2 !== null || report !== null) {
+        tell();
+      }
+    },
+    current: () => report,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+};
+
+// src/spool/sample-report.ts
+var createSampleReport = (options) => {
+  const { insights } = options;
+  const onError = (message) => {
+    try {
+      options.onError(message);
+    } catch {
+    }
+  };
+  const { aggregates, skipped, repaired } = parseAggregates(options.text);
+  const newestFinish = Math.max(0, ...aggregates.map((line) => Date.parse(line.finishedAt)));
+  const start = options.startAt === void 0 ? newestFinish : Date.parse(options.startAt);
+  let clock = start;
+  if (Number.isNaN(start)) {
+    onError(`sample report: the start time ${JSON.stringify(options.startAt)} is no time; the clock starts at the sample's newest finish`);
+    clock = newestFinish;
+  }
+  const skippedPart = skipped > 0 ? [`${plural(skipped, "line")} skipped, broken, of another format version or without a date`] : [];
+  const repairedPart = repaired > 0 ? [`${plural(repaired, "line")} repaired, a field of a wrong type dropped`] : [];
+  const problems = [...skippedPart, ...repairedPart];
+  if (problems.length > 0) {
+    onError(`sample aggregate log: ${problems.join("; ")}`);
+  }
+  const keeper = createReportKeeper({ insights, now: () => new Date(clock), onError });
+  const pending = /* @__PURE__ */ new Map();
+  const added = /* @__PURE__ */ new Map();
+  if (keeper.add(aggregates).length === 0) {
+    onError(`sample aggregate log: no line finished before ${new Date(clock).toISOString()}, so the report has no sample sessions`);
+  }
+  keeper.compute();
+  const lineOf2 = (store, sessionId) => {
+    try {
+      const session = store.session(sessionId);
+      const aggregate = session === void 0 ? void 0 : sessionAggregate(session);
+      return aggregate === void 0 ? void 0 : storedAggregate(JSON.stringify(aggregate))?.aggregate;
+    } catch (error) {
+      onError(`sample report: session aggregate of ${sessionId} not built: ${error instanceof Error ? error.message : String(error)}`);
+      return void 0;
+    }
+  };
+  return {
+    noteFinish(sessionId, finishedAt) {
+      pending.set(sessionId, finishedAt);
+    },
+    noteLine(at, store) {
+      const time2 = at === void 0 ? Number.NaN : Date.parse(at);
+      if (time2 > clock) {
+        clock = time2;
+      }
+      try {
+        store.state();
+      } catch (error) {
+        onError(`sample report: the replay store failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      const due = [];
+      for (const [sessionId, finishedAt] of pending) {
+        if (Date.parse(finishedAt) > clock) {
+          continue;
+        }
+        pending.delete(sessionId);
+        const line = added.get(sessionId) === finishedAt ? void 0 : lineOf2(store, sessionId);
+        if (line !== void 0) {
+          due.push({ sessionId, finishedAt, line });
+        }
+      }
+      if (due.length === 0) {
+        return;
+      }
+      const taken = keeper.add(due.map((entry) => entry.line));
+      for (const entry of due) {
+        if (taken.includes(entry.line)) {
+          added.set(entry.sessionId, entry.finishedAt);
+        }
+      }
+      if (taken.length > 0) {
+        keeper.compute();
+      }
+    },
+    current: () => keeper.current(),
+    subscribe: (listener) => keeper.subscribe(listener)
+  };
+};
+
 // src/ui/badge.ts
 var attempt = (call) => {
   try {
@@ -9030,8 +10290,8 @@ var createAppBadge = (api) => {
     }
   };
   return {
-    set(count) {
-      const next = Math.max(0, Math.floor(count));
+    set(count2) {
+      const next = Math.max(0, Math.floor(count2));
       if (!api || next === shown) {
         return;
       }
@@ -9114,125 +10374,6 @@ var sessionElapsedMs = (session, now) => {
   return Math.max(0, (parseTime(session.endedAt) ?? now) - start);
 };
 
-// src/ui/format.ts
-var pad = (value2) => String(value2).padStart(2, "0");
-var elapsed = (ms) => {
-  const seconds = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1e3)) : 0;
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) {
-    return `${hours}h ${pad(minutes % 60)}m`;
-  }
-  return `${minutes}m ${pad(seconds % 60)}s`;
-};
-var cost = (usd) => `$${(Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)}`;
-var tokens = (count) => {
-  const value2 = Number.isFinite(count) ? Math.max(0, count) : 0;
-  if (value2 >= 999500) {
-    return `${Number((value2 / 1e6).toFixed(2))}M`;
-  }
-  if (value2 >= 99950) {
-    return `${Math.round(value2 / 1e3)}k`;
-  }
-  if (value2 >= 999.5) {
-    return `${(value2 / 1e3).toFixed(1)}k`;
-  }
-  return String(Math.round(value2));
-};
-var ago = (ms) => {
-  const seconds = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1e3)) : 0;
-  if (seconds < 5) {
-    return "just now";
-  }
-  if (seconds < 60) {
-    return `${seconds}s ago`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
-};
-var modelLetter = (model, letters) => {
-  let best;
-  for (const prefix of Object.keys(letters)) {
-    if (model?.startsWith(prefix) && prefix.length > (best?.length ?? -1)) {
-      best = prefix;
-    }
-  }
-  return best === void 0 ? "?" : letters[best];
-};
-var streamCount = (count) => {
-  if (count === 0) {
-    return "";
-  }
-  return count === 1 ? "1 stream" : `${count} streams`;
-};
-var plural = (count, noun2) => `${count} ${noun2}${count === 1 ? "" : "s"}`;
-var githubStatus = (github) => {
-  const checked = github.polling || github.checkedAt !== void 0;
-  if (github.error) {
-    return { text: `gh: ${github.error}`, tone: "bad" };
-  }
-  if (checked && !github.accountOk) {
-    return { text: github.activeAccount ? `gh account mismatch: ${github.activeAccount}` : "gh account mismatch", tone: "bad" };
-  }
-  if (github.repoMismatch) {
-    return { text: `gh repo mismatch: github.repo ${github.repoMismatch.repo}, remotes ${github.repoMismatch.remotes.join(", ")}`, tone: "bad" };
-  }
-  if (!github.polling) {
-    return { text: "gh polling off", tone: "off" };
-  }
-  return { text: github.activeAccount ? `gh ok: ${github.activeAccount}` : "gh ok", tone: "ok" };
-};
-var connectionLabel = (state, replay, speed) => {
-  if (state === "disconnected") {
-    return state;
-  }
-  if (state !== "connected") {
-    return `${state}\u2026`;
-  }
-  return replay ? `replay x${speed}` : "live";
-};
-var escapeRegExp4 = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var cardTitle = (run) => {
-  const title = run.title?.trim() ?? "";
-  if (!run.key) {
-    return title || run.branch;
-  }
-  const key = escapeRegExp4(run.key);
-  const leading = new RegExp(`^${key}(?:\\s*[:-]\\s*|\\s+|$)`, "i");
-  const trailing = new RegExp(`\\s*\\(${key}\\)$`, "i");
-  const stripped = title.replace(leading, "").replace(trailing, "").trim();
-  return stripped || run.branch;
-};
-var ticketUrl = (template, key) => {
-  if (!template || !key || !template.includes("{key}") || !URL.canParse(template)) {
-    return void 0;
-  }
-  const url = template.replaceAll("{key}", encodeURIComponent(key));
-  if (!URL.canParse(url)) {
-    return void 0;
-  }
-  const parsed = new URL(url);
-  return parsed.protocol === "https:" && parsed.host === new URL(template).host ? url : void 0;
-};
-var rowTitle = (run) => {
-  if (run.title?.trim()) {
-    return cardTitle(run);
-  }
-  const parts = run.worktree.split("/").filter((part) => part !== "");
-  return parts[parts.length - 1] ?? run.branch;
-};
-var sessionHeading = (session) => {
-  const fallback = session.rows?.[0]?.branch ?? `Session ${session.id.slice(0, 8)}`;
-  return cardTitle({ title: session.title, key: session.key, branch: fallback });
-};
-var labelText = (label) => `${label.role} \xB7 ${label.description}`;
-var labelTitle = (label, branch) => label === void 0 ? branch : `${labelText(label)}
-${branch}`;
-
 // src/ui/order.ts
 var isDone = (run) => run.chip.tone === "done";
 var runEndedAt = (run) => {
@@ -9241,12 +10382,12 @@ var runEndedAt = (run) => {
   const merged = parseTime(run.pr?.mergedAt) ?? parseTime(lastPromotion?.mergedAt);
   return merged ?? parseTime(run.endedAt) ?? parseTime(run.lastEventAt) ?? 0;
 };
-var newestFirst = (a, b) => b.at - a.at || a.id.localeCompare(b.id);
+var newestFirst2 = (a, b) => b.at - a.at || a.id.localeCompare(b.id);
 var cardOrder = (board) => {
   const runs = board.order.map((id) => board.runs[id]).filter((run) => run !== void 0);
   const active = runs.filter((run) => !isDone(run)).map((run) => ({ id: run.id, at: parseTime(run.startedAt) ?? 0 }));
   const done = runs.filter(isDone).map((run) => ({ id: run.id, at: runEndedAt(run) }));
-  return [...active.sort(newestFirst), ...done.sort(newestFirst)].map((entry) => entry.id);
+  return [...active.sort(newestFirst2), ...done.sort(newestFirst2)].map((entry) => entry.id);
 };
 var FINISHED_HOLD_MS = 2 * 6e4;
 var lastActivityAt = (run) => {
@@ -9298,7 +10439,7 @@ var splitRuns = (board, now, clearedAt) => {
   }
   return split;
 };
-var conversationsLabel = (count) => `Conversations, ${count}`;
+var conversationsLabel = (count2) => `Conversations, ${count2}`;
 var conversationState = (run) => {
   if (run.endedAt !== void 0 || isDone(run)) {
     return "ended";
@@ -9359,7 +10500,7 @@ var sessionCardOrder = (view) => {
       active.push({ id, at: parseTime(session.startedAt) ?? 0 });
     }
   }
-  return [...active.sort(newestFirst), ...done.sort(newestFirst)].map((entry) => entry.id);
+  return [...active.sort(newestFirst2), ...done.sort(newestFirst2)].map((entry) => entry.id);
 };
 var splitSessions = (view, now, clearedAt) => {
   const split = { stack: [], conversations: [], finished: [] };
@@ -9394,7 +10535,7 @@ var splitSessions = (view, now, clearedAt) => {
       finished.push({ id: summary.id, at: parseTime(summary.finishedAt) ?? 0 });
     }
   }
-  split.finished = finished.sort(newestFirst).map((entry) => entry.id);
+  split.finished = finished.sort(newestFirst2).map((entry) => entry.id);
   return split;
 };
 var defaultSessionCollapsed = (session) => isSessionDone(session);
@@ -9407,12 +10548,12 @@ var storedAfterSessionToggle = (session, collapsed) => {
 // src/ui/board-link.ts
 var anyOpens = () => true;
 var emptyLink = () => ({ sessions: /* @__PURE__ */ new Set(), branches: /* @__PURE__ */ new Set(), tickets: /* @__PURE__ */ new Set() });
-var timeOf3 = (iso) => parseTime(iso) ?? Number.NEGATIVE_INFINITY;
+var timeOf4 = (iso) => parseTime(iso) ?? Number.NEGATIVE_INFINITY;
 var meets = (ids, among) => ids.some((id) => among.has(id));
 var newest2 = (items) => {
   let best;
   for (const item2 of items) {
-    if (!best || timeOf3(item2.startedAt) > timeOf3(best.startedAt)) {
+    if (!best || timeOf4(item2.startedAt) > timeOf4(best.startedAt)) {
       best = item2;
     }
   }
@@ -9549,7 +10690,7 @@ var ticketTarget = (view, key, canOpen) => {
   return (newest2(open2) ?? newest2([...sessions, ...summaries]))?.id;
 };
 var promotionTarget = (view, prNumber, canOpen) => {
-  const dots = [...carriedDots(view, prNumber) ?? []].sort((a, b) => timeOf3(b.mergedAt) - timeOf3(a.mergedAt));
+  const dots = [...carriedDots(view, prNumber) ?? []].sort((a, b) => timeOf4(b.mergedAt) - timeOf4(a.mergedAt));
   for (const dot of dots) {
     const target = branchTarget(view, dot.branch, canOpen);
     if (target !== void 0) {
@@ -9654,6 +10795,7 @@ var createContext = (config, now, source, root = document.documentElement) => {
     runs: {},
     sessions: {},
     typical: {},
+    health: void 0,
     repositoryId: "",
     source
   };
@@ -9958,7 +11100,7 @@ var TAIL = ["pr", "merge", "promote", "docs"];
 var MIDDLE_LOOP_LIFT = 14;
 var COLUMN_LEAD = 24;
 var pillWidth = (text2) => text2.length * CHAR + 14;
-var bubbleReach = (count) => count < 2 ? BUBBLE_RADIUS : BUBBLE_COUNT_X + String(count).length * COUNT_CHAR;
+var bubbleReach = (count2) => count2 < 2 ? BUBBLE_RADIUS : BUBBLE_COUNT_X + String(count2).length * COUNT_CHAR;
 var flowState = (state) => {
   if (state === "pending" || state === "skipped") {
     return "pending";
@@ -10366,15 +11508,15 @@ var graphLayout = (run, options) => {
     }
     const stage = run.stages[id];
     const gateWaits = id in run.gates && run.gates[id].state === "waiting";
-    const waits = stage.state === "waiting" || gateWaits || stage.waits.some((wait) => wait.to === void 0);
+    const waits2 = stage.state === "waiting" || gateWaits || stage.waits.some((wait) => wait.to === void 0);
     let tone = id === active ? "stage-active" : "stage";
-    if (waits) {
+    if (waits2) {
       tone = "stage-you";
       waiting = id;
     }
     const at = { x: labelX, y: labelY };
     add({ kind: "text", key: keys.label(id), at, text: STAGE_LABELS2[id], tone, anchor: "middle", ...slide2(id, at) });
-    if (waits) {
+    if (waits2) {
       edge(keys.cue(id), { key: keys.label(id), dx: -9, dy: 6 }, { key: keys.label(id), dx: 9, dy: 6 }, "you-cue", "shared");
     }
   }
@@ -10519,7 +11661,7 @@ var trunkLines = (trunk, promote) => {
   const trunkY = targets.length > 0 ? targets[targets.length - 1].y + TRUNK_GAP : TOP_Y;
   return [...targets, { name: trunk, y: trunkY, tone: "trunk" }];
 };
-var drawingHeight = (lanesTop, count) => lanesTop + Math.max(1, count) * LANE_GAP + BOTTOM;
+var drawingHeight = (lanesTop, count2) => lanesTop + Math.max(1, count2) * LANE_GAP + BOTTOM;
 var forkPath = (forkX, trunkY, y) => {
   const controls = `${point(forkX + 9, trunkY)}, ${point(forkX + 5, y)}`;
   return `M${point(forkX, trunkY)} C ${controls}, ${point(forkX + FORK_RUN, y)}`;
@@ -10706,8 +11848,8 @@ var promotionTooltip = (promotion, now, labels, clickable = false) => {
 var litByBranches = (layout, branches2) => {
   const lanes = layout.lanes.filter((lane) => branches2.has(lane.branch));
   const marks = layout.merges.filter((mark) => branches2.has(mark.branch)).map((mark) => mark.prNumber);
-  const prNumbers = /* @__PURE__ */ new Set([...lanes.flatMap((lane) => lane.prNumber ?? []), ...marks]);
-  const carrying = layout.promotions.filter((promotion) => promotion.carries.some((prNumber) => prNumbers.has(prNumber)));
+  const prNumbers2 = /* @__PURE__ */ new Set([...lanes.flatMap((lane) => lane.prNumber ?? []), ...marks]);
+  const carrying = layout.promotions.filter((promotion) => promotion.carries.some((prNumber) => prNumbers2.has(prNumber)));
   return { lanes: new Set(lanes.map((lane) => lane.branch)), marks: new Set(marks), promotions: new Set(carrying.map((item2) => item2.prNumber)) };
 };
 var litByPromotion = (layout, promotion) => {
@@ -11377,10 +12519,10 @@ var bubblesOf = (layout) => {
   return bubbles;
 };
 var popsOf = (previous, current) => {
-  const before = nodesOf(previous);
+  const before2 = nodesOf(previous);
   const pops = [];
   for (const [key, node] of nodesOf(current)) {
-    const old = before.get(key);
+    const old = before2.get(key);
     const changed = old ? old.state !== node.state && node.state !== "skipped" || old.mark !== node.mark : isActive2(node.state);
     if (changed) {
       pops.push(key);
@@ -11418,10 +12560,10 @@ var popsAtArrival = (keys2, dots) => {
   return keys2.map((key) => ({ key, delay: arrivals.get(key) ?? 0 }));
 };
 var hasColumn = (layout, id) => layout.columns.some((column) => column.id === id);
-var dotsOf = (before, current) => {
-  const previous = before.run;
+var dotsOf = (before2, current) => {
+  const previous = before2.run;
   const { run, layout } = current;
-  const joinArrives = !hasColumn(before.layout, "join") && hasColumn(layout, "join");
+  const joinArrives = !hasColumn(before2.layout, "join") && hasColumn(layout, "join");
   const present = new Set(layout.items.map((item2) => item2.key));
   const queue = [];
   const fan = [];
@@ -11706,7 +12848,7 @@ var edgePieces = (item2, a, b) => {
 var pathData = (pieces) => {
   const [x, y] = pieces[0][0];
   const steps = pieces.map((piece) => {
-    const points = piece.slice(1).map(([px3, py]) => `${fixed(px3)} ${fixed(py)}`);
+    const points = piece.slice(1).map(([px4, py]) => `${fixed(px4)} ${fixed(py)}`);
     return piece.length === 2 ? `L${points[0]}` : `C${points.join(" ")}`;
   });
   return `M${fixed(x)} ${fixed(y)} ${steps.join(" ")}`;
@@ -11784,9 +12926,9 @@ var partsOf = (progress) => {
   const shares = phases !== void 0 && phases.length === flags.length ? phases : flags.map(() => 1 / flags.length);
   return flags.map((done, index) => ({ share: shares[index], done }));
 };
-var currentOf = (progress, count) => {
+var currentOf = (progress, count2) => {
   const current = progress.current;
-  return current !== void 0 && Number.isInteger(current) && current >= 0 && current < count ? current : void 0;
+  return current !== void 0 && Number.isInteger(current) && current >= 0 && current < count2 ? current : void 0;
 };
 var progressText = (progress, current) => {
   const { kind, done, total } = progress;
@@ -11828,7 +12970,7 @@ var typicalText = (used, length) => {
     return `${calls}, longer than all ${length.runs} earlier runs (the longest ${length.p90})`;
   }
   if (used > length.p90) {
-    return `${calls}, longer than usual: at least 90\xA0% of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
+    return `${calls}, longer than usual: at least 90% of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
   }
   const range = length.p25 === length.p75 ? `${length.p25}` : `${length.p25} to ${length.p75}`;
   return `${calls}, usually ${range} (${length.runs} earlier runs)`;
@@ -12163,8 +13305,8 @@ var pipelineLabel = (index) => `Pipeline ${index + 1}`;
 var mergedRows = (rows) => rows.filter((row2) => row2.merge?.state === "done");
 var headerText = (index, title) => title ? `${pipelineLabel(index)} \xB7 ${title}` : pipelineLabel(index);
 var compactTip = (index, title, merged) => {
-  const count = merged === 1 ? "1 branch merged" : `${merged} branches merged`;
-  const text2 = title ? `${pipelineLabel(index)}: ${title} \xB7 ${count}` : `${pipelineLabel(index)} \xB7 ${count}`;
+  const count2 = merged === 1 ? "1 branch merged" : `${merged} branches merged`;
+  const text2 = title ? `${pipelineLabel(index)}: ${title} \xB7 ${count2}` : `${pipelineLabel(index)} \xB7 ${count2}`;
   return `${text2}
 ${OPEN_HINT}`;
 };
@@ -12192,8 +13334,8 @@ var fixCountOf = (session, reviewer) => {
   if (reviewer.state !== "changes") {
     return {};
   }
-  const count = session.followups.filter((item2) => item2.type === "fix" && item2.origin.agentId === reviewer.agentId).length;
-  return count > 0 ? { count } : {};
+  const count2 = session.followups.filter((item2) => item2.type === "fix" && item2.origin.agentId === reviewer.agentId).length;
+  return count2 > 0 ? { count: count2 } : {};
 };
 var PILL_LABEL_MAX = 40;
 var pillText = (row2) => row2.branchLabel === void 0 ? shortBranch(row2.branch) : clip2(labelText(row2.branchLabel), PILL_LABEL_MAX);
@@ -12254,8 +13396,8 @@ var loopSpecs = (row2, reOnly, sharedExit) => {
 var fixOffsets = (row2, loops) => {
   const leaving = (index) => loops.filter((loop) => loop.fixIndex === index).length;
   const pitches = row2.fixes.slice(1).map((_, index) => FIX_PITCH + Math.max(0, leaving(index) - 1) * LANE_STEP);
-  const span = pitches.reduce((sum, pitch) => sum + pitch, 0);
-  return row2.fixes.map((_, index) => pitches.slice(0, index).reduce((sum, pitch) => sum + pitch, 0) - span / 2);
+  const span = pitches.reduce((sum2, pitch) => sum2 + pitch, 0);
+  return row2.fixes.map((_, index) => pitches.slice(0, index).reduce((sum2, pitch) => sum2 + pitch, 0) - span / 2);
 };
 var fixSpan = (plan) => plan.fixDys.length > 1 ? plan.fixDys[plan.fixDys.length - 1] - plan.fixDys[0] : 0;
 var promoteFeeder = (row2, carries) => {
@@ -12333,12 +13475,12 @@ var placeSession = (session, options, room) => {
     groups2.push(newGroup(0, void 0, false, false));
   }
   const current = groups2[groups2.length - 1];
-  const groupOf = (index) => groups2.find((group) => group.index === index) ?? current;
+  const groupOf2 = (index) => groups2.find((group) => group.index === index) ?? current;
   for (const row2 of session.rows) {
-    groupOf(row2.pipeline).rows.push(row2);
+    groupOf2(row2.pipeline).rows.push(row2);
   }
   for (const agentId of session.planAgents.filter((id) => id !== docs?.agentId && session.agents[id] !== void 0)) {
-    groupOf(session.agents[agentId].pipeline).agents.push(agentId);
+    groupOf2(session.agents[agentId].pipeline).agents.push(agentId);
   }
   const planAgents = groups2.filter((group) => !group.folded).flatMap((group) => group.agents);
   const shown = {
@@ -12381,7 +13523,7 @@ var placeSession = (session, options, room) => {
     plan.forkLane = plan.fromText !== void 0 && from?.kind === "branch" && planOf.has(from.branch);
   }
   for (const plan of plans) {
-    groupOf(plan.row.pipeline).plans.push(plan);
+    groupOf2(plan.row.pipeline).plans.push(plan);
   }
   const carries = new Set(session.promote?.state === "waiting" ? session.promote.carries ?? [] : []);
   const promoted = rows.filter((row2) => promoteFeeder(row2, carries));
@@ -12486,7 +13628,7 @@ var placeSession = (session, options, room) => {
   const fixRight = Math.max(fixLeft, ...besideLabels.map((width2) => NODE_R + LABEL_GAP + width2 + 12));
   const mergeLabels = rows.filter(mergeDrawn).map((row2) => textWidth(mergeText(session, row2)));
   const mergeRowsDrawn = rows.filter(mergeDrawn);
-  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf(row2.pipeline) === current) ?? mergeRowsDrawn[0];
+  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf2(row2.pipeline) === current) ?? mergeRowsDrawn[0];
   const gateTarget = mergeRowsDrawn.find((row2) => row2.merge?.state === "waiting") ?? gateRowDrawn;
   const gateOnPromote = wrap && joined && gateTarget !== void 0 && planOf.get(gateTarget.branch) === promoteHost;
   const natural = {
@@ -12512,8 +13654,8 @@ var placeSession = (session, options, room) => {
   items.push(...columnAnchors(setA, natural, midY), ...columnAnchors(setB, natural, midY, lineBAfter));
   let extent = Math.max(setA.end, setB.end);
   const planColumn = setA.byId.plan;
-  const px3 = planColumn.start + planReach;
-  const planAt = { x: px3, y: midY };
+  const px4 = planColumn.start + planReach;
+  const planAt = { x: px4, y: midY };
   const planState = session.plan.state === "idle" ? "running" : session.plan.state;
   const idle = session.plan.state === "idle" ? { idle: true } : {};
   add({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R, agentId: "main", ...idle, ...slide2("plan", planAt) });
@@ -12524,7 +13666,7 @@ var placeSession = (session, options, room) => {
     for (const group of groups2) {
       const base = { pipeline: group.index };
       const header = headerText(group.index, group.title);
-      const headerAt = { x: px3 + HEADER_TEXT.dx, y: group.top + HEADER_TEXT.dy };
+      const headerAt = { x: px4 + HEADER_TEXT.dx, y: group.top + HEADER_TEXT.dy };
       const foldable = foldablePipeline(session, group.index);
       if (foldable) {
         const hitAt = { x: headerAt.x - HEADER_HIT_PAD, y: headerAt.y - 3.5 - HEADER_HIT / 2 };
@@ -12538,7 +13680,7 @@ var placeSession = (session, options, room) => {
         const label = group.title ? `${pipelineLabel(group.index)}: ${group.title}` : pipelineLabel(group.index);
         const tip = group.folded ? {} : { tip: foldable ? `${label}
 ${FOLD_HINT}` : label };
-        const at = { x: px3, y: group.mid };
+        const at = { x: px4, y: group.mid };
         add({ kind: "node", key: sessionKeys.pipelineDot(group.index), at, state: "done", color: "shared", mark: "", radius: DOT_R, ...tip, ...base, from: { key: sessionKeys.plan } });
       }
     }
@@ -12550,7 +13692,7 @@ ${FOLD_HINT}` : label };
     group.agents.forEach((agentId, index) => {
       const agent = session.agents[agentId];
       const key = sessionKeys.agent(agentId);
-      const at = { x: px3 - side, y: group.mid + AGENT_TOP + index * AGENT_STEP };
+      const at = { x: px4 - side, y: group.mid + AGENT_TOP + index * AGENT_STEP };
       const stale = agent.state === "running" && agent.staleSince !== void 0;
       const base = { agentId, pipeline: agent.pipeline };
       const flow = flowOf({ state: agent.state, stale });
@@ -12576,8 +13718,8 @@ ${FOLD_HINT}` : label };
   };
   const lineBStarted = /* @__PURE__ */ new Set();
   const intoLineB = (plan, fromY) => wrap ? { shape: "wrap", extra: { drop: plan.split - fromY } } : { shape: "curve", extra: {} };
-  const fixRun = (plan, index, count, fromY) => {
-    const nest = count - 1 - index;
+  const fixRun = (plan, index, count2, fromY) => {
+    const nest = count2 - 1 - index;
     const reach = nest > 0 ? { reach: nest * LANE_STEP } : {};
     const turn = index > 0 ? { turn: TURN + index * NEST_TURN } : {};
     return { drop: plan.split + nest * LANE_STEP - fromY, ...reach, ...turn };
@@ -12614,7 +13756,7 @@ ${FOLD_HINT}` : label };
         endColumnA = id;
       }
     };
-    const group = groupOf(row2.pipeline);
+    const group = groupOf2(row2.pipeline);
     const earlier = group !== current;
     const unfolds = earlier && group.settled;
     const forked = plan.fromText !== void 0;
@@ -12944,8 +14086,8 @@ ${FOLD_HINT}` : label };
     const cy = group.mid;
     const base = { pipeline: index };
     const widths = group.rows.map((row2) => pillWidth(pillText(row2)) - 4);
-    const moreWidth = (count) => pillWidth(`+${count}`) - 4;
-    const endOf = (count) => pillsLeft + widths.slice(0, count).reduce((sum, width2) => sum + width2 + COMPACT_GAP, 0) - COMPACT_GAP;
+    const moreWidth = (count2) => pillWidth(`+${count2}`) - 4;
+    const endOf = (count2) => pillsLeft + widths.slice(0, count2).reduce((sum2, width2) => sum2 + width2 + COMPACT_GAP, 0) - COMPACT_GAP;
     const pillRoom = summaryMin - SUMMARY_GAP;
     let shown2 = group.rows.length;
     if (endOf(shown2) > pillRoom) {
@@ -12955,7 +14097,7 @@ ${FOLD_HINT}` : label };
       }
     }
     const hitKey = sessionKeys.compactHit(index);
-    const hitAt = { x: px3 - HIT_LEFT, y: cy - HIT_HALF };
+    const hitAt = { x: px4 - HIT_LEFT, y: cy - HIT_HALF };
     const hitIndex = items.length;
     let x = pillsLeft;
     group.rows.slice(0, shown2).forEach((row2, slot) => {
@@ -12982,7 +14124,7 @@ ${FOLD_HINT}` : label };
     }
     const branches2 = new Set(group.rows.map((row2) => row2.branch));
     const agents = Object.entries(session.agents).filter(([id, agent]) => id !== "main" && agent.branch !== void 0 && branches2.has(agent.branch));
-    const spent = agents.reduce((sum, [, agent]) => sum + agent.budget.costUsd, 0);
+    const spent = agents.reduce((sum2, [, agent]) => sum2 + agent.budget.costUsd, 0);
     const summary = agents.length === 0 ? "main thread" : `${plural(agents.length, "agent")} \xB7 ${cost(spent)}`;
     const summaryKey = sessionKeys.compactSummary(index);
     const sx = Math.max(x - COMPACT_GAP + SUMMARY_GAP, summaryMin);
@@ -13141,7 +14283,7 @@ ${FOLD_HINT}` : label };
       state = "done";
     }
     planGate2 = true;
-    add({ kind: "gate", key: sessionKeys.planGate, gate: "plan", at: { x: px3, y: GATE_Y }, state, agentId: "main", from: { key: sessionKeys.plan } });
+    add({ kind: "gate", key: sessionKeys.planGate, gate: "plan", at: { x: px4, y: GATE_Y }, state, agentId: "main", from: { key: sessionKeys.plan } });
     const stem = state === "waiting" ? "gate-link-on" : "gate-link";
     edge("edge:gate:plan", { key: sessionKeys.planGate, dy: 9 }, { key: sessionKeys.plan, dy: -(NODE_R + 2) }, stem, "shared", "line", { agentId: "main" });
   }
@@ -13149,7 +14291,7 @@ ${FOLD_HINT}` : label };
   const mergeRows = rows.filter(mergeDrawn);
   const waitingRows = mergeRows.filter((row2) => row2.merge?.state === "waiting");
   const gateColumn = column("merge");
-  const gateRow = mergeRows.find((row2) => groupOf(row2.pipeline) === current) ?? mergeRows[0];
+  const gateRow = mergeRows.find((row2) => groupOf2(row2.pipeline) === current) ?? mergeRows[0];
   let mergeGate;
   let mergeWaits2 = false;
   if (gateColumn && gateRow) {
@@ -13253,20 +14395,20 @@ ${FOLD_HINT}` : label };
       }
     }
   }
-  const waits = /* @__PURE__ */ new Set();
+  const waits2 = /* @__PURE__ */ new Set();
   if (you === "waiting" || session.plan.state === "waiting") {
-    waits.add("plan");
+    waits2.add("plan");
   }
   if (mergeWaits2) {
-    waits.add("merge");
+    waits2.add("merge");
   }
   const tone = (id) => {
-    if (waits.has(id)) {
+    if (waits2.has(id)) {
       return "stage-you";
     }
     return now.has(id) ? "stage-active" : "stage";
   };
-  const labelX = (entry) => entry.id === "plan" ? px3 : entry.center;
+  const labelX = (entry) => entry.id === "plan" ? px4 : entry.center;
   const labelY = height - 7;
   items.push(...stageLabels(setA, wrap ? labelY - SECOND_LABEL_ROW : labelY, tone, labelX, midY), ...stageLabels(setB, labelY, tone, labelX, midY));
   for (const group of multi ? groups2.slice(1) : []) {
@@ -13302,14 +14444,14 @@ var wrench = (r) => {
   const d = WRENCH.replace(/-?\d*\.?\d+/g, (value2) => round3(Number(value2) * r / 12));
   return svgEl("path", { class: "node-icon node-wrench", d });
 };
-var countText = (count) => {
-  const text2 = String(count);
+var countText = (count2) => {
+  const text2 = String(count2);
   const long = text2.length >= 3;
   const element = svgEl("text", { class: long ? "node-count long" : "node-count", y: long ? 2.9 : 3.6 });
   element.textContent = text2;
   return element;
 };
-var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count) => {
+var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count2) => {
   const core = svgEl("g", { class: "node-core" });
   core.append(svgEl("circle", { class: "node-outline", r: radius }));
   const parts = [];
@@ -13324,7 +14466,7 @@ var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count) => {
   } else if (state === "done" || state === "approved") {
     core.append(check(radius));
   } else if (state === "changes") {
-    core.append(count !== void 0 && count > 0 ? countText(count) : wrench(radius));
+    core.append(count2 !== void 0 && count2 > 0 ? countText(count2) : wrench(radius));
   } else if (state === "handed") {
     const inner = round3(radius - 1.6);
     core.append(svgEl("path", { class: "node-half", d: `M0 -${inner} A${inner} ${inner} 0 0 0 0 ${inner} Z` }));
@@ -13360,8 +14502,8 @@ var drawSheen = (core, radius, state) => {
 };
 var rollCount = 0;
 var drawRoll = (core, radius) => {
-  const count = [...core.children].find((child) => child.classList.contains("node-count"));
-  if (!count) {
+  const count2 = [...core.children].find((child) => child.classList.contains("node-count"));
+  if (!count2) {
     return void 0;
   }
   rollCount += 1;
@@ -13369,21 +14511,21 @@ var drawRoll = (core, radius) => {
   const clip3 = svgEl("clipPath", { id });
   clip3.append(svgEl("circle", { r: round3(radius - 0.8) }));
   const roll = svgEl("g", { class: "node-roll", "clip-path": `url(#${id})` });
-  core.insertBefore(clip3, count);
-  core.insertBefore(roll, count);
+  core.insertBefore(clip3, count2);
+  core.insertBefore(roll, count2);
   const glyph = wrench(radius);
-  roll.append(glyph, count);
-  count.style.opacity = "0";
+  roll.append(glyph, count2);
+  count2.style.opacity = "0";
   const settle = () => {
     const parent = roll.parentNode;
     if (parent) {
-      count.style.opacity = "";
-      parent.insertBefore(count, roll);
+      count2.style.opacity = "";
+      parent.insertBefore(count2, roll);
       roll.remove();
       clip3.remove();
     }
   };
-  return { wrench: glyph, count, distance: Math.round(radius * 14) / 10, settle };
+  return { wrench: glyph, count: count2, distance: Math.round(radius * 14) / 10, settle };
 };
 
 // src/ui/graph/scene.ts
@@ -13509,7 +14651,7 @@ var createScene = (host, context, options = {}) => {
     return element;
   };
   const marked = (item2) => item2.questionIds.some((id) => highlighted.has(id));
-  const questionsOf = (entry) => entry.item.kind === "bubble" ? entry.item.questionIds : [];
+  const questionsOf2 = (entry) => entry.item.kind === "bubble" ? entry.item.questionIds : [];
   const dispatch = (entry, type, questionIds2) => {
     const detail = { questionIds: questionIds2 };
     entry.element?.dispatchEvent(new CustomEvent(type, { bubbles: true, detail }));
@@ -13518,8 +14660,8 @@ var createScene = (host, context, options = {}) => {
     const element = entry.element;
     element?.addEventListener("pointerenter", () => {
       if (entry.alive) {
-        hovered = { entry, ids: questionsOf(entry).join(" ") };
-        dispatch(entry, QUESTION_HOVER, questionsOf(entry));
+        hovered = { entry, ids: questionsOf2(entry).join(" ") };
+        dispatch(entry, QUESTION_HOVER, questionsOf2(entry));
       }
     });
     element?.addEventListener("pointerleave", () => {
@@ -13530,7 +14672,7 @@ var createScene = (host, context, options = {}) => {
     });
     element?.addEventListener("click", () => {
       if (entry.alive) {
-        dispatch(entry, QUESTION_SELECT, questionsOf(entry));
+        dispatch(entry, QUESTION_SELECT, questionsOf2(entry));
       }
     });
   };
@@ -13539,12 +14681,12 @@ var createScene = (host, context, options = {}) => {
       return;
     }
     const { entry } = hovered;
-    const ids = entry.alive ? questionsOf(entry).join(" ") : "";
+    const ids = entry.alive ? questionsOf2(entry).join(" ") : "";
     if (ids === hovered.ids) {
       return;
     }
     hovered = entry.alive ? { entry, ids } : void 0;
-    dispatch(entry, QUESTION_HOVER, entry.alive ? questionsOf(entry) : []);
+    dispatch(entry, QUESTION_HOVER, entry.alive ? questionsOf2(entry) : []);
   };
   const textSpan = (text2) => {
     const span = svgEl("tspan", { class: "sub" });
@@ -13641,18 +14783,18 @@ var createScene = (host, context, options = {}) => {
         break;
       }
       case "bubble": {
-        const count = item2.questionIds.length;
+        const count2 = item2.questionIds.length;
         const title = svgEl("title");
         title.textContent = item2.summary;
-        const ring = svgEl("rect", { class: "bubble-ring", x: -RING, y: -RING, width: RING + bubbleReach(count) + 3, height: 2 * RING, rx: RING });
+        const ring = svgEl("rect", { class: "bubble-ring", x: -RING, y: -RING, width: RING + bubbleReach(count2) + 3, height: 2 * RING, rx: RING });
         const core = svgEl("g", { class: "bubble-core" });
         if (item2.blocking) {
           core.append(svgEl("circle", { class: "bubble-halo", r: BUBBLE_RADIUS }));
         }
         core.append(svgEl("circle", { r: BUBBLE_RADIUS }), textElement("bubble-text", "?", { y: 4 }));
         const parts = [title, ring, core];
-        if (count > 1) {
-          parts.push(textElement("bubble-count", String(count), { x: BUBBLE_COUNT_X, y: 3.2 }));
+        if (count2 > 1) {
+          parts.push(textElement("bubble-count", String(count2), { x: BUBBLE_COUNT_X, y: 3.2 }));
         }
         element.setAttribute("class", item2.blocking ? "bubble" : "bubble non-blocking");
         element.classList.toggle("quiet", item2.quiet);
@@ -13799,7 +14941,7 @@ var createScene = (host, context, options = {}) => {
         layers.dots.append(dot.group);
       }
       const lengths = paths.map((path) => path.getTotalLength());
-      const total = lengths.reduce((sum, length) => sum + length, 0);
+      const total = lengths.reduce((sum2, length) => sum2 + length, 0);
       dot.trail.forEach((circle, index) => {
         const progress = Math.min(1, Math.max(0, (time2 - index * TRAIL_LAG_MS - dot.start) / DOT_MS));
         const travelled = easeInOutCubic(progress);
@@ -14166,12 +15308,12 @@ var detailStep = (state, event) => {
 // src/ui/table/verify.ts
 var MAX_PIPS = 7;
 var KINDS = ["typecheck", "lint", "test"];
-var entriesOf = (results, kind) => results?.[kind] ?? [];
+var entriesOf2 = (results, kind) => results?.[kind] ?? [];
 var verifyRounds = (results) => {
-  const count = Math.max(...KINDS.map((kind) => entriesOf(results, kind).length));
+  const count2 = Math.max(...KINDS.map((kind) => entriesOf2(results, kind).length));
   const rounds = [];
-  for (let index = 0; index < count; index += 1) {
-    const entries = KINDS.flatMap((kind) => entriesOf(results, kind)[index] ?? []);
+  for (let index = 0; index < count2; index += 1) {
+    const entries = KINDS.flatMap((kind) => entriesOf2(results, kind)[index] ?? []);
     if (entries.includes("fail")) {
       rounds.push("fail");
     } else if (entries.includes("running")) {
@@ -14187,9 +15329,9 @@ var verifyPips = (meter, agentRunning) => {
   const rounds = verifyRounds(meter.results);
   const used = usedRounds(meter);
   const limit = meter.limit > 0 ? meter.limit : 0;
-  const count = Math.max(limit, used);
+  const count2 = Math.max(limit, used);
   const pips = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < count2; index += 1) {
     const over = limit > 0 && index >= limit;
     let state = "empty";
     if (index < used) {
@@ -14202,11 +15344,11 @@ var verifyPips = (meter, agentRunning) => {
   }
   return pips;
 };
-var noun = (count) => count === 1 ? "round" : "rounds";
+var noun = (count2) => count2 === 1 ? "round" : "rounds";
 var roundLine = (results, index, agentRunning) => {
   const parts = [];
   for (const kind of KINDS) {
-    const entry = entriesOf(results, kind)[index];
+    const entry = entriesOf2(results, kind)[index];
     if (entry !== void 0) {
       parts.push(`${kind} ${entry === "running" && !agentRunning ? "unknown" : entry}`);
     }
@@ -14302,15 +15444,15 @@ var nowCell = (agent, state, waitingText) => {
 };
 var ratioOf = (meter) => meter.limit > 0 ? Math.min(1, meter.used / meter.limit) : void 0;
 var countText2 = (meter) => meter.limit > 0 ? `${meter.used}/${meter.limit}` : String(meter.used);
-var contextSize = (count) => {
-  const value2 = Math.max(0, count);
+var contextSize = (count2) => {
+  const value2 = Math.max(0, count2);
   if (value2 >= 999500) {
     return `${Number((value2 / 1e6).toFixed(1))}M`;
   }
   return `${Math.round(value2 / 1e3)}k`;
 };
 var countCell = (meter) => ({ text: countText2(meter), ratio: ratioOf(meter), level: meter.level });
-var rowOf = (agent, parts, config) => {
+var rowOf2 = (agent, parts, config) => {
   const { state, superseded, pill } = parts;
   const main = agent.id === MAIN_AGENT;
   const active = isActive4(state);
@@ -14356,7 +15498,7 @@ var agentRow = (run, agent, config) => {
     now: nowCell(agent, state, run.chip.text),
     endedAt: agentEnd(run, agent)
   };
-  return rowOf(agent, parts, config);
+  return rowOf2(agent, parts, config);
 };
 var streamRunOf = (session, agentId) => {
   for (const row2 of session.rows) {
@@ -14369,7 +15511,7 @@ var streamRunOf = (session, agentId) => {
   }
   return void 0;
 };
-var reviewOf = (session, agentId) => {
+var reviewOf2 = (session, agentId) => {
   for (const row2 of session.rows) {
     let newest3;
     for (const entry of row2.reviewers) {
@@ -14388,7 +15530,7 @@ var agentName = (session, agent) => {
   if (agent.id === MAIN_AGENT) {
     return "main thread";
   }
-  const review = reviewOf(session, agent.id);
+  const review = reviewOf2(session, agent.id);
   const reviewerId = review?.reviewer.reviewerId ?? agent.reviewerId;
   if (reviewerId) {
     const again = review !== void 0 && isReReview(review.reviewer) ? " \xB7 re-review" : "";
@@ -14407,7 +15549,7 @@ var agentTitle = (session, agent, name) => {
   if (agent.id === MAIN_AGENT) {
     return name;
   }
-  const round4 = reviewOf(session, agent.id)?.reviewer.round ?? 1;
+  const round4 = reviewOf2(session, agent.id)?.reviewer.round ?? 1;
   const extra = [...round4 > 1 ? [`round ${round4}`] : [], ...agent.role === name ? [] : [agent.role]];
   return extra.length > 0 ? `${name} (${extra.join(", ")})` : name;
 };
@@ -14448,7 +15590,7 @@ var sessionSuperseded = (session, agent, state) => {
   if (state !== "changes") {
     return false;
   }
-  const review = reviewOf(session, agent.id);
+  const review = reviewOf2(session, agent.id);
   if (review === void 0) {
     return false;
   }
@@ -14474,7 +15616,7 @@ var sessionAgentRow = (session, agent, config) => {
     now: sessionNowCell(session, agent, state),
     endedAt: sessionAgentEnd(session, agent)
   };
-  return rowOf(agent, parts, config);
+  return rowOf2(agent, parts, config);
 };
 var STALE_MINUTES = 30;
 var staleTitle = (row2, clock) => {
@@ -14521,12 +15663,12 @@ var sessionTableModel = (session, config, showAll) => {
   const rows = [...mains, ...subagents];
   return { rows, shown, more: moreText(rows, shown, showAll) };
 };
-var pad2 = (value2) => String(value2).padStart(2, "0");
+var pad3 = (value2) => String(value2).padStart(2, "0");
 var sinceStart = (ms) => {
   const seconds = Number.isFinite(ms) ? Math.max(0, Math.round(ms / 1e3)) : 0;
-  return `${pad2(Math.floor(seconds / 60))}:${pad2(seconds % 60)}`;
+  return `${pad3(Math.floor(seconds / 60))}:${pad3(seconds % 60)}`;
 };
-var duration = (ms) => {
+var duration2 = (ms) => {
   if (ms < 1e4) {
     return `${(Math.max(0, ms) / 1e3).toFixed(1)}s`;
   }
@@ -14543,11 +15685,11 @@ var callMark = (call) => {
 };
 var callDuration = (call) => {
   if (call.durationMs !== void 0) {
-    return duration(call.durationMs);
+    return duration2(call.durationMs);
   }
   const start = parseTime(call.startedAt);
   const end = parseTime(call.endedAt);
-  return start === void 0 || end === void 0 ? "" : duration(end - start);
+  return start === void 0 || end === void 0 ? "" : duration2(end - start);
 };
 var recentCalls = (agent, limit = 9) => {
   const start = parseTime(agent.startedAt) ?? 0;
@@ -15056,11 +16198,11 @@ var createTableCore = (host, context, source) => {
   };
   const reorder = (ordered, shown, created, toggled) => {
     const animate = motion();
-    const before = /* @__PURE__ */ new Map();
+    const before2 = /* @__PURE__ */ new Map();
     if (animate) {
       for (const entry of items.values()) {
         if (entry.visible && !created.has(entry)) {
-          before.set(entry, entry.item.getBoundingClientRect().top);
+          before2.set(entry, entry.item.getBoundingClientRect().top);
         }
       }
     }
@@ -15073,7 +16215,7 @@ var createTableCore = (host, context, source) => {
       return;
     }
     for (const entry of ordered) {
-      const top = before.get(entry);
+      const top = before2.get(entry);
       if (!entry.visible || top === void 0 && toggled && !created.has(entry)) {
         continue;
       }
@@ -15230,7 +16372,7 @@ var createSessionTableView = (host, context) => {
   let pointed;
   let lastTick = Number.NEGATIVE_INFINITY;
   let destroyed = false;
-  const agentOf = (id) => current?.agents[id];
+  const agentOf2 = (id) => current?.agents[id];
   const abort = (load2) => {
     load2.controller?.abort();
     load2.controller = void 0;
@@ -15266,9 +16408,9 @@ var createSessionTableView = (host, context) => {
   const core = createTableCore(host, context, {
     session: true,
     model: (showAll) => current ? sessionTableModel(current, context.config, showAll) : void 0,
-    agent: agentOf,
+    agent: agentOf2,
     details(id) {
-      const agent = agentOf(id);
+      const agent = agentOf2(id);
       if (!current || !agent) {
         return void 0;
       }
@@ -15276,7 +16418,7 @@ var createSessionTableView = (host, context) => {
       return sessionAgentDetails(current, agent, load2?.state.full, agent.trimmed ? loadOf(load2) : "done", context.typical);
     },
     onToggle(id, open2) {
-      const agent = agentOf(id);
+      const agent = agentOf2(id);
       if (!open2) {
         step(id, { type: "close" });
       } else if (agent?.trimmed) {
@@ -15294,7 +16436,7 @@ var createSessionTableView = (host, context) => {
       }
       pointed = next;
       core.mark((rowId) => rowId === next);
-      const agent = next === void 0 ? void 0 : agentOf(next);
+      const agent = next === void 0 ? void 0 : agentOf2(next);
       const detail = { target: agent ? focusOf(agent) : void 0 };
       host.dispatchEvent(new CustomEvent(SESSION_FOCUS, { bubbles: true, detail }));
     }
@@ -15319,7 +16461,7 @@ var createSessionTableView = (host, context) => {
     if (target.agentId !== void 0) {
       return id === target.agentId;
     }
-    return target.branch !== void 0 && agentOf(id)?.branch === target.branch;
+    return target.branch !== void 0 && agentOf2(id)?.branch === target.branch;
   };
   return {
     update(session) {
@@ -15482,17 +16624,17 @@ var firstLine2 = (text2) => {
   }
   return "";
 };
-var replyCount = (count) => count === 1 ? "1 reply" : `${count} replies`;
-var stripModel = (messages, waits = () => false) => {
+var replyCount = (count2) => count2 === 1 ? "1 reply" : `${count2} replies`;
+var stripModel = (messages, waits2 = () => false) => {
   const newest3 = messages.at(-1);
   if (!newest3) {
     return void 0;
   }
-  const waiting = waits(newest3);
+  const waiting = waits2(newest3);
   const shown = newest3.kind === "plan" || newest3.kind === "ask" && waiting;
   const label = shown ? KIND_LABEL[newest3.kind] : "";
-  const count = replyCount(messages.length);
-  return { id: newest3.id, text: firstLine2(newest3.text), kind: newest3.kind, label, at: parseTime(newest3.at), count, waiting };
+  const count2 = replyCount(messages.length);
+  return { id: newest3.id, text: firstLine2(newest3.text), kind: newest3.kind, label, at: parseTime(newest3.at), count: count2, waiting };
 };
 var stillWaits = (message, card, home) => {
   if (message.kind !== "ask") {
@@ -15532,8 +16674,8 @@ var sessionStillWaits = (message, session) => {
   return session.chip.tone === "you" && !answered;
 };
 var sessionStripModel = (session) => {
-  const waits = (message) => sessionStillWaits(message, session);
-  return stripModel(session.messages, waits);
+  const waits2 = (message) => sessionStillWaits(message, session);
+  return stripModel(session.messages, waits2);
 };
 var holdsMessage = (session, messageId) => {
   return messageId !== "" && session.messages.some((message) => message.id === messageId);
@@ -15541,16 +16683,16 @@ var holdsMessage = (session, messageId) => {
 var gateMessage = (session, questionIds2) => {
   const ids = new Set(questionIds2);
   const linked = session.questions.filter((question) => ids.has(question.id) && holdsMessage(session, question.messageId ?? ""));
-  const newestFirst2 = linked.sort((a, b) => (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0));
-  return (newestFirst2.find((question) => question.state === "open") ?? newestFirst2[0])?.messageId;
+  const newestFirst4 = linked.sort((a, b) => (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0));
+  return (newestFirst4.find((question) => question.state === "open") ?? newestFirst4[0])?.messageId;
 };
-var pad3 = (value2) => String(value2).padStart(2, "0");
+var pad4 = (value2) => String(value2).padStart(2, "0");
 var timeOfDay = (at) => {
   if (at === void 0) {
     return "";
   }
   const date = new Date(at);
-  return `${pad3(date.getHours())}:${pad3(date.getMinutes())}`;
+  return `${pad4(date.getHours())}:${pad4(date.getMinutes())}`;
 };
 var toEntry = (message) => {
   const at = parseTime(message.at);
@@ -15606,9 +16748,9 @@ var toDeveloperEntry = (message) => {
     dateTime: message.at
   };
 };
-var timeOf4 = (item2) => parseTime(item2.at) ?? Number.NEGATIVE_INFINITY;
+var timeOf5 = (item2) => parseTime(item2.at) ?? Number.NEGATIVE_INFINITY;
 var byTime2 = (items) => {
-  return [...items].sort((a, b) => timeOf4(a) - timeOf4(b) || (a.id < b.id ? -1 : Number(a.id > b.id)));
+  return [...items].sort((a, b) => timeOf5(a) - timeOf5(b) || (a.id < b.id ? -1 : Number(a.id > b.id)));
 };
 var turnNote = (reply, source) => {
   if (reply?.startedBy === void 0) {
@@ -15628,7 +16770,7 @@ var pendingState = (source, newest3) => {
   if (source.main === "ended") {
     return "ended";
   }
-  const newestAt = timeOf4(newest3);
+  const newestAt = timeOf5(newest3);
   const asked = (source.openQuestionsAt ?? []).some((at) => (parseTime(at) ?? Number.NEGATIVE_INFINITY) > newestAt);
   if (asked) {
     return "waiting";
@@ -15643,7 +16785,7 @@ var turnsModel = (source) => {
   let next = 0;
   for (const reply of replies) {
     const start = next;
-    while (next < developer.length && timeOf4(developer[next]) <= timeOf4(reply)) {
+    while (next < developer.length && timeOf5(developer[next]) <= timeOf5(reply)) {
       next += 1;
     }
     turns.push(toTurn(developer.slice(start, next), reply, source));
@@ -15654,9 +16796,9 @@ var turnsModel = (source) => {
   if (rest.length > 0) {
     turns.push(toTurn(rest, void 0, source));
   }
-  const newestFirst2 = turns.reverse();
-  const count = source.developerMessages === void 0 ? void 0 : developer.length;
-  return { latest: newestFirst2[0], pending, earlier: newestFirst2.slice(1), replies: replies.length, developer: count };
+  const newestFirst4 = turns.reverse();
+  const count2 = source.developerMessages === void 0 ? void 0 : developer.length;
+  return { latest: newestFirst4[0], pending, earlier: newestFirst4.slice(1), replies: replies.length, developer: count2 };
 };
 var messagePlace = (model, messageId) => {
   if (messageId === void 0) {
@@ -15756,7 +16898,7 @@ var createSessionModalSource = (sessions, sessionId, fallback = () => void 0) =>
     return memo.source;
   };
 };
-var earlierLabel = (count) => `Earlier turns (${count})`;
+var earlierLabel = (count2) => `Earlier turns (${count2})`;
 var modalTitle = (run) => {
   const title = cardTitle(run);
   return run.key ? `${run.key}: ${title}` : title;
@@ -15769,6 +16911,488 @@ var modalSubtitle = (repository, replies, developer) => {
   const mine = developer === void 0 ? "" : `${plural(developer, "message")} from you`;
   const parts = [repository, "main thread", replyCount(replies), mine];
   return parts.filter((part) => part !== "").join(" \xB7 ");
+};
+
+// src/ui/health-report-view.ts
+var SLOT_PX = 8;
+var SPARK_HEIGHT_PX = 34;
+var PLOT_PX = SPARK_HEIGHT_PX - 4;
+var MIN_BAR_PX = 1.5;
+var BAR_GAP_PX = 1.2;
+var SLIDE_MS = 700;
+var FADE_UP_MS = 260;
+var FADE_UP_STAGGER_MS = 25;
+var FADE_UP_MAX_DELAYED = 8;
+var FADE_UP = [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }];
+var SLIDE = [{ transform: `translateX(${SLOT_PX}px)` }, { transform: "none" }];
+var COPY_TEXT = "Copy added lines";
+var COPIED_TEXT = "Copied";
+var COPY_FAILED_TEXT = "Select and copy";
+var COPY_RESET_MS = 1600;
+var COPIED_STATUS = "Added lines copied.";
+var COPY_FAILED_STATUS = "Copy failed. Select and copy selects the lines.";
+var IMPACTS = ["cost", "time", "quality"];
+var IMPACT_NAMES = { cost: "Cost", time: "Time", quality: "Quality" };
+var GROUP_CLASSES = { change: "chg", consider: "con", ok: "okg", info: "ifg", unmeasured: "nmg" };
+var FINDING_CLASSES = { change: "change", consider: "consider", ok: "ok", info: "info", unmeasured: "nm" };
+var SUGGESTED = /* @__PURE__ */ new Set(["change", "consider"]);
+var stageHit = (finding, stage) => stage === "all" || finding.step === stage;
+var impactHit = (finding, impact) => impact === "all" || finding.impact === impact;
+var filterView = (report, filter) => {
+  const findings = report.groups.flatMap((group) => group.findings);
+  const passing = findings.filter((finding) => stageHit(finding, filter.stage) && impactHit(finding, filter.impact));
+  const shown = new Set(passing.map((finding) => finding.id));
+  const suggested = findings.filter((finding) => SUGGESTED.has(finding.group));
+  const byImpact = suggested.filter((finding) => impactHit(finding, filter.impact));
+  const byStage = suggested.filter((finding) => stageHit(finding, filter.stage));
+  const stageOptions = ["all", ...report.stages.map((stage) => stage.id)];
+  const impactOptions = ["all", ...IMPACTS];
+  const stageCounts = new Map(stageOptions.map((option) => [option, byImpact.filter((finding) => stageHit(finding, option)).length]));
+  const impactCounts = new Map(impactOptions.map((option) => [option, byStage.filter((finding) => impactHit(finding, option)).length]));
+  const filtered = filter.stage !== "all" || filter.impact !== "all";
+  const noun3 = findings.length === 1 ? "finding" : "findings";
+  const all = `${findings.length} ${noun3}`;
+  const summary = filtered ? `Showing ${shown.size} of ${all}` : `${all} \xB7 numbers count what is worth changing or considering`;
+  return { shown, stageCounts, impactCounts, filtered, summary };
+};
+var updatedText = (report, now) => {
+  const updated = report.updated;
+  if (updated === void 0) {
+    return "";
+  }
+  const at = Date.parse(updated.finishedAt);
+  return Number.isFinite(at) ? `updated after ${updated.name} finished, ${ago(now - at)}` : "";
+};
+var healthSubtitle = (report, now) => {
+  const updated = updatedText(report, now);
+  return updated === "" ? report.count : `${report.count} \xB7 ${updated}`;
+};
+var segFade = (seg) => {
+  seg.classList.toggle("ofl", seg.scrollLeft > 2);
+  seg.classList.toggle("ofr", seg.scrollLeft + seg.clientWidth < seg.scrollWidth - 2);
+};
+var plotY = (share2) => {
+  const clamped = Math.min(1, Math.max(0, share2));
+  return SPARK_HEIGHT_PX - Math.max(MIN_BAR_PX, clamped * PLOT_PX);
+};
+var px = (value2) => value2.toFixed(1);
+var sparkSvg = (spark) => {
+  const width = spark.bars.length * SLOT_PX;
+  const svg = svgEl("svg", { class: "hsp", viewBox: `0 0 ${width} ${SPARK_HEIGHT_PX}`, width, height: SPARK_HEIGHT_PX, role: "img" });
+  svg.setAttribute("aria-label", spark.label);
+  if (spark.windowStart > 0 && spark.windowStart < spark.bars.length) {
+    const x = spark.windowStart * SLOT_PX;
+    svg.append(svgEl("line", { class: "sep", x1: x, x2: x, y1: 0, y2: SPARK_HEIGHT_PX }));
+  }
+  const bars = svgEl("g", { class: "hbars" });
+  spark.bars.forEach((bar, index) => {
+    const left = index * SLOT_PX;
+    if (bar.height === null || !Number.isFinite(bar.height)) {
+      bars.append(svgEl("circle", { class: "hz", cx: left + SLOT_PX / 2, cy: SPARK_HEIGHT_PX - MIN_BAR_PX, r: 1.1 }));
+      return;
+    }
+    const top = plotY(bar.height);
+    const kind = bar.window ? "r" : "p";
+    const size = { width: px(SLOT_PX - 2 * BAR_GAP_PX), height: px(SPARK_HEIGHT_PX - top) };
+    const attributes = { x: px(left + BAR_GAP_PX), y: px(top), ...size, rx: 1 };
+    bars.append(svgEl("rect", { class: bar.worse ? `${kind} over` : kind, ...attributes }));
+  });
+  svg.append(bars);
+  if (spark.guide !== void 0 && Number.isFinite(spark.guide)) {
+    const y = px(plotY(spark.guide));
+    svg.append(svgEl("line", { class: "hgl", x1: 0, x2: width, y1: y, y2: y }));
+  }
+  return { svg, bars };
+};
+var viewCount = 0;
+var createHealthReportView = (hooks) => {
+  viewCount += 1;
+  const prefix = `health-${viewCount}`;
+  const element = el("div", "hrep");
+  let filter = { stage: "all", impact: "all" };
+  const open2 = /* @__PURE__ */ new Set();
+  const openChanges = /* @__PURE__ */ new Set();
+  let last;
+  let report;
+  let keyless = false;
+  let drawnParts = [];
+  let panelCount2 = 0;
+  let items = /* @__PURE__ */ new Map();
+  let groups2 = [];
+  let options = [];
+  let segs = [];
+  let focusables = /* @__PURE__ */ new Map();
+  let summary = el("p");
+  let summaryText = el("span");
+  let clear = el("button");
+  let none = el("p");
+  let barGroups = [];
+  const sizes = new ResizeObserver(() => segs.forEach(segFade));
+  const register = (key, control) => {
+    focusables.set(key, control);
+    return control;
+  };
+  const apply = () => {
+    if (!report) {
+      return;
+    }
+    const view = filterView(report, filter);
+    for (const [id, item2] of items) {
+      item2.hidden = !view.shown.has(id);
+    }
+    for (const group of groups2) {
+      const shown = group.ids.filter((id) => view.shown.has(id)).length;
+      group.section.hidden = shown === 0;
+      setText(group.count, String(shown));
+    }
+    for (const option of options) {
+      const counts = option.kind === "stage" ? view.stageCounts : view.impactCounts;
+      const count2 = counts.get(option.value) ?? 0;
+      option.button.setAttribute("aria-pressed", String(filter[option.kind] === option.value));
+      option.button.classList.toggle("z", count2 === 0 && option.value !== "all");
+      setText(option.count, count2 === 0 ? "" : String(count2));
+    }
+    setText(summaryText, view.summary);
+    summary.classList.toggle("on", view.filtered);
+    clear.hidden = !view.filtered;
+    none.hidden = view.shown.size > 0 || items.size === 0;
+    segs.forEach(segFade);
+  };
+  const fadeUp = () => {
+    if (hooks.reducedMotion()) {
+      return;
+    }
+    const shown = [...items.values()].filter((item2) => !item2.hidden);
+    shown.forEach((item2, index) => {
+      const delay = Math.min(index, FADE_UP_MAX_DELAYED) * FADE_UP_STAGGER_MS;
+      item2.animate(FADE_UP, { duration: FADE_UP_MS, delay, easing: EASE3, fill: "backwards" });
+    });
+  };
+  const setFilter = (next) => {
+    filter = next;
+    apply();
+    fadeUp();
+  };
+  const segmented = (kind, label, values) => {
+    const row2 = el("div", "hfr");
+    const key = el("span", "hfk", label);
+    key.id = `${prefix}-${kind}`;
+    const seg = el("div", "hseg");
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-labelledby", key.id);
+    for (const { value: value2, name, dot } of values) {
+      const button = register(`${kind}:${value2}`, el("button"));
+      button.type = "button";
+      if (dot) {
+        const mark = el("i", value2);
+        mark.setAttribute("aria-hidden", "true");
+        button.append(mark);
+      }
+      const count2 = el("span", "n");
+      button.append(name, count2);
+      button.addEventListener("click", () => {
+        const pressed = filter[kind] === value2;
+        setFilter({ ...filter, [kind]: pressed ? "all" : value2 });
+      });
+      options.push({ button, kind, value: value2, count: count2 });
+      seg.append(button);
+    }
+    seg.addEventListener("scroll", () => segFade(seg));
+    segs.push(seg);
+    row2.append(key, seg);
+    return row2;
+  };
+  const filters = (next) => {
+    const block = el("div", "hflt");
+    const stageValues = next.stages.map((stage2) => ({ value: stage2.id, name: stage2.name, dot: false }));
+    const impactValues = IMPACTS.map((impact2) => ({ value: impact2, name: IMPACT_NAMES[impact2], dot: true }));
+    summary = el("p", "hfsum");
+    summary.setAttribute("aria-live", "polite");
+    summaryText = el("span");
+    clear = register("clear", el("button", "hclr", "Clear filters"));
+    clear.type = "button";
+    clear.addEventListener("click", () => {
+      setFilter({ stage: "all", impact: "all" });
+      focusables.get("stage:all")?.focus({ preventScroll: true });
+    });
+    summary.append(summaryText, clear);
+    const stage = segmented("stage", "Step", [{ value: "all", name: "All", dot: false }, ...stageValues]);
+    const impact = segmented("impact", "Impact", [{ value: "all", name: "All", dot: false }, ...impactValues]);
+    block.append(stage, impact, summary);
+    return block;
+  };
+  const evidenceNumber = (number, kind) => {
+    const block = el("div", kind);
+    block.append(el("span", void 0, number.label), el("b", void 0, number.text));
+    return block;
+  };
+  const evidenceBlock = (finding, evidence) => {
+    const block = el("div", "evb");
+    if (evidence.setup !== "") {
+      const setup = el("p", "evs");
+      setup.append(el("span", void 0, "Setup"), evidence.setup);
+      block.append(setup);
+    }
+    const numbers = [
+      evidence.now ? evidenceNumber(evidence.now) : void 0,
+      evidence.before ? evidenceNumber(evidence.before, "was") : void 0,
+      evidence.guideline ? evidenceNumber(evidence.guideline, "gd") : void 0
+    ].filter((number) => number !== void 0);
+    const spark = evidence.spark && evidence.spark.bars.length > 0 ? sparkSvg(evidence.spark) : void 0;
+    if (numbers.length > 0 || spark) {
+      const figures = el("div", "evm");
+      figures.append(...numbers);
+      if (spark) {
+        figures.append(spark.svg);
+        barGroups.push(spark.bars);
+      }
+      block.append(figures);
+    }
+    if (evidence.rows.length > 0) {
+      const list = el("ol", keyless ? "hevl keyless" : "hevl");
+      for (const row2 of evidence.rows) {
+        const item2 = el("li", "hevr");
+        if (!keyless) {
+          item2.append(el("span", "k", row2.key));
+        }
+        const title = el("span", "t", row2.title);
+        title.title = row2.title;
+        item2.append(title, el("span", "v", row2.value));
+        if (hooks.opens(row2.session)) {
+          const go = register(`go:${finding.id}:${row2.session}`, el("button", "go", "Show card"));
+          go.type = "button";
+          go.addEventListener("click", () => hooks.show(row2.session));
+          item2.append(go);
+        } else {
+          item2.append(el("span", "go off", "record only"));
+        }
+        list.append(item2);
+      }
+      block.append(list);
+    }
+    return block;
+  };
+  const disclosure = (kind, finding, content, toggle, opened) => {
+    panelCount2 += 1;
+    const panel = el("div", "xp");
+    panel.id = `${prefix}-${kind}-${panelCount2}`;
+    const clip3 = el("div");
+    clip3.append(content);
+    panel.append(clip3);
+    toggle.setAttribute("aria-controls", panel.id);
+    const setOpen2 = (on) => {
+      toggle.setAttribute("aria-expanded", String(on));
+      panel.classList.toggle("open", on);
+      panel.inert = !on;
+    };
+    setOpen2(opened.has(finding.id));
+    toggle.addEventListener("click", () => {
+      const on = !opened.has(finding.id);
+      if (on) {
+        opened.add(finding.id);
+      } else {
+        opened.delete(finding.id);
+      }
+      setOpen2(on);
+    });
+    return panel;
+  };
+  const evidencePanel = (finding, evidence, toggle) => {
+    return disclosure("evidence", finding, evidenceBlock(finding, evidence), toggle, open2);
+  };
+  const copyControl = (finding, lines, block) => {
+    const button = register(`copy:${finding.id}`, el("button", "hcp", COPY_TEXT));
+    button.type = "button";
+    const status = el("span", "visually-hidden");
+    status.setAttribute("role", "status");
+    let failed = false;
+    let timer;
+    const done = (copied) => {
+      failed = !copied;
+      setText(button, copied ? COPIED_TEXT : COPY_FAILED_TEXT);
+      setText(status, copied ? COPIED_STATUS : COPY_FAILED_STATUS);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        failed = false;
+        setText(button, COPY_TEXT);
+        setText(status, "");
+      }, COPY_RESET_MS);
+    };
+    button.addEventListener("click", () => {
+      if (failed) {
+        getSelection()?.selectAllChildren(block);
+        return;
+      }
+      try {
+        void navigator.clipboard.writeText(lines.join("\n")).then(() => done(true), () => done(false));
+      } catch {
+        done(false);
+      }
+    });
+    return [button, status];
+  };
+  const fixBlock = (change) => {
+    const block = el("div", "fdx");
+    const fix = el("p", void 0, change.fix);
+    fix.append(el("span", "sav", `Effect: ${change.effect}`));
+    block.append(el("span", "ftag", "Fix"), fix);
+    return block;
+  };
+  const changeBlock = (finding, change) => {
+    const block = el("div", "diff");
+    const lines = el("pre");
+    for (const text2 of change.lines) {
+      const line = el("span", "dl add");
+      const mark = el("i", void 0, "+");
+      mark.setAttribute("aria-hidden", "true");
+      line.append(mark, text2);
+      lines.append(line);
+    }
+    const head = el("div", "dfh");
+    head.append(el("span", "dff", change.file), ...copyControl(finding, change.lines, lines));
+    block.append(head, lines);
+    return block;
+  };
+  const stepChip = (finding) => el("span", "stg", finding.stepName);
+  const actionToggle = (key, text2) => {
+    const toggle = register(key, el("button", "xb", text2));
+    toggle.type = "button";
+    toggle.append(chevronIcon());
+    return toggle;
+  };
+  const suggestionItem = (finding, item2) => {
+    const head = el("div", "fdh");
+    head.append(stepChip(finding), el("span", `imp ${finding.impact}`, finding.impact));
+    if (finding.basis) {
+      head.append(el("span", "bas", finding.basis));
+    }
+    item2.append(head, el("h4", "fdt", finding.headline), el("p", "fdl", finding.line));
+    const change = finding.change;
+    if (change) {
+      item2.append(fixBlock(change));
+    }
+    if (!change && !finding.evidence) {
+      return;
+    }
+    const actions = el("div", "fda");
+    const panels = [];
+    if (change) {
+      const toggle = actionToggle(`change:${finding.id}`, "Show the change");
+      actions.append(toggle);
+      panels.push(disclosure("change", finding, changeBlock(finding, change), toggle, openChanges));
+    }
+    if (finding.evidence) {
+      const toggle = actionToggle(`evidence:${finding.id}`, "Evidence");
+      actions.append(toggle);
+      panels.push(evidencePanel(finding, finding.evidence, toggle));
+    }
+    item2.append(actions, ...panels);
+  };
+  const quietItem = (finding, item2) => {
+    const parts = [stepChip(finding), el("span", "okt", finding.headline), el("span", "okv", finding.value ?? "")];
+    if (!finding.evidence) {
+      const row2 = el("div", "okr");
+      row2.append(...parts);
+      item2.append(row2);
+      return;
+    }
+    const toggle = register(`evidence:${finding.id}`, el("button", "okr"));
+    toggle.type = "button";
+    toggle.append(...parts, chevronIcon());
+    item2.append(toggle, evidencePanel(finding, finding.evidence, toggle));
+  };
+  const unmeasuredItem = (finding, item2) => {
+    const row2 = el("div", "okr");
+    const label = finding.absent ? "not in this workflow" : "not measured";
+    row2.append(stepChip(finding), el("span", "okt", finding.headline), el("span", "hnm", label));
+    item2.append(row2, el("p", "hreason", finding.line));
+  };
+  const findingItem = (finding) => {
+    const item2 = el("li", `hf ${FINDING_CLASSES[finding.group]}`);
+    item2.dataset.id = finding.id;
+    item2.addEventListener("animationend", () => item2.classList.remove("hflash"));
+    if (SUGGESTED.has(finding.group)) {
+      suggestionItem(finding, item2);
+    } else if (finding.group === "unmeasured") {
+      unmeasuredItem(finding, item2);
+    } else {
+      quietItem(finding, item2);
+    }
+    items.set(finding.id, item2);
+    return item2;
+  };
+  const groupSection = (group) => {
+    const section2 = el("section", `hg ${GROUP_CLASSES[group.group]}`);
+    const heading2 = el("h3", "hgh");
+    const count2 = el("span", "hgn");
+    heading2.append(group.label, " ", count2);
+    const list = el("ol", "hfl");
+    list.append(...group.findings.map(findingItem));
+    section2.append(heading2, list);
+    groups2.push({ section: section2, count: count2, ids: group.findings.map((finding) => finding.id) });
+    return section2;
+  };
+  const flash = (item2) => {
+    item2.classList.remove("hflash");
+    void item2.offsetWidth;
+    item2.classList.add("hflash");
+  };
+  const draw2 = (next, animate) => {
+    const active = document.activeElement;
+    const focused = [...focusables].find(([, control]) => control === active)?.[0];
+    const previous = last;
+    if (filter.stage !== "all" && !next.stages.some((stage) => stage.id === filter.stage)) {
+      filter = { ...filter, stage: "all" };
+    }
+    report = next;
+    last = next;
+    keyless = next.keyless;
+    items = /* @__PURE__ */ new Map();
+    groups2 = [];
+    options = [];
+    segs = [];
+    focusables = /* @__PURE__ */ new Map();
+    barGroups = [];
+    panelCount2 = 0;
+    const parts = [filters(next)];
+    if (next.note) {
+      parts.push(el("p", "hnote", next.note));
+    }
+    parts.push(...next.groups.map(groupSection));
+    none = el("p", "hnone", "Nothing matches these filters.");
+    const foot = [next.closing, next.footer].filter((text2) => text2 !== "").join(" ");
+    parts.push(none, el("p", "hfoot", foot));
+    element.replaceChildren(...parts);
+    drawnParts = parts;
+    sizes.disconnect();
+    segs.forEach((seg) => sizes.observe(seg));
+    apply();
+    const target = focused === void 0 ? void 0 : focusables.get(focused);
+    target?.focus({ preventScroll: true });
+    if (!animate || hooks.reducedMotion() || !previous || previous.newest === next.newest) {
+      return;
+    }
+    for (const group of barGroups) {
+      group.animate(SLIDE, { duration: SLIDE_MS, easing: EASE3 });
+    }
+    const before2 = new Map(previous.groups.flatMap((group) => group.findings.map((finding) => [finding.id, finding.group])));
+    for (const group of next.groups) {
+      for (const finding of group.findings) {
+        const was = before2.get(finding.id);
+        const item2 = items.get(finding.id);
+        if (was !== void 0 && was !== finding.group && item2) {
+          flash(item2);
+        }
+      }
+    }
+  };
+  const reset = (next = {}) => {
+    filter = { stage: next.stage ?? "all", impact: next.impact ?? "all" };
+    open2.clear();
+    openChanges.clear();
+    last = void 0;
+  };
+  return { element, reset, draw: draw2, parts: () => drawnParts };
 };
 
 // src/ui/modal-motion.ts
@@ -15836,12 +17460,12 @@ var closePlan = (box, opener, inFlight, viewport2) => {
   }
   return { kind: "shell", from: box, to: opener, delay: CLOSE_MOVE_AT_MS, moveMs: CLOSE_MS, doneAt: CLOSE_MOVE_AT_MS + CLOSE_MS };
 };
-var px = (value2) => `${Math.round(value2 * 100) / 100}px`;
+var px2 = (value2) => `${Math.round(value2 * 100) / 100}px`;
 var lookFrame = (look) => ({
-  left: px(look.rect.left),
-  top: px(look.rect.top),
-  width: px(look.rect.width),
-  height: px(look.rect.height),
+  left: px2(look.rect.left),
+  top: px2(look.rect.top),
+  width: px2(look.rect.width),
+  height: px2(look.rect.height),
   borderRadius: look.radius,
   backgroundColor: look.background,
   borderColor: look.border,
@@ -15849,20 +17473,20 @@ var lookFrame = (look) => ({
 });
 var shellFrames = (from, to) => [lookFrame(from), lookFrame(to)];
 var tagFrames = (from, to) => {
-  const dx = px(to.left - from.left);
-  const dy = px(to.top - from.top);
+  const dx = px2(to.left - from.left);
+  const dy = px2(to.top - from.top);
   return [{ transform: "translate(0px, 0px)" }, { transform: `translate(${dx}, ${dy})` }];
 };
 var rideFrames = (from, box) => {
-  const dx = px(from.left - box.left);
-  const dy = px(from.top - box.top);
+  const dx = px2(from.left - box.left);
+  const dy = px2(from.top - box.top);
   return [{ translate: `${dx} ${dy}` }, { translate: "0px 0px" }];
 };
 var contentDelays = (contentAt) => {
   return Array.from({ length: CONTENT_GROUPS }, (_, group) => contentAt + group * CONTENT_STAGGER_MS);
 };
 var SWAP_MS = 550;
-var SLIDE_MS = 450;
+var SLIDE_MS2 = 450;
 var TURN_HEIGHT_MS = 450;
 var FOLD_FADE_MS = 160;
 var BUBBLE_MS = 450;
@@ -15874,22 +17498,22 @@ var TURN_TOGGLE_MS = 400;
 var LINES_FADE_MS = 160;
 var FULL_FADE_MS = 280;
 var CLAMP_MS = 350;
-var HOLD_MS = Math.max(TURN_HEIGHT_MS, SLIDE_MS) + 20;
-var heightFrames = (from, to) => [{ height: px(from) }, { height: px(to) }];
+var HOLD_MS = Math.max(TURN_HEIGHT_MS, SLIDE_MS2) + 20;
+var heightFrames = (from, to) => [{ height: px2(from) }, { height: px2(to) }];
 var dropFrames = () => [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
 var bubbleFrames = () => [{ opacity: 0, transform: `translateX(${BUBBLE_SHIFT_PX}px)` }, { opacity: 1, transform: "none" }];
 var riseFrames = () => [{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }];
-var latestChange = (before, after) => {
+var latestChange = (before2, after) => {
   if (after === void 0) {
-    return before === void 0 ? "none" : "turn";
+    return before2 === void 0 ? "none" : "turn";
   }
-  if (before === void 0 || before.key !== after.key) {
+  if (before2 === void 0 || before2.key !== after.key) {
     return "turn";
   }
-  if (before.reply === void 0 && after.reply !== void 0) {
+  if (before2.reply === void 0 && after.reply !== void 0) {
     return "reply";
   }
-  return before.reply === after.reply ? "same" : "turn";
+  return before2.reply === after.reply ? "same" : "turn";
 };
 var anchorIndex = (tops) => {
   const below = tops.findIndex((top) => top >= 0);
@@ -16130,14 +17754,14 @@ var stopHeight = (element) => {
   element.classList.remove("sizing");
   return height;
 };
-var growFrom = (element, from, duration2, done = noop) => {
+var growFrom = (element, from, duration3, done = noop) => {
   const to = element.getBoundingClientRect().height;
   if (Math.abs(to - from) < 0.5) {
     done();
     return;
   }
   element.classList.add("sizing");
-  const animation = element.animate(heightFrames(from, to), { duration: duration2, easing: OPEN_EASE });
+  const animation = element.animate(heightFrames(from, to), { duration: duration3, easing: OPEN_EASE });
   heights.set(element, animation);
   const end = () => {
     if (heights.get(element) === animation) {
@@ -16149,14 +17773,14 @@ var growFrom = (element, from, duration2, done = noop) => {
   animation.finished.then(end, noop);
 };
 var opacityNow = (element) => Number(getComputedStyle(element).opacity);
-var fadeFrom = (element, from, duration2, delay = 0) => {
+var fadeFrom = (element, from, duration3, delay = 0) => {
   fades.get(element)?.cancel();
   const to = opacityNow(element);
   if (Math.abs(to - from) < 0.01 && delay === 0) {
     fades.delete(element);
     return;
   }
-  fades.set(element, element.animate([{ opacity: from }, { opacity: to }], { duration: duration2, delay, easing: OPEN_EASE, fill: "backwards" }));
+  fades.set(element, element.animate([{ opacity: from }, { opacity: to }], { duration: duration3, delay, easing: OPEN_EASE, fill: "backwards" }));
 };
 var play = (element, frames, options) => {
   fades.get(element)?.cancel();
@@ -16441,11 +18065,11 @@ var FLASH_LATEST = [
 ];
 var FLASH_ITEM = [{ backgroundColor: "rgba(255, 255, 255, .12)" }, { backgroundColor: "rgba(255, 255, 255, .12)", offset: 0.3 }];
 var FADE_IN = [{ opacity: 0 }, { opacity: 1 }];
-var mainTag = () => {
+var mainTag = (label = "main") => {
   const tag2 = el("span", "main-tag");
   const dot = el("i");
   dot.setAttribute("aria-hidden", "true");
-  tag2.append(dot, "main");
+  tag2.append(dot, label);
   return tag2;
 };
 var drawModalTitle = (title, source, keyUrl) => {
@@ -16453,10 +18077,21 @@ var drawModalTitle = (title, source, keyUrl) => {
   setTicketKey(title, key, keyUrl, after, source.title);
   title.title = source.title;
 };
+var drawHealthTitle = (title, text2) => {
+  setTicketKey(title, void 0, "", "", text2);
+  title.title = text2;
+};
+var HEALTH_DELAYED_PARTS = 6;
+var HEALTH_CLOSE_STAGGER_MS = 20;
+var HEALTH_CLOSE_DELAYED = 3;
 var modal;
 var openMainThreadModal = (request) => {
   modal ??= createModal();
   modal.open(request);
+};
+var openHealthReport = (request) => {
+  modal ??= createModal();
+  modal.openHealth(request);
 };
 var mainThreadModalFrom = () => modal?.from();
 var rectOf = (element) => {
@@ -16552,7 +18187,12 @@ var createModal = () => {
   earlierClip.append(earlierList);
   earlierWrap.append(earlierClip);
   earlier.append(earlierToggle, earlierWrap);
-  scroll.append(empty, latestArea, earlier);
+  const reportView = createHealthReportView({
+    opens: (sessionId) => health?.opens(sessionId) ?? false,
+    show: (sessionId) => showSession(sessionId),
+    reducedMotion: () => reducedMotion()
+  });
+  scroll.append(empty, latestArea, earlier, reportView.element);
   box.append(header, rule, scroll);
   const riders = [header, rule, scroll];
   root.append(backdrop, box);
@@ -16560,6 +18200,12 @@ var createModal = () => {
   let phase = "closed";
   let token = 0;
   let request;
+  let health;
+  let opened;
+  let mode = "main";
+  let drawnReport;
+  let afterClose;
+  const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let home;
   let drawn;
   let drawnModel;
@@ -16592,8 +18238,8 @@ var createModal = () => {
   const liftParts = (current) => {
     return current.lift ?? [...fromOf(current).children].filter((child) => !child.classList.contains("main-tag"));
   };
-  const liftOff = (parts, duration2) => {
-    lifted = parts.map((part) => part.animate([{ opacity: 0 }], { duration: duration2, easing: "ease", fill: "forwards" }));
+  const liftOff = (parts, duration3) => {
+    lifted = parts.map((part) => part.animate([{ opacity: 0 }], { duration: duration3, easing: "ease", fill: "forwards" }));
   };
   const bringBack = (animate) => {
     for (const animation of lifted) {
@@ -16667,7 +18313,20 @@ var createModal = () => {
     earlierToggle.setAttribute("aria-expanded", String(open3));
     earlierWrap.inert = !open3;
   };
-  const reducedMotion = () => request?.context.reducedMotion() ?? true;
+  const reducedMotion = () => health ? motionQuery.matches : request?.context.reducedMotion() ?? true;
+  const setTagLabel = (label) => {
+    if (tag2.textContent !== label) {
+      tag2.replaceChildren(...mainTag(label).childNodes);
+    }
+  };
+  const setMode = (next) => {
+    mode = next;
+    const healthMode = next === "health";
+    box.classList.toggle("health-mode", healthMode);
+    setTagLabel(healthMode ? "health" : "main");
+    close.setAttribute("aria-label", healthMode ? "Close workflow health" : "Close messages");
+    scroll.setAttribute("aria-label", healthMode ? "Workflow health report" : "Messages");
+  };
   const drawnHeight = (element) => element.hidden ? 0 : element.getBoundingClientRect().height;
   const fadeOutPrevious = () => {
     ghost?.remove();
@@ -16775,8 +18434,8 @@ var createModal = () => {
     }
   };
   const slideIn = (item2) => {
-    growFrom(item2, 0, SLIDE_MS);
-    play(item2, dropFrames(), { duration: SLIDE_MS, easing: OPEN_EASE });
+    growFrom(item2, 0, SLIDE_MS2);
+    play(item2, dropFrames(), { duration: SLIDE_MS2, easing: OPEN_EASE });
   };
   const fillEarlier = (model, animate) => {
     const list = model.earlier;
@@ -16935,7 +18594,20 @@ var createModal = () => {
   };
   const contentGroups = (withTag) => {
     const head = withTag ? [tag2, headText, close, rule] : [headText, close, rule];
+    if (mode === "health") {
+      return [head, ...reportView.parts().map((part) => [part])];
+    }
     return [head, [latestArea.hidden ? empty : latestArea], earlier.hidden ? [] : [earlier]];
+  };
+  const openDelays = (contentAt, count2) => {
+    if (mode === "main") {
+      return contentDelays(contentAt);
+    }
+    return Array.from({ length: count2 }, (_, index) => contentAt + Math.min(index, HEALTH_DELAYED_PARTS) * CONTENT_STAGGER_MS);
+  };
+  const closeDelays = (count2) => {
+    const reverse = (index) => Math.min(count2 - 1 - index, HEALTH_CLOSE_DELAYED) * HEALTH_CLOSE_STAGGER_MS;
+    return Array.from({ length: count2 }, (_, index) => mode === "health" ? reverse(index) : 0);
   };
   const focusTarget = (current) => {
     if (isShown2(current.opener)) {
@@ -16955,7 +18627,13 @@ var createModal = () => {
     if (own !== token) {
       return;
     }
-    const current = request;
+    const after = afterClose;
+    afterClose = void 0;
+    land(animate, landing);
+    after?.();
+  };
+  const land = (animate, landing) => {
+    const current = opened;
     const active = document.activeElement;
     const focusInside = active === null || active === document.body || root.contains(active);
     stopMotion();
@@ -16963,6 +18641,9 @@ var createModal = () => {
     root.dataset.phase = "closed";
     phase = "closed";
     request = void 0;
+    health = void 0;
+    opened = void 0;
+    drawnReport = void 0;
     drawn = void 0;
     drawnModel = void 0;
     anchor = void 0;
@@ -16993,8 +18674,40 @@ var createModal = () => {
     token += 1;
     finish(token, false);
   };
+  const renderHealth = (next, animate) => {
+    drawnReport = next;
+    drawHealthTitle(title, next.title);
+    tickHealth();
+    reportView.draw(next, animate);
+    updateScrollStop();
+  };
+  const tickHealth = () => {
+    const sub = drawnReport ? healthSubtitle(drawnReport, Date.now()) : "";
+    setText(subtitle, sub);
+    subtitle.title = sub;
+  };
+  const followReport = (current) => {
+    if (!current.opener.isConnected || current.opener.closest(".leaving")) {
+      closeAtOnce();
+      return;
+    }
+    const next = current.report();
+    if (next !== void 0 && next !== drawnReport && phase === "open") {
+      renderHealth(next, !reducedMotion());
+    }
+    const second = Math.floor(Date.now() / 1e3);
+    if (second !== lastSecond) {
+      lastSecond = second;
+      tickHealth();
+      updateScrollStop();
+    }
+  };
   const loop = () => {
     frameId = requestAnimationFrame(loop);
+    if (health && phase !== "closed") {
+      followReport(health);
+      return;
+    }
     const current = request;
     if (!current || phase === "closed") {
       return;
@@ -17017,17 +18730,14 @@ var createModal = () => {
       updateScrollStop();
     }
   };
-  const open2 = (next) => {
-    const source = next.source();
-    if (!source || phase === "opening" || phase === "open") {
-      return;
-    }
+  const form = (next, nextMode, reduced, opening) => {
     const from = fromOf(next);
-    const continuing = phase === "closing" && request !== void 0 && fromOf(request) === from;
+    const continuing = phase === "closing" && opened !== void 0 && fromOf(opened) === from && mode === nextMode;
     const inFlight = continuing ? rectOf(shell ?? box) : void 0;
     const inFlightLook = shell && inFlight ? lookOf(shell, inFlight) : void 0;
     const tagFrom = continuing && clone ? rectOf(clone) : void 0;
     const backdropFrom = continuing ? opacityOf(backdrop) : 0;
+    afterClose = void 0;
     if (phase === "closing" && !continuing) {
       closeAtOnce();
     }
@@ -17036,21 +18746,13 @@ var createModal = () => {
     const own = token;
     phase = "opening";
     root.dataset.phase = phase;
-    request = next;
+    opened = next;
     home = homeOf2(from);
     root.hidden = false;
     setPageInert(true);
     root.classList.add("instant");
-    if (!continuing) {
-      reset();
-    }
-    render(source, next.context, false);
-    const place2 = drawnModel ? messagePlace(drawnModel, next.messageId) : void 0;
-    const target = place2 === "earlier" && next.messageId !== void 0 ? turns.get(next.messageId) : void 0;
-    if (target) {
-      setEarlierOpen(true);
-      target.setOpen(true, false);
-    }
+    setMode(nextMode);
+    opening.prepare(continuing);
     const boxRect = rectOf(box);
     const boxLook = lookOf(box, boxRect);
     updateScrollStop();
@@ -17059,10 +18761,10 @@ var createModal = () => {
     if (frameId === 0) {
       frameId = requestAnimationFrame(loop);
     }
-    if (next.context.reducedMotion()) {
+    if (reduced) {
       phase = "open";
       root.dataset.phase = phase;
-      reveal(next.messageId, false);
+      opening.done(false);
       return;
     }
     const fromRect = from.isConnected ? rectOf(shapeOf2(from)) : void 0;
@@ -17084,7 +18786,7 @@ var createModal = () => {
     }
     const move = track(shell.animate(shellFrames(startLook, boxLook), { duration: plan.moveMs, easing: OPEN_EASE, fill: "forwards" }));
     box.classList.add("forming");
-    const handed = fromUsable && !continuing ? tagOf(from) : void 0;
+    const handed = fromUsable && !continuing && nextMode === "main" ? tagOf(from) : void 0;
     const tagStart = tagFrom ?? (handed ? rectOf(handed) : void 0);
     if (handed) {
       openerTag = handed;
@@ -17095,12 +18797,15 @@ var createModal = () => {
       clone = createClone(tagStart);
       track(clone.animate(tagFrames(tagStart, rectOf(tag2)), { duration: plan.moveMs, easing: OPEN_EASE, fill: "forwards" }));
     }
-    const delays = contentDelays(plan.contentAt);
+    const groups2 = contentGroups(!tagStart);
+    const delays = openDelays(plan.contentAt, groups2.length);
+    const lastFade = (delays.at(-1) ?? 0) + CONTENT_MS;
+    const doneAt = Math.max(plan.doneAt, lastFade);
     const ride = rideFrames(plan.from, boxRect);
     for (const rider of riders) {
       track(rider.animate(ride, { duration: plan.moveMs, easing: OPEN_EASE }));
     }
-    contentGroups(!tagStart).forEach((group, index) => {
+    groups2.forEach((group, index) => {
       for (const part of group) {
         track(part.animate(FADE_IN, { duration: CONTENT_MS, delay: delays[index], easing: OPEN_EASE, fill: "backwards" }));
       }
@@ -17122,15 +18827,72 @@ var createModal = () => {
       }
       phase = "open";
       root.dataset.phase = phase;
-      const newest3 = next.source();
-      if (newest3 && newest3 !== drawn) {
-        render(newest3, next.context, true);
-      }
-      reveal(next.messageId, true);
-    }, plan.doneAt);
+      opening.done(true);
+    }, doneAt);
   };
-  const closeModal = () => {
-    const current = request;
+  const open2 = (next) => {
+    const source = next.source();
+    if (!source || phase === "opening" || phase === "open") {
+      return;
+    }
+    form(next, "main", next.context.reducedMotion(), {
+      prepare: (continuing) => {
+        request = next;
+        health = void 0;
+        if (!continuing) {
+          reset();
+        }
+        render(source, next.context, false);
+        const place2 = drawnModel ? messagePlace(drawnModel, next.messageId) : void 0;
+        const target = place2 === "earlier" && next.messageId !== void 0 ? turns.get(next.messageId) : void 0;
+        if (target) {
+          setEarlierOpen(true);
+          target.setOpen(true, false);
+        }
+      },
+      done: (animate) => {
+        const newest3 = next.source();
+        if (animate && newest3 && newest3 !== drawn) {
+          render(newest3, next.context, true);
+        }
+        reveal(next.messageId, animate);
+      }
+    });
+  };
+  const openHealth = (next) => {
+    const initial = next.report();
+    if (!initial || phase === "opening" || phase === "open") {
+      return;
+    }
+    form(next, "health", motionQuery.matches, {
+      prepare: (continuing) => {
+        health = next;
+        request = void 0;
+        if (!continuing) {
+          reportView.reset(next.filter);
+          drawnReport = void 0;
+        }
+        renderHealth(initial, false);
+        if (!continuing) {
+          scroll.scrollTop = 0;
+        }
+      },
+      done: (animate) => {
+        const newest3 = next.report();
+        if (animate && newest3 && newest3 !== drawnReport) {
+          renderHealth(newest3, true);
+        }
+      }
+    });
+  };
+  const showSession = (sessionId) => {
+    const current = health;
+    if (current) {
+      closeModal(() => current.open(sessionId));
+    }
+  };
+  const closeModal = (after) => {
+    const current = opened;
     if (!current || phase !== "opening" && phase !== "open") {
       return;
     }
@@ -17140,7 +18902,8 @@ var createModal = () => {
     phase = "closing";
     root.dataset.phase = phase;
     setPageInert(false);
-    if (current.context.reducedMotion()) {
+    afterClose = after;
+    if (reducedMotion()) {
       finish(own, false);
       return;
     }
@@ -17148,7 +18911,10 @@ var createModal = () => {
     const inFlightLook = shell && inFlight ? lookOf(shell, inFlight) : void 0;
     const tagFrom = clone ? rectOf(clone) : void 0;
     const backdropFrom = opacityOf(backdrop);
-    const parts = contentGroups(true).flat();
+    const groups2 = contentGroups(true);
+    const delays = closeDelays(groups2.length);
+    const parts = groups2.flat();
+    const partDelay = new Map(groups2.flatMap((group, index) => group.map((part) => [part, delays[index]])));
     const partOpacity = new Map(parts.map((part) => [part, opacityOf(part)]));
     const riding = riders.map((rider) => ({ rider, offset: getComputedStyle(rider).translate }));
     const boxRect = rectOf(box);
@@ -17175,7 +18941,8 @@ var createModal = () => {
     for (const part of parts) {
       if (part !== tag2 || !tagEnd) {
         const frames = [{ opacity: partOpacity.get(part) ?? 1 }, { opacity: 0 }];
-        track(part.animate(frames, { duration: CLOSE_CONTENT_MS, easing: "ease-in", fill: "forwards" }));
+        const delay = partDelay.get(part) ?? 0;
+        track(part.animate(frames, { duration: CLOSE_CONTENT_MS, delay, easing: "ease-in", fill: "both" }));
       }
     }
     const shellLook = inFlightLook ?? lookOf(box, boxRect);
@@ -17253,7 +19020,7 @@ var createModal = () => {
     }
   });
   setEarlierOpen(false);
-  return { open: open2, from: () => request ? fromOf(request) : void 0 };
+  return { open: open2, openHealth, from: () => opened ? fromOf(opened) : void 0 };
 };
 
 // src/ui/questions.ts
@@ -17330,9 +19097,9 @@ var keysOf2 = (questions) => {
   const seen = /* @__PURE__ */ new Map();
   const keys2 = /* @__PURE__ */ new Map();
   for (const question of questions) {
-    const count = (seen.get(question.id) ?? 0) + 1;
-    seen.set(question.id, count);
-    keys2.set(question, count === 1 ? question.id : `${question.id}#${count}`);
+    const count2 = (seen.get(question.id) ?? 0) + 1;
+    seen.set(question.id, count2);
+    keys2.set(question, count2 === 1 ? question.id : `${question.id}#${count2}`);
   }
   return keys2;
 };
@@ -17429,7 +19196,7 @@ var flyFrames = (from, to, steps = 14) => {
   }
   return frames;
 };
-var EASE3 = "cubic-bezier(.2,.8,.2,1)";
+var EASE4 = "cubic-bezier(.2,.8,.2,1)";
 var FLY_EASE = "cubic-bezier(.45,.05,.3,1)";
 var FLY_DELAY_MS = 320;
 var FLY_MS = 900;
@@ -17441,7 +19208,7 @@ var slide = (element, open2, scale) => {
   const shown = { height: `${height}px`, opacity: 1, transform: "none" };
   element.classList.add("sliding");
   const frames = open2 ? [closed, shown] : [shown, closed];
-  const animation = element.animate(frames, { duration: open2 ? 550 : 400, easing: EASE3, fill: open2 ? "none" : "forwards" });
+  const animation = element.animate(frames, { duration: open2 ? 550 : 400, easing: EASE4, fill: open2 ? "none" : "forwards" });
   latestSlide.set(element, animation);
   const done = () => {
     if (latestSlide.get(element) === animation) {
@@ -17460,10 +19227,10 @@ var createQuestionsCore = (host, context, options) => {
   const section2 = el("section", "questions");
   section2.setAttribute("aria-label", HEADING_USER);
   section2.hidden = true;
-  const count = el("span", "questions-count");
+  const count2 = el("span", "questions-count");
   const title = el("span", "questions-title", HEADING_USER);
   const heading2 = el("div", "questions-heading");
-  heading2.append(title, count);
+  heading2.append(title, count2);
   const list = el("div", "questions-list");
   section2.append(heading2, list);
   host.append(section2);
@@ -17616,7 +19383,7 @@ var createQuestionsCore = (host, context, options) => {
   };
   const render = (clock, animate) => {
     const model = questionsModel(input.questions, clock, input.streamName, input.words);
-    setText(count, model.count);
+    setText(count2, model.count);
     if (model.items.length > 0) {
       setText(title, model.heading);
       if (section2.getAttribute("aria-label") !== model.heading) {
@@ -17772,7 +19539,7 @@ var createSessionQuestionsView = (host, context, options = {}) => {
 };
 
 // src/ui/strip.ts
-var EASE4 = "cubic-bezier(.2,.8,.2,1)";
+var EASE5 = "cubic-bezier(.2,.8,.2,1)";
 var SWAP_MS2 = 500;
 var createStripCore = (host, context, open2) => {
   const strip = el("button", "main-strip");
@@ -17783,8 +19550,8 @@ var createStripCore = (host, context, open2) => {
   const text2 = el("span", "main-strip-text");
   const kind = el("span", "main-strip-kind");
   const time2 = el("time", "main-strip-time");
-  const count = el("span", "main-strip-count");
-  strip.append(mainTag(), text2, kind, time2, count, chevronIcon());
+  const count2 = el("span", "main-strip-count");
+  strip.append(mainTag(), text2, kind, time2, count2, chevronIcon());
   host.append(strip);
   strip.addEventListener("click", () => open2(strip));
   let first = true;
@@ -17811,7 +19578,7 @@ var createStripCore = (host, context, open2) => {
       strip.dataset.waiting = String(model.waiting);
       setText(kind, model.label);
       kind.hidden = model.label === "";
-      setText(count, model.count);
+      setText(count2, model.count);
       if (model.id !== key) {
         const swap = key !== "" && !context.reducedMotion() && mainThreadModalFrom() !== strip;
         key = model.id;
@@ -17825,7 +19592,7 @@ var createStripCore = (host, context, open2) => {
         if (swap) {
           const frames = [{ opacity: 0, transform: "translateY(3px)" }, { opacity: 1, transform: "none" }];
           for (const part of [text2, kind]) {
-            part.animate(frames, { duration: SWAP_MS2, easing: EASE4 });
+            part.animate(frames, { duration: SWAP_MS2, easing: EASE5 });
           }
         }
       }
@@ -17888,7 +19655,7 @@ var createSessionStripView = (host, context) => {
 };
 
 // src/ui/card.ts
-var EASE5 = "cubic-bezier(.2,.8,.2,1)";
+var EASE6 = "cubic-bezier(.2,.8,.2,1)";
 var CARD_ERROR_TEXT = "This card stopped updating. Reload the page.";
 var createProgressChip = (context) => {
   const element = el("span", "progress-chip");
@@ -17906,7 +19673,7 @@ var createProgressChip = (context) => {
       element.dataset.tone = chip.tone;
       if (bump) {
         const frames = [{ transform: "none" }, { transform: "scale(1.12)", offset: 0.35 }, { transform: "none" }];
-        element.animate(frames, { duration: 500, easing: EASE5 });
+        element.animate(frames, { duration: 500, easing: EASE6 });
       }
     }
   };
@@ -18136,7 +19903,7 @@ var HIDE_TEXT = "Hide";
 var CLEAR_TEXT = "Clear";
 var OPEN_MESSAGES_TEXT = "Open the main-thread messages";
 var ROW_ERROR_TEXT = "This row stopped updating. Reload the page.";
-var EASE6 = "cubic-bezier(.2,.8,.2,1)";
+var EASE7 = "cubic-bezier(.2,.8,.2,1)";
 var OUTCOME_TONE_TEXTS = {
   conversation: "conversation",
   none: "not merged",
@@ -18460,7 +20227,7 @@ var ROW_LEAVE_MS = 440;
 var ROW_LEAVE_EASE = "cubic-bezier(.4,0,.2,1)";
 var ROW_MOVE_MS = 420;
 var enterRow = (element) => {
-  element.animate(ROW_ENTER, { duration: ROW_ENTER_MS, easing: EASE6, fill: "backwards" });
+  element.animate(ROW_ENTER, { duration: ROW_ENTER_MS, easing: EASE7, fill: "backwards" });
 };
 var createRowList = (list, make) => {
   const rows = /* @__PURE__ */ new Map();
@@ -18501,10 +20268,10 @@ var createRowList = (list, make) => {
     },
     sync(next, options) {
       const keep2 = new Set(next);
-      const before = /* @__PURE__ */ new Map();
+      const before2 = /* @__PURE__ */ new Map();
       if (options.animate) {
         for (const row2 of rows.values()) {
-          before.set(row2.element, row2.element.offsetTop);
+          before2.set(row2.element, row2.element.offsetTop);
         }
       }
       const held = [];
@@ -18551,10 +20318,10 @@ var createRowList = (list, make) => {
       }
       ids = next;
       if (options.animate) {
-        for (const [element, top] of before) {
+        for (const [element, top] of before2) {
           const delta = top - element.offsetTop;
           if (element.isConnected && !leaving.has(element) && Math.abs(delta) > 1) {
-            element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: ROW_MOVE_MS, easing: EASE6 });
+            element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: ROW_MOVE_MS, easing: EASE7 });
           }
         }
         for (const id of fresh) {
@@ -18571,7 +20338,7 @@ var createRowList = (list, make) => {
 
 // src/ui/conversations.ts
 var CONVERSATIONS_TITLE = "Conversations";
-var EASE7 = "cubic-bezier(.2,.8,.2,1)";
+var EASE8 = "cubic-bezier(.2,.8,.2,1)";
 var ENTER = [{ opacity: 0, transform: "translateY(-14px)" }, { opacity: 1, transform: "none" }];
 var FOLD_MS = 440;
 var FOLD_EASE = "cubic-bezier(.4,0,.2,1)";
@@ -18596,8 +20363,8 @@ var createSectionCore = (make) => {
   element.hidden = true;
   const bar = el("div", "section-bar");
   const heading2 = el("h2", "section-heading");
-  const count = el("span", "section-count num", "0");
-  heading2.append(el("span", "section-title", CONVERSATIONS_TITLE), count);
+  const count2 = el("span", "section-count num", "0");
+  heading2.append(el("span", "section-title", CONVERSATIONS_TITLE), count2);
   bar.append(heading2);
   const list = el("ol", "run-rows");
   element.append(bar, list);
@@ -18646,11 +20413,11 @@ var createSectionCore = (make) => {
       return;
     }
     rows.sync(next, { moved, animate: motion && wasShown, fill });
-    setText(count, String(next.length));
+    setText(count2, String(next.length));
     heading2.setAttribute("aria-label", conversationsLabel(next.length));
     element.hidden = next.length === 0;
     if (motion && !wasShown && next.length > 0) {
-      element.animate(ENTER, { duration: 420, easing: EASE7, fill: "backwards" });
+      element.animate(ENTER, { duration: 420, easing: EASE8, fill: "backwards" });
     }
   };
   return { element, rows, sync };
@@ -18922,7 +20689,7 @@ var createChipsRow = (host, context, actions) => {
     show(entry.status, texts.status);
     entry.status.dataset.tone = texts.tone;
     if (changed && !fresh && texts.status !== "" && !context.reducedMotion()) {
-      entry.status.animate(BUMP_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE8 });
+      entry.status.animate(BUMP_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE3 });
     }
     entry.element.title = chipTitle(chip);
     if (chip.kind === "fold") {
@@ -18959,7 +20726,7 @@ var createChipsRow = (host, context, actions) => {
           entry = create(chip);
           entries.set(key, entry);
           if (drawn && !context.reducedMotion()) {
-            entry.element.animate(ENTER_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE8 });
+            entry.element.animate(ENTER_FRAMES, { duration: CHIP_MOTION_MS, easing: EASE3 });
           }
           write2(entry, chip, true);
         } else {
@@ -18969,9 +20736,9 @@ var createChipsRow = (host, context, actions) => {
       });
       for (const move of chipMoves(current, keys2)) {
         const element = entries.get(move.key)?.element;
-        const before = move.before === void 0 ? null : entries.get(move.before)?.element ?? null;
+        const before2 = move.before === void 0 ? null : entries.get(move.before)?.element ?? null;
         if (element) {
-          host.insertBefore(element, before);
+          host.insertBefore(element, before2);
         }
       }
       drawn = true;
@@ -19175,8 +20942,8 @@ var createPanelShell = (context, options, make) => {
   const bar = el("div", "finished-bar");
   const toggle = el("button", "finished-toggle");
   toggle.type = "button";
-  const count = el("span", "section-count num", "0");
-  toggle.append(chevronIcon(), el("span", "section-title", options.title), count, el("span", "finished-hint", FINISHED_HINT));
+  const count2 = el("span", "section-count num", "0");
+  toggle.append(chevronIcon(), el("span", "section-title", options.title), count2, el("span", "finished-hint", FINISHED_HINT));
   const clearAll = el("button", "button finished-clear", CLEAR_ALL_TEXT);
   clearAll.type = "button";
   bar.append(toggle, clearAll);
@@ -19205,10 +20972,10 @@ var createPanelShell = (context, options, make) => {
     }
     const rises = displayed >= 0 && next > displayed;
     displayed = next;
-    setText(count, String(next));
+    setText(count2, String(next));
     toggle.setAttribute("aria-label", `${options.title}, ${next}`);
     if (rises && !context.reducedMotion()) {
-      count.animate(BUMP_FRAMES, { duration: 500, easing: EASE10 });
+      count2.animate(BUMP_FRAMES, { duration: 500, easing: EASE10 });
     }
   };
   const dropCard = (id) => {
@@ -19298,7 +21065,7 @@ var createPanelShell = (context, options, make) => {
   };
   return {
     element,
-    count,
+    count: count2,
     toggle,
     body,
     rows,
@@ -19474,8 +21241,8 @@ var createFinishedSessionsPanel = (context, options) => {
     }
   };
   const step = (id, event) => {
-    const before = states.get(id) ?? "hidden";
-    const next = showStep(before, event);
+    const before2 = states.get(id) ?? "hidden";
+    const next = showStep(before2, event);
     states.set(id, next.state);
     if (next.abort) {
       loader.abort(id);
@@ -19483,14 +21250,14 @@ var createFinishedSessionsPanel = (context, options) => {
     if (next.load) {
       load2(id);
     }
-    const loaded = before === "loading" && next.state === "shown";
+    const loaded = before2 === "loading" && next.state === "shown";
     const box = loaded ? rows.rows.get(id)?.detail.parentElement : void 0;
     const from = box ? box.offsetHeight : 0;
     render(id);
     if (box) {
       resize(box, from);
     }
-    if (before === "shown" !== (next.state === "shown")) {
+    if (before2 === "shown" !== (next.state === "shown")) {
       options.onShownChange();
     }
   };
@@ -19520,9 +21287,9 @@ var createFinishedSessionsPanel = (context, options) => {
     pageToast().show(clearedToastText(entries), toastOptions);
   };
   const clearRow = (id) => {
-    const before = [...rows.ids()];
+    const before2 = [...rows.ids()];
     clear([id]);
-    const target = clearFocusTarget(before, id, rows.ids());
+    const target = clearFocusTarget(before2, id, rows.ids());
     const row2 = target === void 0 ? void 0 : rows.rows.get(target);
     if (row2) {
       row2.focusClear();
@@ -19653,7 +21420,7 @@ var createFinishedSessionsPanel = (context, options) => {
 var EMPTY_BOARD_TEXT = "No runs yet. A session shows up here as a conversation once it gets a prompt, and as a card once it delegates to a subagent, edits files or opens a PR.";
 var NO_ACTIVE_TEXT = "No active runs. A new run shows up here once a session gets a prompt; the finished ones are under Finished runs.";
 var NO_REPOSITORY_TEXT = "No repository yet. A repository gets a tab once a Claude Code session runs in it with a Nurselog config (nurselog init).";
-var EASE8 = "cubic-bezier(.2,.8,.2,1)";
+var EASE3 = "cubic-bezier(.2,.8,.2,1)";
 var FADE_MS = 320;
 var ENTER2 = [{ opacity: 0, transform: "translateY(-14px)" }, { opacity: 1, transform: "none" }];
 var ENTER_MS = 420;
@@ -19843,16 +21610,16 @@ var morphFrom = (element, from) => {
   const to = element.getBoundingClientRect();
   const frames = [{ transform: `translateY(${from.top - to.top}px)`, height: `${from.height}px` }, { transform: "none", height: `${to.height}px` }];
   element.classList.add("morphing");
-  const morph = element.animate(frames, { duration: MORPH_MS, easing: EASE8 });
+  const morph = element.animate(frames, { duration: MORPH_MS, easing: EASE3 });
   const settle = () => element.classList.remove("morphing");
   morph.finished.then(settle, settle);
 };
 var measureTops = (elements) => new Map(elements.map((element) => [element, element.getBoundingClientRect().top]));
-var glide = (before, after, still = /* @__PURE__ */ new Set()) => {
-  for (const [element, top] of before) {
+var glide = (before2, after, still = /* @__PURE__ */ new Set()) => {
+  for (const [element, top] of before2) {
     const delta = top - (after.get(element) ?? top);
     if (!still.has(element) && Math.abs(delta) > 0.5) {
-      element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE8 });
+      element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE3 });
     }
   }
 };
@@ -19933,22 +21700,22 @@ var createCardStack = (host, context, repositoryId, options) => {
     }
     return { retiring, flights };
   };
-  const play2 = ({ before, stackChange, rowRects, flights, emptyWasHidden }) => {
+  const play2 = ({ before: before2, stackChange, rowRects, flights, emptyWasHidden }) => {
     const morphing = /* @__PURE__ */ new Set();
     for (const card of stackChange.entered) {
       const from = rowRects.get(card.element.dataset.run ?? "");
       if (!from) {
-        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE8, fill: "backwards" });
+        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE3, fill: "backwards" });
         continue;
       }
       morphFrom(card.element, from);
       morphing.add(card.element);
     }
-    glide(before, measure(), morphing);
-    const folded = stackChange.folded.reduce((sum, card) => sum + card.element.offsetHeight + flowGap(card.element), 0);
-    const count = panel.count.getBoundingClientRect();
+    glide(before2, measure(), morphing);
+    const folded = stackChange.folded.reduce((sum2, card) => sum2 + card.element.offsetHeight + flowGap(card.element), 0);
+    const count2 = panel.count.getBoundingClientRect();
     for (const flight of flights) {
-      const animation = fly(flight.from, { left: count.left, top: count.top - folded }, flight.text, flight.land);
+      const animation = fly(flight.from, { left: count2.left, top: count2.top - folded }, flight.text, flight.land);
       inFlight.add(animation);
       const done = () => inFlight.delete(animation);
       animation.finished.then(done, done);
@@ -19966,7 +21733,7 @@ var createCardStack = (host, context, repositoryId, options) => {
     const finishedChanged = !sameList(split.finished, panel.ids());
     const changed = stackChanged || conversationsChanged || finishedChanged;
     const motion = changed && !firstUpdate && !context.reducedMotion();
-    const before = motion ? measure() : /* @__PURE__ */ new Map();
+    const before2 = motion ? measure() : /* @__PURE__ */ new Map();
     const tops = motion ? offsetTops() : /* @__PURE__ */ new Map();
     const emptyWasHidden = empty.hidden === true;
     const moved = new Set(conversations.ids().filter((id) => split.stack.includes(id)));
@@ -19991,7 +21758,7 @@ var createCardStack = (host, context, repositoryId, options) => {
     panel.update(board);
     updateFootnote();
     if (motion) {
-      play2({ before, stackChange, rowRects, flights, emptyWasHidden });
+      play2({ before: before2, stackChange, rowRects, flights, emptyWasHidden });
     }
     firstUpdate = false;
   };
@@ -20027,11 +21794,11 @@ var createCardStack = (host, context, repositoryId, options) => {
     pageToast().show(`Cleared ${what}`, toastOptions);
   };
   const clearRow = (runId) => {
-    const before = panel.ids();
-    const index = before.indexOf(runId);
+    const before2 = panel.ids();
+    const index = before2.indexOf(runId);
     clear([runId]);
     const after = panel.ids();
-    const next = before.slice(index + 1).find((id) => after.includes(id)) ?? before.slice(0, index).reverse().find((id) => after.includes(id));
+    const next = before2.slice(index + 1).find((id) => after.includes(id)) ?? before2.slice(0, index).reverse().find((id) => after.includes(id));
     const row2 = next === void 0 ? void 0 : panel.row(next);
     if (row2) {
       row2.focusClear();
@@ -20085,6 +21852,1065 @@ var createConnectionState = (show, delay = CONNECTING_DELAY_MS) => {
         timer = void 0;
         show("connecting");
       }, delay);
+    }
+  };
+};
+
+// src/ui/suggested-changes.ts
+var CHANGE_FILE = "CLAUDE.md";
+var LARGE_OUTPUTS = {
+  fix: "Cut long command output with tail, and run full test suites in a subagent.",
+  lines: [
+    "Pipe a command that can print more than 200 lines through `tail -n 80`.",
+    "Run a full test suite in a subagent and keep only its summary."
+  ]
+};
+var PEAK_CONTEXT = {
+  fix: "Start a new session for each task.",
+  lines: ["When a task is done and the next one is a different task, stop and tell me to start a new session."]
+};
+var COST_SHARE = {
+  fix: "Hand the writing to subagents once the decisions are made.",
+  lines: ["When the decisions are made and the work spans several files, hand the writing to a subagent."]
+};
+var MAIN_CACHE = {
+  fix: "Hand wide searches to a subagent and read files by line range.",
+  lines: ["Send a search across many files to a subagent and read only the line ranges it returns."]
+};
+var SECOND_IMPLEMENTER = {
+  fix: "Give each brief what one run needs to finish.",
+  lines: ["An implementer brief lists the files, the acceptance criteria and the checks to run before handing back."]
+};
+var QUICK_ANSWERS = {
+  fix: "Make questions quick to answer.",
+  lines: ["Ask each question with its options and a recommended answer first."]
+};
+var kindsText = (kinds) => {
+  if (kinds.length < 2) {
+    return kinds.join("");
+  }
+  return `${kinds.slice(0, -1).join(", ")} and ${kinds[kinds.length - 1]}`;
+};
+var cacheChange = (step, role) => {
+  if (step === "main") {
+    return MAIN_CACHE;
+  }
+  if (role === void 0) {
+    return void 0;
+  }
+  if (step === "explore") {
+    const line = `When you start ${role}, name the folders to search and ask for file paths and line ranges, not file contents.`;
+    return { fix: "Name the folders to search, and ask for paths and line ranges.", lines: [line] };
+  }
+  if (step === "review") {
+    const line = `Write the diff to a file once and give ${role} its path and the changed files; it reads those, not the whole repository.`;
+    return { fix: `Pass the diff to ${role} as a file.`, lines: [line] };
+  }
+  return { fix: `Name the files ${role} needs in its brief.`, lines: [`A brief for ${role} names the files it needs by path and line range.`] };
+};
+var budgetLine = (budget) => {
+  if (budget === void 0) {
+    return "A brief that needs more tool calls than its role's budget is two briefs.";
+  }
+  return `A brief that needs more than about ${plural(budget, "tool call")} is two briefs.`;
+};
+var quietChange = (role) => {
+  const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
+  return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
+};
+var checksLine = (setup) => {
+  const kinds = setup?.verification ?? [];
+  const checks = kinds.length === 0 ? "the project's checks" : `the ${kindsText(kinds)} commands`;
+  return `Before a subagent hands back a change, it runs ${checks} and fixes what fails.`;
+};
+var changeOf = (source, role) => {
+  switch (source.line.insight.signal) {
+    case "main-large-outputs":
+      return LARGE_OUTPUTS;
+    case "main-peak-context":
+      return PEAK_CONTEXT;
+    case "main-cost-share":
+      return COST_SHARE;
+    case "cache-per-output":
+      return cacheChange(source.step, role);
+    case "budget-first-stop":
+      return { fix: "Split tasks into briefs that fit the budget.", lines: [budgetLine(source.budget)] };
+    case "second-implementer":
+      return SECOND_IMPLEMENTER;
+    case "second-round":
+      return { fix: "Run the checks before the hand-back.", lines: [checksLine(source.setup)] };
+    case "quiet-reviewer":
+      return role === void 0 ? void 0 : quietChange(role);
+    case "question-open-time":
+      return QUICK_ANSWERS;
+    default:
+      return void 0;
+  }
+};
+var effectOf = (source, verdict) => {
+  const window2 = source.window;
+  if (source.line.insight.signal === "quiet-reviewer" && window2?.value !== void 0 && window2.n > 0) {
+    const saving = cost(window2.value);
+    if (saving !== cost(0)) {
+      return `up to ${saving} less per ${plural(window2.n, "run")}`;
+    }
+  }
+  if (verdict === "change") {
+    return source.guideline === void 0 ? "back within the guideline" : `back within the guideline (${source.guideline})`;
+  }
+  return source.before === void 0 ? "back to the level before" : `back to the level before (${source.before})`;
+};
+var suggestedChange = (source) => {
+  const verdict = source.line.verdict;
+  if (verdict !== "change" && verdict !== "consider") {
+    return void 0;
+  }
+  const role = source.line.role === "" ? void 0 : source.line.role;
+  const change = changeOf(source, role);
+  if (change === void 0) {
+    return void 0;
+  }
+  return { fix: change.fix, effect: effectOf(source, verdict), file: CHANGE_FILE, lines: [...change.lines] };
+};
+
+// src/ui/workflow-map.ts
+var ABSENT_TEXT = "not in this workflow";
+var UNMEASURED_TEXT = "not measured";
+var EMPTY_TEXT2 = "The workflow map appears once a work session has finished.";
+var EMPTY_TITLE = `A work session has at least ${WORK_SESSION_CALLS} main-thread tool calls.`;
+var STEPS = [
+  { id: "main", name: "Main thread" },
+  { id: "explore", name: "Explore" },
+  { id: "implement", name: "Implement" },
+  { id: "review", name: "Review" },
+  { id: "verify", name: "Verify" },
+  { id: "merge", name: "PR and merge" },
+  { id: "you", name: "Your answers" }
+];
+var AREA_STEPS = {
+  delivery: "merge",
+  implementers: "implement",
+  review: "review",
+  verification: "verify",
+  tokens: "main",
+  questions: "you"
+};
+var STAGE_STEPS = { implement: "implement", review: "review", pr: "merge", other: "explore" };
+var STEP_STAGES = { explore: "other", implement: "implement", review: "review", merge: "pr" };
+var NEUTRAL = {
+  "fix-followups": "fix follow-ups recorded",
+  "verify-commands": "verification recorded",
+  "questions-per-session": "questions recorded"
+};
+var PHRASES = {
+  "cost-per-pr": ["PRs cost more", "cost per PR in range"],
+  "time-to-pr": ["PRs take longer", "PRs open quickly"],
+  "cost-per-100-lines": ["changes cost more per line", "cost per line in range"],
+  "budget-first-stop": ["implementers stop at budget", "within budget"],
+  "second-implementer": ["streams need a second implementer", "one implementer per stream"],
+  "second-round": ["branches reviewed twice", "reviews pass first time"],
+  "quiet-reviewer": ["<role> finds nothing", "reviewers find issues"],
+  "failed-runs": ["verification fails often", "verification passes"],
+  "cache-per-output": ["<role> reads whole files", "reads selectively"],
+  "main-peak-context": ["context runs too full", "context in range"],
+  "main-cost-share": ["carries most of the cost", "cost share in range"],
+  "overhead-share": ["Nurselog overhead high", "overhead small"],
+  "main-large-outputs": ["reads raw output", "keeps output short"],
+  "question-open-time": ["questions wait long", "quick answers"],
+  "developer-wait": ["work waits for you", "little waiting"]
+};
+var MAIN_CACHE_PROBLEM = "re-reads a long context";
+var NO_ROLE = "a role";
+var MERGE_TEXT = { developer: "you merge", agent: "agent merges" };
+var MAX_ROLES = 3;
+var isPlainObject3 = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var isArea = (value2) => typeof value2 === "string" && Object.hasOwn(AREA_STEPS, value2);
+var isInformational = (signal) => Object.hasOwn(NEUTRAL, signal);
+var isSignal = (value2) => typeof value2 === "string" && (Object.hasOwn(NEUTRAL, value2) || Object.hasOwn(PHRASES, value2));
+var lineVerdict = (line, signal) => {
+  if (isPlainObject3(line.notMeasured)) {
+    return line.notMeasured.unused === true ? "unused" : "unmeasured";
+  }
+  if (isInformational(signal)) {
+    return "info";
+  }
+  if (line.flag === "guideline") {
+    return "change";
+  }
+  return line.flag === "comparison" ? "consider" : "ok";
+};
+var readLine2 = (value2) => {
+  if (!isPlainObject3(value2) || !isArea(value2.area) || !isSignal(value2.signal)) {
+    return void 0;
+  }
+  const insight = value2;
+  const verdict = lineVerdict(value2, value2.signal);
+  return typeof value2.role === "string" ? { insight, role: value2.role, verdict } : { insight, verdict };
+};
+var stageOf = (role, setup) => {
+  const roles = setup?.roles ?? [];
+  const entry = roles.find((item2) => item2.role === role) ?? roles.find((item2) => item2.role === "*");
+  return entry?.stage ?? "other";
+};
+var isMainLine = (line) => line.role === void 0 || line.role === "main";
+var stepOf = (line, setup) => {
+  if (line.insight.signal === "cache-per-output" && !isMainLine(line)) {
+    return STAGE_STEPS[stageOf(line.role ?? "", setup)];
+  }
+  return AREA_STEPS[line.insight.area];
+};
+var linePhrase = (line, verdict, shortName) => {
+  const signal = line.insight.signal;
+  if (isInformational(signal)) {
+    return NEUTRAL[signal];
+  }
+  const [problem, good] = PHRASES[signal];
+  if (verdict === "ok") {
+    return good;
+  }
+  if (signal === "cache-per-output" && isMainLine(line)) {
+    return MAIN_CACHE_PROBLEM;
+  }
+  const role = line.role === void 0 ? NO_ROLE : shortName(line.role);
+  return problem.replace("<role>", role);
+};
+var stepVerdict = (lines) => {
+  const counted = lines.filter((line) => line.verdict !== "unused");
+  if (counted.length === 0) {
+    return "absent";
+  }
+  const order = ["change", "consider", "ok", "unmeasured"];
+  return order.find((verdict) => counted.some((line) => line.verdict === verdict)) ?? "ok";
+};
+var stepPhrase = (lines, verdict, shortName) => {
+  if (verdict === "absent") {
+    return "";
+  }
+  if (verdict === "unmeasured") {
+    return UNMEASURED_TEXT;
+  }
+  const first = lines.find((line) => line.verdict === verdict) ?? lines.find((line) => line.verdict === "info");
+  return first ? linePhrase(first, verdict, shortName) : "";
+};
+var roleList = (names) => {
+  const shown = names.slice(0, MAX_ROLES).join(", ");
+  const rest = names.length - MAX_ROLES;
+  return rest > 0 ? `${shown} +${rest}` : shown;
+};
+var sharedBudget = (roles, setup) => {
+  const entryOf2 = (role) => setup.roles.find((item2) => item2.role === role) ?? setup.roles.find((item2) => item2.role === "*");
+  const budgets = roles.map((role) => entryOf2(role)?.toolCalls);
+  if (budgets.length === 0 || budgets.some((budget) => budget === void 0)) {
+    return void 0;
+  }
+  if (budgets.every((budget) => budget === null)) {
+    return null;
+  }
+  const first = budgets[0];
+  return typeof first === "number" && budgets.every((budget) => budget === first) ? first : void 0;
+};
+var budgetText = (roles, setup) => {
+  const budget = sharedBudget(roles, setup);
+  if (budget === null) {
+    return " \xB7 no budget";
+  }
+  return budget === void 0 ? "" : ` \xB7 ${plural(budget, "call")}`;
+};
+var listedRoles = (stage, lines, setup) => {
+  const lineRoles = [...new Set(lines.flatMap((line) => line.role ?? []))];
+  if (lineRoles.length > 0 || !setup) {
+    return lineRoles;
+  }
+  return setup.roles.filter((item2) => item2.stage === stage && item2.role !== "*").map((item2) => item2.role);
+};
+var setupLine = (id, lines, setup, shortName) => {
+  if (id === "verify") {
+    return setup ? setup.verification.join(", ") : "";
+  }
+  const stage = STEP_STAGES[id];
+  if (stage === void 0) {
+    return "";
+  }
+  if (id === "merge" && lines.every((line) => line.role === void 0)) {
+    return setup ? MERGE_TEXT[setup.mergeBy] : "";
+  }
+  const roles = listedRoles(stage, lines, setup);
+  const listed2 = roleList(roles.map(shortName));
+  return id === "implement" && setup ? `${listed2}${budgetText(roles, setup)}` : listed2;
+};
+var implementBudget = (lines, setup) => {
+  const budget = setup ? sharedBudget(listedRoles("implement", lines, setup), setup) : void 0;
+  return typeof budget === "number" ? budget : void 0;
+};
+var countText3 = (change, consider, measured) => {
+  const parts = [];
+  if (change > 0) {
+    parts.push(`${change} to change`);
+  }
+  if (consider > 0) {
+    parts.push(`${consider} to consider`);
+  }
+  if (parts.length > 0) {
+    return parts.join(" \xB7 ");
+  }
+  return measured ? "nothing to change" : "nothing measured yet";
+};
+var basisText = (sessions) => `checked against guidelines, the setup and the last ${plural(sessions, "work session")}`;
+var workflowMap = (insights, roleShorts) => {
+  const { report, setup } = insights;
+  const shortName = (role) => {
+    const short = ownValue(roleShorts, role);
+    return typeof short === "string" && short !== "" ? short : role;
+  };
+  const listed2 = Array.isArray(report.insights) ? report.insights : [];
+  const lines = listed2.flatMap((value2) => readLine2(value2) ?? []);
+  const byStep = new Map(STEPS.map((step) => [step.id, []]));
+  for (const line of lines) {
+    byStep.get(stepOf(line, setup))?.push(line);
+  }
+  const steps = STEPS.map(({ id, name }) => {
+    const own = byStep.get(id) ?? [];
+    const verdict = stepVerdict(own);
+    const flagged = own.filter((line) => line.verdict === "change" || line.verdict === "consider").length;
+    const setupText = verdict === "absent" ? ABSENT_TEXT : setupLine(id, own, setup, shortName);
+    const phrase = stepPhrase(own, verdict, shortName);
+    return { id, name, lines: own, verdict, setup: setupText, phrase, more: Math.max(0, flagged - 1) };
+  });
+  const change = lines.filter((line) => line.verdict === "change").length;
+  const consider = lines.filter((line) => line.verdict === "consider").length;
+  const measured = steps.some((step) => step.verdict === "change" || step.verdict === "consider" || step.verdict === "ok");
+  const sessions = Array.isArray(report.sessions) ? report.sessions.length : 0;
+  return { steps, change, consider, empty: sessions === 0, count: countText3(change, consider, measured), basis: basisText(sessions) };
+};
+
+// src/ui/health-report.ts
+var PR2 = ["PR", "PRs"];
+var RUN2 = ["run", "runs"];
+var STREAM2 = ["stream", "streams"];
+var BRANCH2 = ["branch", "branches"];
+var SESSION2 = ["session", "sessions"];
+var ANSWERED2 = ["answered question", "answered questions"];
+var QUIET_RUNS2 = 10;
+var HEADROOM = 1.08;
+var MAX_CHIPS = 4;
+var noun2 = (count2, unit) => count2 === 1 ? unit[0] : unit[1];
+var wholePercent = (fraction) => `${Math.round(fraction * 100)}%`;
+var tenthPercent = (fraction) => `${(fraction * 100).toFixed(1)}%`;
+var rateText = (k, n2, unit, hit) => `${k} of ${n2} ${noun2(n2, unit)} ${hit}`;
+var rate = (hit) => ({
+  text: (evidence, unit) => evidence.k === void 0 ? void 0 : rateText(evidence.k, evidence.n, unit, hit),
+  row: (number, point2, unit) => point2.k !== void 0 && point2.n !== void 0 ? rateText(point2.k, point2.n, unit, hit) : `${wholePercent(number)} of ${unit[1]} ${hit}`
+});
+var valued = (text2, row2 = text2) => ({
+  text: (evidence) => evidence.value === void 0 ? void 0 : text2(evidence.value),
+  row: row2
+});
+var quietLeast2 = (limit) => {
+  let least = 0;
+  while (least < QUIET_RUNS2 && least / QUIET_RUNS2 < limit) {
+    least += 1;
+  }
+  return least;
+};
+var SIGNALS2 = {
+  "cost-per-pr": {
+    impact: "cost",
+    unit: PR2,
+    headline: ["PRs cost more than before", "Cost per PR stays in range"],
+    ...valued((value2) => `${cost(value2)} per PR`)
+  },
+  "time-to-pr": {
+    impact: "time",
+    unit: PR2,
+    headline: ["PRs take longer to open", "PRs open quickly"],
+    ...valued(duration)
+  },
+  "cost-per-100-lines": {
+    impact: "cost",
+    unit: PR2,
+    headline: ["Changes cost more per line", "Cost per changed line stays in range"],
+    text: (evidence) => evidence.value === void 0 ? "no changed lines" : `${cost(evidence.value)} per 100 lines`,
+    row: (number) => `${cost(number)} per 100 lines`
+  },
+  "budget-first-stop": {
+    impact: "time",
+    unit: RUN2,
+    headline: ["Implementers stop at their tool-call budget", "Implementers finish within their budget"],
+    ...rate("reached the budget"),
+    limit: (limit) => `under ${Math.round(limit * 100)}%`,
+    scale: true
+  },
+  "second-implementer": {
+    impact: "time",
+    unit: STREAM2,
+    headline: ["Streams need a second implement run", "One implement run per stream"],
+    ...rate("had a second run")
+  },
+  "second-round": {
+    impact: "time",
+    unit: BRANCH2,
+    headline: ["Branches need a second review round", "Reviews pass in one round"],
+    ...rate("had a second round")
+  },
+  "quiet-reviewer": {
+    impact: "cost",
+    unit: RUN2,
+    headline: ["<role> rarely finds anything to fix", "<role> finds things to fix"],
+    // A quiet-reviewer point is one run; a session's points merge into one row, "2 of 3 runs had a fix follow-up".
+    ...rate("had a fix follow-up"),
+    limit: (limit) => `at least ${quietLeast2(limit)} of ${QUIET_RUNS2}`,
+    perRun: true
+  },
+  "failed-runs": {
+    impact: "quality",
+    unit: RUN2,
+    headline: ["Verification fails often", "Verification passes"],
+    ...rate("failed")
+  },
+  "cache-per-output": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["<role> reads whole files", "<role> reads selectively"],
+    ...valued((value2) => `${Math.round(value2)} per output token`),
+    limit: (limit) => `at most ${Math.round(limit)}`,
+    scale: true
+  },
+  "main-peak-context": {
+    impact: "quality",
+    unit: SESSION2,
+    headline: ["The main thread's context runs too full", "The main thread's context stays in range"],
+    ...valued((value2) => `${tokens(value2)} tokens`),
+    // The points are peak tokens and the limit a share of the context limit: no common scale.
+    limit: (limit) => `at most ${Math.round(limit * 100)}% of the context limit`
+  },
+  "main-cost-share": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["The main thread carries most of the cost", "The main thread's cost share stays in range"],
+    ...valued(wholePercent)
+  },
+  "overhead-share": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["The Nurselog overhead is high", "The Nurselog overhead stays small"],
+    ...valued(tenthPercent),
+    limit: (limit) => `at most ${tenthPercent(limit)}`,
+    scale: true
+  },
+  "main-large-outputs": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["The main thread reads raw command output", "The main thread keeps long output out of its context"],
+    ...valued((value2) => `a median of ${value2} per session`, (value2) => plural(value2, "large output")),
+    limit: (limit) => `at most ${limit} per session`,
+    scale: true
+  },
+  "question-open-time": {
+    impact: "time",
+    unit: ANSWERED2,
+    headline: ["Questions wait long for an answer", "Questions get quick answers"],
+    ...valued(duration)
+  },
+  "developer-wait": {
+    impact: "time",
+    unit: SESSION2,
+    headline: ["Work waits for you", "Little waiting for you"],
+    ...valued((value2) => `${duration(value2)} per session`, duration)
+  },
+  "fix-followups": {
+    impact: "quality",
+    unit: RUN2,
+    headline: ["Fix follow-ups per review run", "Fix follow-ups per review run"],
+    ...valued((value2) => `${value2.toFixed(1)} per run`)
+  },
+  "verify-commands": {
+    impact: "quality",
+    unit: RUN2,
+    headline: ["Verification commands per implement run", "Verification commands per implement run"],
+    ...valued((value2) => `a median of ${value2} per run`, (value2) => `${value2} per run`)
+  },
+  "questions-per-session": {
+    impact: "time",
+    unit: SESSION2,
+    headline: ["Questions per session", "Questions per session"],
+    ...valued((value2) => `a median of ${value2} per session`, (value2) => plural(value2, "question"))
+  }
+};
+var MAIN_CACHE2 = ["The main thread re-reads a long context", "The main thread's cache reads stay in range"];
+var NO_ROLE2 = "A role";
+var NO_TITLE = "recorded session";
+var AREA_NAMES2 = {
+  delivery: "Delivery",
+  implementers: "Implementers",
+  review: "Review",
+  verification: "Verification",
+  tokens: "Token economy",
+  questions: "Questions and waits"
+};
+var GROUPS = [
+  { group: "change", label: "Worth changing" },
+  { group: "consider", label: "Worth considering" },
+  { group: "ok", label: "Working well" },
+  { group: "info", label: "For reference" },
+  { group: "unmeasured", label: "Not measured" }
+];
+var FOOTER = "Checked against the guidelines and the workflow setup of nurselog.config.json. These are suggestions; nothing on this board changes your files.";
+var isPlainObject4 = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
+var finite = (value2) => typeof value2 === "number" && Number.isFinite(value2);
+var nonEmpty = (value2) => typeof value2 === "string" && value2 !== "" ? value2 : void 0;
+var readEvidence = (value2) => {
+  if (!isPlainObject4(value2) || !finite(value2.n) || value2.n < 0) {
+    return void 0;
+  }
+  const evidence = { n: value2.n };
+  if (finite(value2.k)) {
+    evidence.k = value2.k;
+  }
+  if (finite(value2.value)) {
+    evidence.value = value2.value;
+  }
+  return evidence;
+};
+var readLimit = (value2) => {
+  if (!isPlainObject4(value2) || !finite(value2.limit)) {
+    return void 0;
+  }
+  return { limit: value2.limit, worse: value2.worse === "below" ? "below" : "above" };
+};
+var pointNumber = (value2, k, n2) => {
+  if (finite(value2)) {
+    return value2;
+  }
+  return k !== void 0 && n2 !== void 0 && n2 > 0 ? k / n2 : null;
+};
+var readPoints = (series) => {
+  if (!Array.isArray(series)) {
+    return [];
+  }
+  return series.flatMap((item2) => {
+    if (!isPlainObject4(item2) || typeof item2.session !== "string") {
+      return [];
+    }
+    const k = finite(item2.k) ? item2.k : void 0;
+    const n2 = finite(item2.n) ? item2.n : void 0;
+    return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2 }];
+  });
+};
+var readFacts = (report) => {
+  const basis = report.basis;
+  const options = report.options;
+  const listed2 = report.sessions;
+  const entries = Array.isArray(listed2) ? listed2 : [];
+  const sessions = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (isPlainObject4(entry) && typeof entry.id === "string") {
+      sessions.set(entry.id, { key: nonEmpty(entry.key), title: nonEmpty(entry.title) });
+    }
+  }
+  const last = entries[entries.length - 1];
+  const facts = { sessions, newest: isPlainObject4(last) ? last : void 0 };
+  if (isPlainObject4(basis)) {
+    facts.window = finite(basis.window) ? basis.window : void 0;
+    facts.baseline = finite(basis.baseline) ? basis.baseline : void 0;
+  }
+  if (isPlainObject4(options)) {
+    facts.minBaseline = finite(options.minBaseline) ? options.minBaseline : void 0;
+  }
+  return facts;
+};
+var sideText = (format, evidence) => {
+  if (evidence === void 0) {
+    return void 0;
+  }
+  return evidence.n === 0 ? `no ${format.unit[1]}` : format.text(evidence, format.unit);
+};
+var numberOf2 = (label, text2) => text2 === void 0 ? void 0 : { label, text: text2 };
+var nowLabel = (signal, window2, facts) => {
+  if (signal === "quiet-reviewer" && window2 !== void 0) {
+    return `last ${plural(window2.n, "run")}`;
+  }
+  return facts.window === void 0 ? "recent sessions" : `last ${plural(facts.window, "session")}`;
+};
+var sparkline = (points, limit, unit) => {
+  if (points.length === 0) {
+    return void 0;
+  }
+  const numbers = points.flatMap((point2) => point2.number ?? []);
+  const max = Math.max(0, ...numbers, limit?.limit ?? 0) * HEADROOM;
+  const guide = limit !== void 0 && max > 0 ? limit : void 0;
+  const bars = points.map((point2) => {
+    const number = point2.number;
+    if (number === null) {
+      return { height: null, window: point2.window, worse: false };
+    }
+    const height = max > 0 ? Math.max(0, number / max) : 0;
+    const beyond = guide !== void 0 && (guide.worse === "above" ? number > guide.limit : number < guide.limit);
+    return { height, window: point2.window, worse: beyond };
+  });
+  const first = points.findIndex((point2) => point2.window);
+  const highlighted = points.filter((point2) => point2.window).length;
+  const label = `${plural(points.length, unit)}, the latest ${highlighted} highlighted${guide ? ", dashed line is the guideline" : ""}`;
+  const spark = { bars, windowStart: first === -1 ? points.length : first, label };
+  if (guide) {
+    spark.guide = guide.limit / max;
+  }
+  return spark;
+};
+var mergeRuns = (session, runs) => {
+  const k = runs.reduce((total, run) => total + (run.k ?? ((run.number ?? 0) >= 1 ? 1 : 0)), 0);
+  const n2 = runs.reduce((total, run) => total + (run.n ?? 1), 0);
+  return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2 };
+};
+var rowPoints = (points, perRun) => {
+  const newestFirst4 = [...points].reverse().filter((point2) => point2.window && point2.number !== null);
+  if (!perRun) {
+    return newestFirst4;
+  }
+  const bySession = /* @__PURE__ */ new Map();
+  for (const point2 of newestFirst4) {
+    const runs = bySession.get(point2.session);
+    if (runs === void 0) {
+      bySession.set(point2.session, [point2]);
+    } else {
+      runs.push(point2);
+    }
+  }
+  return [...bySession].map(([session, runs]) => mergeRuns(session, runs));
+};
+var pointRows = (points, format, facts) => {
+  const rows = [];
+  const sessionValues = /* @__PURE__ */ new Map();
+  for (const point2 of rowPoints(points, format.perRun === true)) {
+    if (point2.number === null) {
+      continue;
+    }
+    const value2 = format.row(point2.number, point2, format.unit);
+    const session = facts.sessions.get(point2.session);
+    rows.push({ session: point2.session, key: session?.key ?? "", title: session?.title ?? NO_TITLE, value: value2 });
+    if (!sessionValues.has(point2.session)) {
+      sessionValues.set(point2.session, value2);
+    }
+  }
+  return { rows, sessionValues };
+};
+var groupOf = (verdict) => verdict === "unused" ? "unmeasured" : verdict;
+var lineText = (insight, role) => {
+  const text2 = typeof insight.text === "string" ? insight.text : "";
+  const prefix = `${AREA_NAMES2[insight.area]}: `;
+  const bare = text2.startsWith(prefix) ? text2.slice(prefix.length) : text2;
+  if (role !== void 0 && role !== "" && bare.startsWith(role)) {
+    return bare;
+  }
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+};
+var headlineOf = (line) => {
+  const signal = line.insight.signal;
+  if (signal === "fix-followups") {
+    return line.role === void 0 ? SIGNALS2[signal].headline[0] : `${line.role}: fix follow-ups per run`;
+  }
+  const mainThread = signal === "cache-per-output" && (line.role === void 0 || line.role === "main");
+  const [problem, good] = mainThread ? MAIN_CACHE2 : SIGNALS2[signal].headline;
+  const role = line.role ?? NO_ROLE2;
+  return (line.verdict === "ok" ? good : problem).replace("<role>", () => role);
+};
+var idOf = (line) => line.role === void 0 ? line.insight.signal : `${line.insight.signal}:${line.role}`;
+var unmeasuredImpact = (insight) => {
+  const covered = isPlainObject4(insight.notMeasured) ? insight.notMeasured.signals : void 0;
+  const signals = Array.isArray(covered) ? covered : [];
+  const known = signals.find((signal) => typeof signal === "string" && Object.hasOwn(SIGNALS2, signal));
+  return known === void 0 ? "quality" : SIGNALS2[known].impact;
+};
+var unmeasuredFinding = (line, step) => ({
+  id: `unmeasured:${line.insight.area}`,
+  step: step.id,
+  stepName: step.name,
+  group: "unmeasured",
+  absent: line.verdict === "unused",
+  impact: unmeasuredImpact(line.insight),
+  headline: AREA_NAMES2[line.insight.area],
+  line: lineText(line.insight),
+  sessionValues: /* @__PURE__ */ new Map()
+});
+var measuredFinding = (line, step, facts, changes) => {
+  const insight = line.insight;
+  const format = SIGNALS2[insight.signal];
+  const window2 = readEvidence(insight.window);
+  const baseline = readEvidence(insight.baseline);
+  const limit = readLimit(insight.guideline);
+  const points = readPoints(insight.series);
+  const now = numberOf2(nowLabel(insight.signal, window2, facts), sideText(format, window2));
+  const before2 = numberOf2(facts.baseline === void 0 ? "before" : `${facts.baseline} before`, sideText(format, baseline));
+  const guideline = limit === void 0 || format.limit === void 0 ? void 0 : numberOf2("guideline", format.limit(limit.limit));
+  const spark = sparkline(points, format.scale === true ? limit : void 0, insight.signal === "quiet-reviewer" ? "run" : "session");
+  const { rows, sessionValues } = pointRows(points, format, facts);
+  const evidence = { setup: step.verdict === "absent" ? "" : step.setup, rows };
+  if (now) {
+    evidence.now = now;
+  }
+  if (before2) {
+    evidence.before = before2;
+  }
+  if (guideline) {
+    evidence.guideline = guideline;
+  }
+  if (spark) {
+    evidence.spark = spark;
+  }
+  const finding = {
+    id: idOf(line),
+    step: step.id,
+    stepName: step.name,
+    group: groupOf(line.verdict),
+    absent: false,
+    impact: format.impact,
+    headline: headlineOf(line),
+    line: lineText(insight, line.role),
+    evidence,
+    sessionValues
+  };
+  if (line.verdict === "change") {
+    finding.basis = "worse than the guideline";
+  }
+  if (line.verdict === "consider") {
+    finding.basis = "worse than before";
+  }
+  if ((line.verdict === "ok" || line.verdict === "info") && now) {
+    finding.value = now.text;
+  }
+  const change = suggestedChange({ line, step: step.id, ...changes, guideline: guideline?.text, before: before2?.text, window: window2 });
+  if (change) {
+    finding.change = change;
+  }
+  return finding;
+};
+var noteOf = (facts) => {
+  const { window: window2, baseline, minBaseline } = facts;
+  if (window2 === void 0 || baseline === void 0 || minBaseline === void 0 || baseline >= minBaseline) {
+    return void 0;
+  }
+  const recorded = `Only ${plural(baseline, "work session")} ${baseline === 1 ? "is" : "are"} recorded before the latest ${window2}.`;
+  return `${recorded} Guidelines still apply; the comparison with before settles as more sessions finish.`;
+};
+var updatedOf = (newest3) => {
+  if (newest3 === void 0 || typeof newest3.finishedAt !== "string") {
+    return void 0;
+  }
+  return { name: nonEmpty(newest3.key) ?? "a session", finishedAt: newest3.finishedAt };
+};
+var healthReport = (insights, roleShorts, repositoryName) => {
+  const map = workflowMap(insights, roleShorts);
+  const facts = readFacts(insights.report);
+  const implement = map.steps.find((step) => step.id === "implement");
+  const changes = { setup: insights.setup, budget: implementBudget(implement?.lines ?? [], insights.setup) };
+  const owners = /* @__PURE__ */ new Map();
+  for (const step of map.steps) {
+    for (const line of step.lines) {
+      owners.set(line.insight, { line, step });
+    }
+  }
+  const listed2 = Array.isArray(insights.report.insights) ? insights.report.insights : [];
+  const findings = listed2.flatMap((value2) => {
+    const owner = owners.get(value2);
+    if (owner === void 0) {
+      return [];
+    }
+    const unmeasured = owner.line.verdict === "unmeasured" || owner.line.verdict === "unused";
+    return [unmeasured ? unmeasuredFinding(owner.line, owner.step) : measuredFinding(owner.line, owner.step, facts, changes)];
+  });
+  const groups2 = GROUPS.map(({ group, label }) => ({ group, label, findings: findings.filter((finding) => finding.group === group) }));
+  const stages = map.steps.filter((step) => findings.some((finding) => finding.step === step.id)).map(({ id, name }) => ({ id, name }));
+  const report = {
+    title: `Workflow health \xB7 ${repositoryName}`,
+    count: map.count,
+    keyless: [...facts.sessions.values()].every((session) => session.key === void 0),
+    stages,
+    groups: groups2.filter((group) => group.findings.length > 0),
+    closing: typeof insights.report.closing === "string" ? insights.report.closing : "",
+    footer: FOOTER
+  };
+  const updated = updatedOf(facts.newest);
+  if (updated) {
+    report.updated = updated;
+  }
+  const newest3 = nonEmpty(facts.newest?.id);
+  if (newest3 !== void 0) {
+    report.newest = newest3;
+  }
+  const note = noteOf(facts);
+  if (note !== void 0) {
+    report.note = note;
+  }
+  return report;
+};
+var costChanges = (report) => {
+  const suggested = report.groups.filter((group) => group.group === "change" || group.group === "consider");
+  return suggested.reduce((total, group) => total + group.findings.filter((finding) => finding.impact === "cost").length, 0);
+};
+var costLinkText = (count2) => `${plural(count2, "workflow change")} would cut token use`;
+var sessionChips2 = (report, sessionId) => {
+  const suggested = report.groups.filter((group) => group.group === "change" || group.group === "consider");
+  const chips = suggested.flatMap((group) => group.findings).flatMap((finding) => {
+    const value2 = finding.sessionValues.get(sessionId);
+    return value2 === void 0 ? [] : [{ headline: finding.headline, value: value2 }];
+  });
+  return chips.slice(0, MAX_CHIPS);
+};
+
+// src/ui/health-strip.ts
+var healthOpenKey = (repositoryId) => `nurselog.health.${repositoryId}`;
+var RETRY_MS = 3e4;
+var VERDICT_LABELS = { change: "to change", consider: "to consider", ok: "working well", unmeasured: "", absent: ABSENT_TEXT };
+var stepLabel = (step) => {
+  const change = step.lines.filter((line) => line.verdict === "change").length;
+  const consider = step.lines.filter((line) => line.verdict === "consider").length;
+  const changeText = change > 0 ? `${change} to change` : "";
+  const considerText = consider > 0 ? `${consider} to consider` : "";
+  const counts = [changeText, considerText].filter((part) => part !== "").join(", ");
+  const counted = step.more > 0 ? counts : VERDICT_LABELS[step.verdict];
+  const parts = [counted, step.phrase].filter((part) => part !== "");
+  return parts.length > 0 ? `${step.name}: ${parts.join(", ")}` : step.name;
+};
+var healthReporter = (context, repositoryName, changed) => {
+  let last;
+  return (insights) => {
+    if (insights === last) {
+      return;
+    }
+    last = insights;
+    context.health = insights ? healthReport(insights, context.config.roleShorts, repositoryName()) : void 0;
+    changed();
+  };
+};
+var stripCount = 0;
+var setTitle2 = (element, text2) => {
+  if (text2 === "") {
+    element.removeAttribute("title");
+  } else if (element.title !== text2) {
+    element.title = text2;
+  }
+};
+var createStep = (setupId, open2) => {
+  const item2 = el("li");
+  const node = el("button", "wn");
+  node.type = "button";
+  const dot = el("span", "wd");
+  dot.setAttribute("aria-hidden", "true");
+  const name = el("span", "wl");
+  const setup = el("span", "ws");
+  setup.id = setupId;
+  node.setAttribute("aria-describedby", setupId);
+  const verdict = el("span", "wv");
+  const phrase = el("span");
+  const more = el("b");
+  verdict.append(phrase, more);
+  node.append(dot, name, setup, verdict);
+  item2.append(node);
+  node.addEventListener("animationend", () => node.classList.remove("bump"));
+  node.addEventListener("click", () => open2(node));
+  return { item: item2, step: { node, name, setup, phrase, more } };
+};
+var bumpKey = (step) => `${step.verdict}:${step.more}`;
+var createHealthStrip = (context, hooks) => {
+  stripCount += 1;
+  const element = el("section", "hstrip");
+  element.setAttribute("aria-label", "Workflow health");
+  element.hidden = true;
+  const header = el("div", "hsh");
+  const toggle = el("button", "hsx");
+  toggle.type = "button";
+  const bodyId = `health-body-${stripCount}`;
+  toggle.setAttribute("aria-controls", bodyId);
+  toggle.append(chevronIcon());
+  const count2 = el("span", "hsc");
+  const countDot = el("i");
+  countDot.setAttribute("aria-hidden", "true");
+  const countText4 = el("span");
+  count2.append(countDot, countText4);
+  const basis = el("span", "hsu");
+  const note = el("span", "hsn", EMPTY_TEXT2);
+  note.title = EMPTY_TITLE;
+  const reportButton = el("button", "button hso", "Open report");
+  reportButton.type = "button";
+  reportButton.addEventListener("click", () => hooks.open(reportButton, {}));
+  header.append(toggle, el("h2", void 0, "Workflow health"), count2, basis, note, reportButton);
+  const body = el("div", "hsb");
+  body.id = bodyId;
+  const clip3 = el("div");
+  const list = el("ol", "wmap");
+  const line = el("li", "wline");
+  line.setAttribute("aria-hidden", "true");
+  list.append(line);
+  const steps = /* @__PURE__ */ new Map();
+  clip3.append(list);
+  body.append(clip3);
+  element.append(header, body);
+  const openKey = healthOpenKey(context.repositoryId);
+  let open2 = readValue(openKey, true) === "1";
+  let stamp;
+  let pending;
+  let failedAt;
+  let data;
+  let map;
+  let drawnKeys;
+  const drawOpen = () => {
+    const empty = map?.empty ?? false;
+    const shown = open2 && !empty;
+    element.classList.toggle("open", shown);
+    body.classList.toggle("open", shown);
+    body.inert = !shown;
+    for (const parts of steps.values()) {
+      parts.node.tabIndex = shown ? 0 : -1;
+    }
+    toggle.setAttribute("aria-expanded", String(open2));
+    toggle.setAttribute("aria-label", open2 ? "Hide the workflow map" : "Show the workflow map");
+  };
+  const drawUpdated = () => {
+    setTitle2(reportButton, context.health ? updatedText(context.health, Date.now()) : "");
+  };
+  header.addEventListener("click", (event) => {
+    if (reportButton.contains(event.target) || !map || map.empty) {
+      return;
+    }
+    open2 = !open2;
+    writeValue(openKey, open2 ? "1" : void 0, true);
+    drawOpen();
+  });
+  const openStep = (id, node) => {
+    const listed2 = context.health?.stages.some((stage) => stage.id === id) ?? false;
+    hooks.open(node, listed2 ? { stage: id } : {});
+  };
+  const drawStep = (step) => {
+    let parts = steps.get(step.id);
+    if (!parts) {
+      const id = step.id;
+      const made = createStep(`${bodyId}-${id}-setup`, (node) => openStep(id, node));
+      list.append(made.item);
+      steps.set(step.id, made.step);
+      parts = made.step;
+    }
+    parts.node.className = parts.node.classList.contains("bump") ? `wn ${step.verdict} bump` : `wn ${step.verdict}`;
+    parts.node.dataset.step = step.id;
+    const label = stepLabel(step);
+    if (parts.node.getAttribute("aria-label") !== label) {
+      parts.node.setAttribute("aria-label", label);
+    }
+    setText(parts.name, step.name);
+    setText(parts.setup, step.setup);
+    setTitle2(parts.setup, step.setup);
+    setText(parts.phrase, step.phrase);
+    setText(parts.more, step.more > 0 ? `+${step.more}` : "");
+    parts.more.hidden = step.more === 0;
+  };
+  const bump = (id) => {
+    const node = steps.get(id)?.node;
+    if (!node) {
+      return;
+    }
+    node.classList.remove("bump");
+    void node.offsetWidth;
+    node.classList.add("bump");
+  };
+  const rising = () => element.getAnimations().some((animation) => animation.playState !== "finished");
+  const enter = () => {
+    const height = `${element.offsetHeight}px`;
+    const gap = flowGap(element);
+    const from = { ...ENTER2[0], height: "0px", marginBottom: `${-gap}px`, overflow: "hidden" };
+    const to = { ...ENTER2[1], height, marginBottom: "0px", overflow: "hidden" };
+    element.animate([from, to], { duration: ENTER_MS, easing: EASE3 });
+  };
+  const draw2 = () => {
+    const wasHidden = element.hidden;
+    element.hidden = stamp === void 0 || data === void 0;
+    if (!data) {
+      hooks.report(void 0);
+      return;
+    }
+    const next = workflowMap(data, context.config.roleShorts);
+    map = next;
+    element.classList.toggle("empty", next.empty);
+    toggle.hidden = next.empty;
+    count2.hidden = next.empty;
+    basis.hidden = next.empty;
+    reportButton.hidden = next.empty;
+    note.hidden = !next.empty;
+    body.hidden = next.empty;
+    countDot.hidden = next.change === 0;
+    setText(countText4, next.count);
+    setText(basis, next.basis);
+    for (const step of next.steps) {
+      drawStep(step);
+    }
+    const keys2 = new Map(next.steps.map((step) => [step.id, bumpKey(step)]));
+    if (drawnKeys && !context.reducedMotion()) {
+      for (const [id, key] of keys2) {
+        const before2 = drawnKeys.get(id);
+        if (before2 !== void 0 && before2 !== key) {
+          bump(id);
+        }
+      }
+    }
+    drawnKeys = keys2;
+    drawOpen();
+    hooks.report(data);
+    drawUpdated();
+    if (wasHidden && !context.reducedMotion() && !rising()) {
+      enter();
+    }
+  };
+  const guardedDraw = () => {
+    try {
+      draw2();
+    } catch (error) {
+      element.hidden = true;
+      console.error("Nurselog: the workflow health strip failed to draw; it is hidden until its next report.", error);
+    }
+  };
+  const fetchReport = () => {
+    pending?.abort();
+    const controller = new AbortController();
+    pending = controller;
+    void context.source.insights(context.repositoryId, controller.signal).then((result) => {
+      if (pending !== controller) {
+        return;
+      }
+      pending = void 0;
+      if (result) {
+        failedAt = void 0;
+        data = result;
+        guardedDraw();
+      } else if (data === void 0) {
+        failedAt = Date.now();
+      }
+    });
+  };
+  drawOpen();
+  return {
+    element,
+    update(next) {
+      drawUpdated();
+      if (next === stamp) {
+        if (next !== void 0 && pending === void 0 && failedAt !== void 0 && Date.now() - failedAt >= RETRY_MS) {
+          failedAt = void 0;
+          fetchReport();
+        }
+        return;
+      }
+      stamp = next;
+      failedAt = void 0;
+      if (next === void 0) {
+        pending?.abort();
+        pending = void 0;
+        data = void 0;
+      } else {
+        fetchReport();
+      }
+      guardedDraw();
+    },
+    waiting: () => stamp !== void 0 && data === void 0 && pending !== void 0,
+    destroy() {
+      pending?.abort();
+      pending = void 0;
+      failedAt = void 0;
     }
   };
 };
@@ -20240,11 +23066,11 @@ var text = (className, value2, y, x = 0) => {
   element.textContent = value2;
   return element;
 };
-var nodeGroup = (state, color, mark, radius, x = 0, extra, count) => {
+var nodeGroup = (state, color, mark, radius, x = 0, extra, count2) => {
   const classes = extra ? `node ${state} ${extra}` : `node ${state}`;
   const group = svgEl("g", { class: classes, transform: `translate(${x} 0)` });
   setVars(group, { "--c": color });
-  drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }), count);
+  drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }), count2);
   return group;
 };
 var pillGroup = (color, compact, x = 0) => {
@@ -20297,9 +23123,9 @@ var row = (title, items, note) => {
 var nodesRow = (config, color) => {
   const marks = legendMarks(config);
   const mark = legendSampleMark(marks);
-  const items = LEGEND_NODES.map(({ state, label, className, count }) => {
+  const items = LEGEND_NODES.map(({ state, label, className, count: count2 }) => {
     const svg = sample("-13 -13 26 26", 26, 26);
-    svg.append(nodeGroup(state, color, mark, NODE_R2, 0, className, count));
+    svg.append(nodeGroup(state, color, mark, NODE_R2, 0, className, count2));
     return item(svg, label);
   });
   return row("Nodes", items, marksNote(marks));
@@ -20433,6 +23259,272 @@ var showLegend = (config) => {
   }
 };
 
+// src/ui/tabs.ts
+var TAB_PARAM = "repo";
+var wantedName = (search) => new URLSearchParams(search).get(TAB_PARAM) || void 0;
+var tabUrl = (href, name) => {
+  const url = new URL(href);
+  url.searchParams.set(TAB_PARAM, name);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+var VIEW_PARAM = "view";
+var pageView = (search) => new URLSearchParams(search).get(VIEW_PARAM) === "runs" ? "runs" : "sessions";
+var SESSION_PARAM = "session";
+var wantedSession = (search) => new URLSearchParams(search).get(SESSION_PARAM) || void 0;
+var withoutSession = (href) => {
+  const url = new URL(href);
+  url.searchParams.delete(SESSION_PARAM);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+var SESSION_WAIT_MS = 1e4;
+var sessionLinkStep = (canOpen, waitedMs) => {
+  if (canOpen) {
+    return "jump";
+  }
+  return waitedMs !== void 0 && waitedMs >= SESSION_WAIT_MS ? "drop" : "wait";
+};
+var mostRecentlyActive = (list) => {
+  let newest3;
+  for (const repository of list) {
+    if (!newest3 || (repository.lastLineAt ?? "") > (newest3.lastLineAt ?? "")) {
+      newest3 = repository;
+    }
+  }
+  return newest3;
+};
+var selectRepository = (list, wanted, currentId) => {
+  const current = currentId === void 0 ? void 0 : list.find((repository) => repository.id === currentId);
+  const named = wanted === void 0 ? void 0 : list.find((repository) => repository.name === wanted);
+  return current ?? named ?? mostRecentlyActive(list);
+};
+var tabViews = (list, selectedId) => list.map((repository) => {
+  const running = Math.max(0, repository.running);
+  const waiting = Math.max(0, repository.waiting);
+  const label = `${repository.name}: ${running} running, ${waiting} waiting for you`;
+  return { id: repository.id, name: repository.name, running, waiting, selected: repository.id === selectedId, label };
+});
+var plainClick = (event) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
+var waitingTotal = (list) => list.reduce((sum2, repository) => sum2 + Math.max(0, repository.waiting), 0);
+var documentTitle = (list, selected, label) => {
+  if (!selected) {
+    return label;
+  }
+  const waiting = waitingTotal(list);
+  const count2 = waiting > 0 ? `(${waiting}) ` : "";
+  return `${count2}${selected.name} \xB7 ${label}`;
+};
+var inView = (start, end, viewStart, viewEnd) => start >= viewStart - 0.5 && end <= viewEnd + 0.5;
+var hiddenWaiting = (boxes, viewStart, viewEnd) => {
+  let start;
+  let end;
+  for (const box of boxes) {
+    if (box.waiting <= 0) {
+      continue;
+    }
+    const spanStart = Math.min(box.nameStart, box.badgeStart);
+    const spanEnd = Math.max(box.nameEnd, box.badgeEnd);
+    const fits = spanEnd - spanStart <= viewEnd - viewStart + 1;
+    const shownStart = fits ? spanStart : box.nameStart;
+    const shownEnd = fits ? spanEnd : box.nameEnd;
+    if (shownStart < viewStart - 0.5 && (!start || box.start > start.start)) {
+      start = box;
+    }
+    if (shownEnd > viewEnd + 0.5 && (!end || box.end < end.end)) {
+      end = box;
+    }
+  }
+  return { start: start?.id, end: end?.id };
+};
+var tabNameId = (id) => `repo-tab-${id}-name`;
+var INCHWORM_REACH = 0.42;
+var inchwormFrames = (from, to) => {
+  const left = Math.min(from.left, to.left);
+  const right = Math.max(from.left + from.width, to.left + to.width);
+  return [{ left: from.left, width: from.width }, { left, width: right - left, offset: INCHWORM_REACH }, { left: to.left, width: to.width }];
+};
+var centredScroll = (tab, viewWidth, scrollWidth) => {
+  const left = tab.left - (viewWidth - tab.width) / 2;
+  return Math.min(Math.max(0, left), Math.max(0, scrollWidth - viewWidth));
+};
+var travelDirection = (ids, fromId, toId) => {
+  const from = fromId === void 0 ? -1 : ids.indexOf(fromId);
+  const to = toId === void 0 ? -1 : ids.indexOf(toId);
+  return from >= 0 && to >= 0 && to < from ? -1 : 1;
+};
+var badgeMotion = (previous, next, selected) => {
+  const bump = previous !== void 0 && next > previous;
+  return { bump, ping: bump && !selected };
+};
+var keyTarget = (ids, currentId, key) => {
+  const index = ids.indexOf(currentId);
+  if (index < 0) {
+    return void 0;
+  }
+  switch (key) {
+    case "ArrowRight":
+      return ids[(index + 1) % ids.length];
+    case "ArrowLeft":
+      return ids[(index - 1 + ids.length) % ids.length];
+    case "Home":
+      return ids[0];
+    case "End":
+      return ids[ids.length - 1];
+    default:
+      return void 0;
+  }
+};
+
+// src/ui/link-hand-off.ts
+var APP_WINDOW_QUERY = "(display-mode: standalone)";
+var HAND_OFF_CHANNEL = "nurselog-board";
+var OFFER_WAIT_MS = 150;
+var ACK_WAIT_MS = 150;
+var CLOSE_WAIT_MS = 500;
+var HANDED_OFF_TEXT = "Opened in the Nurselog app window.";
+var SHOW_HERE_TEXT = "Show here";
+var MAX_TEXT = 1024;
+var OFFERS_KEPT = 8;
+var isText = (value2) => typeof value2 === "string" && value2.length > 0 && value2.length <= MAX_TEXT;
+var parseHandOffMessage = (data) => {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return void 0;
+  }
+  const { type, id, repo, session, from, to, focusedAt } = data;
+  if (!isText(id)) {
+    return void 0;
+  }
+  if (type === "ask" && isText(repo) && isText(session)) {
+    return { type, id, repo, session };
+  }
+  if (type === "offer" && isText(from) && typeof focusedAt === "number" && Number.isFinite(focusedAt) && focusedAt >= 0) {
+    return { type, id, from, focusedAt };
+  }
+  if (type === "go" && isText(to)) {
+    return { type, id, to };
+  }
+  if (type === "ack" && isText(from)) {
+    return { type, id, from };
+  }
+  return void 0;
+};
+var chooseOffer = (offers) => {
+  let newest3;
+  for (const offer of offers) {
+    if (!newest3 || offer.focusedAt > newest3.focusedAt) {
+      newest3 = offer;
+    }
+  }
+  return newest3;
+};
+var askLink = (search) => {
+  const repo = wantedName(search);
+  const session = wantedSession(search);
+  return repo === void 0 || session === void 0 ? void 0 : { repo, session };
+};
+var launchLink = (targetURL) => {
+  if (typeof targetURL !== "string") {
+    return void 0;
+  }
+  let search;
+  try {
+    search = new URL(targetURL).search;
+  } catch {
+    return void 0;
+  }
+  const session = wantedSession(search);
+  return session === void 0 ? void 0 : { repo: wantedName(search), session };
+};
+var receiverEligible = (state, repo) => {
+  const free = state.appWindow && state.view === "sessions" && !state.signedOut && !state.asking;
+  return free && state.tabNames.includes(repo);
+};
+var linkStep = (place2, link) => {
+  const selected = place2.repositories.find((repository) => repository.id === place2.selectedId);
+  const target = link.repo === void 0 ? selected : place2.repositories.find((repository) => repository.name === link.repo);
+  if (place2.signedOut || place2.view !== "sessions" || target === void 0) {
+    return { step: "ignore" };
+  }
+  if (target !== selected) {
+    return { step: "want", session: link.session, switchTo: target, waitFrom: "first-snapshot" };
+  }
+  return place2.wantedSession === link.session ? { step: "keep" } : { step: "want", session: link.session, waitFrom: "now" };
+};
+var startAsk = (deps, link, finish) => {
+  const id = deps.newId();
+  const offers = [];
+  let phase = "collect";
+  let chosen;
+  let cancel = () => {
+  };
+  const end = (outcome) => {
+    if (phase === "done") {
+      return;
+    }
+    phase = "done";
+    cancel();
+    finish(outcome);
+  };
+  const pick = () => {
+    const offer = chooseOffer(offers);
+    if (!offer) {
+      end("fallback");
+      return;
+    }
+    phase = "go";
+    chosen = offer.from;
+    deps.post({ type: "go", id, to: offer.from });
+    cancel = deps.setTimer(() => end("fallback"), ACK_WAIT_MS);
+  };
+  deps.post({ type: "ask", id, repo: link.repo, session: link.session });
+  cancel = deps.setTimer(pick, OFFER_WAIT_MS);
+  return {
+    receive(message) {
+      if (message.id !== id) {
+        return;
+      }
+      if (phase === "collect" && message.type === "offer") {
+        offers.push({ from: message.from, focusedAt: message.focusedAt });
+      } else if (phase === "go" && message.type === "ack" && message.from === chosen) {
+        end("handed");
+      }
+    },
+    cancel() {
+      phase = "done";
+      cancel();
+    }
+  };
+};
+var createAnswerer = (deps) => {
+  const offered = /* @__PURE__ */ new Map();
+  return {
+    receive(message) {
+      if (message.type === "ask") {
+        if (!deps.eligible(message.repo)) {
+          return;
+        }
+        offered.delete(message.id);
+        offered.set(message.id, { repo: message.repo, session: message.session });
+        for (const old of offered.keys()) {
+          if (offered.size <= OFFERS_KEPT) {
+            break;
+          }
+          offered.delete(old);
+        }
+        deps.post({ type: "offer", id: message.id, from: deps.id, focusedAt: deps.focusedAt() });
+        return;
+      }
+      if (message.type !== "go" || message.to !== deps.id) {
+        return;
+      }
+      const link = offered.get(message.id);
+      offered.delete(message.id);
+      if (link && deps.eligible(link.repo) && deps.take(link)) {
+        deps.post({ type: "ack", id: message.id, from: deps.id });
+      }
+    }
+  };
+};
+
 // src/ui/overview.ts
 var EASE11 = "cubic-bezier(.2,.8,.2,1)";
 var ENTER3 = [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
@@ -20476,7 +23568,29 @@ var createRow = (key, link) => {
   element.append(dot, keyText, title, value2, bar);
   return { element, dot, key: keyText, title, value: value2, bar, segments: /* @__PURE__ */ new Map() };
 };
-var createRanking = (context, link, reveal) => {
+var createHealthLink = (openHealth) => {
+  const element = el("button", "hlink");
+  element.type = "button";
+  element.hidden = true;
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  const text2 = el("span");
+  element.append(dot, text2, chevronIcon());
+  element.addEventListener("click", () => openHealth(element));
+  let count2 = 0;
+  return {
+    element,
+    draw(report) {
+      const next = report ? costChanges(report) : 0;
+      element.hidden = next === 0;
+      if (next > 0 && next !== count2) {
+        setText(text2, costLinkText(next));
+      }
+      count2 = next;
+    }
+  };
+};
+var createRanking = (context, link, openHealth, reveal) => {
   overviewCount += 1;
   const element = el("div", link ? "overview-panel overview-ranking linkable" : "overview-panel overview-ranking");
   const head = el("div", "overview-head");
@@ -20505,6 +23619,10 @@ var createRanking = (context, link, reveal) => {
   const toggleLabel = el("span");
   toggle.append(toggleLabel, chevronIcon());
   element.append(head, columns, top, more, toggle);
+  const healthLink = openHealth ? createHealthLink(openHealth) : void 0;
+  if (healthLink) {
+    element.append(healthLink.element);
+  }
   const rows = /* @__PURE__ */ new Map();
   let open2 = false;
   let drawn = false;
@@ -20585,6 +23703,9 @@ var createRanking = (context, link, reveal) => {
   };
   return {
     element,
+    health(report) {
+      healthLink?.draw(report);
+    },
     highlight(tickets) {
       lit = tickets;
       for (const [key, row2] of rows) {
@@ -20613,10 +23734,10 @@ var createRanking = (context, link, reveal) => {
       const arranged = JSON.stringify([keysOf3(ranking.top), keysOf3(ranking.rest)]);
       const moved = arranged !== arrangement;
       arrangement = arranged;
-      const before = /* @__PURE__ */ new Map();
+      const before2 = /* @__PURE__ */ new Map();
       if (motion && drawn && moved) {
         for (const [key, row2] of rows) {
-          before.set(key, row2.element.getBoundingClientRect().top);
+          before2.set(key, row2.element.getBoundingClientRect().top);
         }
       }
       const grow = [];
@@ -20637,7 +23758,7 @@ var createRanking = (context, link, reveal) => {
           row2.element.animate(ENTER3, { duration: ENTER_MS2, easing: EASE11 });
         }
         for (const [key, row2] of rows) {
-          const from = before.get(key);
+          const from = before2.get(key);
           if (from === void 0) {
             continue;
           }
@@ -20653,7 +23774,7 @@ var createRanking = (context, link, reveal) => {
     }
   };
 };
-var createOverview = (host, context, link) => {
+var createOverview = (host, context, link, openHealth) => {
   const element = el("section", "overview");
   element.setAttribute("aria-label", "Board overview");
   element.hidden = true;
@@ -20669,7 +23790,7 @@ var createOverview = (host, context, link) => {
     element.dataset.panels = String(shown);
     element.hidden = shown === 0;
   };
-  const ranking = createRanking(context, link, (shown) => {
+  const ranking = createRanking(context, link, openHealth, (shown) => {
     ranking.element.hidden = !shown;
     layout();
   });
@@ -20723,6 +23844,9 @@ var createOverview = (host, context, link) => {
         layout();
       }
     },
+    health(report) {
+      ranking.health(report);
+    },
     link(next) {
       linked = next;
       ranking.highlight(next?.tickets);
@@ -20748,7 +23872,7 @@ var FIXTURE_ANNOUNCEMENTS = {
 };
 var FIXTURE_NOTE_MS = 2e3;
 var dispositionName = (header, fallback) => /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
-var plainClick = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
+var plainClick2 = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
 var saveBlob = (blob, name) => {
   const url = URL.createObjectURL(blob);
   const anchor = el("a");
@@ -20808,7 +23932,7 @@ var createFixtureLink = (context, deps = browserDeps()) => {
     }
   };
   element.addEventListener("click", (event) => {
-    if (plainClick(event)) {
+    if (plainClick2(event)) {
       event.preventDefault();
       void save();
     }
@@ -20850,11 +23974,11 @@ var followupColumns = (followups, expanded = /* @__PURE__ */ new Set()) => {
   const ordered = [...followups].sort(compareFollowups);
   return FOLLOWUP_TYPES2.map((type) => {
     const items = ordered.filter((followup) => followup.type === type);
-    const count = items.length;
+    const count2 = items.length;
     const open2 = expanded.has(type);
-    const shown = open2 || count <= SHOWN_ITEMS ? items : items.slice(count - SHOWN_ITEMS);
-    const toggle = count <= SHOWN_ITEMS ? "" : open2 ? "Show fewer" : `Show all (${count})`;
-    return { type, title: WORDS[type].title, items, shown, count, toggle };
+    const shown = open2 || count2 <= SHOWN_ITEMS ? items : items.slice(count2 - SHOWN_ITEMS);
+    const toggle = count2 <= SHOWN_ITEMS ? "" : open2 ? "Show fewer" : `Show all (${count2})`;
+    return { type, title: WORDS[type].title, items, shown, count: count2, toggle };
   });
 };
 var newFollowups = (previous, next) => {
@@ -20975,9 +24099,9 @@ var createSessionFollowupsView = (host, context, options) => {
     element.dataset.type = type;
     element.style.setProperty("--c", flyColor(type));
     const title = el("span", "followup-column-title");
-    const count = el("span", "followup-column-count", "0");
+    const count2 = el("span", "followup-column-count", "0");
     const head = el("h4");
-    head.append(iconOf(type), title, count);
+    head.append(iconOf(type), title, count2);
     const list = el("div", "followup-list");
     const empty = el("div", "followup-empty", "None yet");
     const more = el("button", "show-all");
@@ -20993,7 +24117,7 @@ var createSessionFollowupsView = (host, context, options) => {
     });
     element.append(head, list, empty, more);
     grid.append(element);
-    return { type, head, title, count, list, empty, more };
+    return { type, head, title, count: count2, list, empty, more };
   };
   const columnOf = (type) => {
     let column = columns.get(type);
@@ -21049,10 +24173,10 @@ var createSessionFollowupsView = (host, context, options) => {
     const entering = section2.hidden;
     section2.hidden = false;
     if (animate && entering) {
-      section2.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE8 });
+      section2.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE3 });
     } else if (animate) {
       for (const element of entered) {
-        element.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE8 });
+        element.animate(ENTER_FRAMES, { duration: ENTER_MS3, easing: EASE3 });
       }
     }
   };
@@ -21080,7 +24204,7 @@ var createSessionFollowupsView = (host, context, options) => {
       const land = () => {
         remove();
         if (folded && !destroyed) {
-          total.animate(BUMP_FRAMES, { duration: BUMP_MS, easing: EASE8 });
+          total.animate(BUMP_FRAMES, { duration: BUMP_MS, easing: EASE3 });
         }
       };
       chip.animate(flyFrames(origin, target), { duration: FLY_MS3, easing: FLY_EASE3, fill: "forwards" }).finished.then(land, remove);
@@ -21141,13 +24265,13 @@ var isEnded2 = (state) => !isActive2(state) && state !== "pending" && state !== 
 var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
 var SHEEN_STATES = ["done", "approved", "changes"];
 var sheensOf = (previous, current, pops) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const before2 = new Map(previous.items.map((item2) => [item2.key, item2]));
   const sheens = [];
   for (const item2 of current.items) {
     if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
       continue;
     }
-    const old = before.get(item2.key);
+    const old = before2.get(item2.key);
     if (old?.kind === "node" && old.state === "running" && old.stale !== true) {
       const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
       sheens.push({ key: item2.key, delay: pop + POP_MS2 });
@@ -21156,10 +24280,10 @@ var sheensOf = (previous, current, pops) => {
   return sheens;
 };
 var rollsOf = (previous, current, pops) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const before2 = new Map(previous.items.map((item2) => [item2.key, item2]));
   const rolls = [];
   for (const item2 of current.items) {
-    const old = before.get(item2.key);
+    const old = before2.get(item2.key);
     if (item2.kind !== "node" || item2.state !== "changes" || item2.count === void 0 || old?.kind !== "node") {
       continue;
     }
@@ -21173,10 +24297,10 @@ var rollsOf = (previous, current, pops) => {
   return rolls;
 };
 var foldsOf = (previous, current) => {
-  const before = foldedPipelines(previous.session, previous.expanded);
+  const before2 = foldedPipelines(previous.session, previous.expanded);
   const after = foldedPipelines(current.session, current.expanded);
-  const opened = [...before].filter((index) => !after.has(index)).map((pipeline) => ({ pipeline, open: true }));
-  const closed = [...after].filter((index) => !before.has(index)).map((pipeline) => ({ pipeline, open: false }));
+  const opened = [...before2].filter((index) => !after.has(index)).map((pipeline) => ({ pipeline, open: true }));
+  const closed = [...after].filter((index) => !before2.has(index)).map((pipeline) => ({ pipeline, open: false }));
   return [...opened, ...closed].sort((a, b) => a.pipeline - b.pipeline);
 };
 var edgeLength = (edge, positions) => {
@@ -21214,7 +24338,7 @@ var chain = (queue, current) => {
     if (!next) {
       continue;
     }
-    const lengthOf = (keys2) => keys2.reduce((sum, key) => sum + edgeLength(edges.get(key), positions), 0);
+    const lengthOf = (keys2) => keys2.reduce((sum2, key) => sum2 + edgeLength(edges.get(key), positions), 0);
     const first = lengthOf(worktree.edges);
     const total = first + lengthOf(next.edges);
     const merged = { edges: [...worktree.edges, ...next.edges], color: worktree.color, to: next.to, stops: [{ key: pill, share: total > 0 ? first / total : 0.5 }] };
@@ -21224,14 +24348,14 @@ var chain = (queue, current) => {
   return chained;
 };
 var dotsOf2 = (previous, current, unfolded) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const before2 = new Map(previous.items.map((item2) => [item2.key, item2]));
   const edgeItems = new Map(current.items.filter((item2) => item2.kind === "edge").map((item2) => [item2.key, item2]));
   const queue = [];
   const fans = /* @__PURE__ */ new Map();
   const dotted = current.items.filter((item2) => (item2.kind === "node" || item2.kind === "pill" || item2.kind === "bar") && item2.dot !== void 0);
   for (const item2 of dotted) {
     const dot = item2.dot;
-    const old = before.get(item2.key);
+    const old = before2.get(item2.key);
     if (!old && item2.pipeline !== void 0 && unfolded.has(item2.pipeline)) {
       continue;
     }
@@ -21250,7 +24374,7 @@ var dotsOf2 = (previous, current, unfolded) => {
       if (handsBack && dot.back) {
         queue.push({ edges: dot.edges, color: dot.color, reverse: true });
       }
-      const out = (dot.out ?? []).filter((key) => edgeItems.has(key) && before.has(targetKey(edgeItems.get(key))));
+      const out = (dot.out ?? []).filter((key) => edgeItems.has(key) && before2.has(targetKey(edgeItems.get(key))));
       if (handsBack && out.length > 0 && out.length === (dot.out ?? []).length) {
         queue.push({ edges: out, color: dot.color });
       }
@@ -21460,7 +24584,7 @@ var createSessionGraphView = (host, context) => {
 
 // src/ui/session-id.ts
 var SESSION_ID_LENGTH = 8;
-var COPIED_TEXT = "copied";
+var COPIED_TEXT2 = "copied";
 var COPIED_MS = 1200;
 var shortSessionId = (id) => id.slice(0, SESSION_ID_LENGTH);
 var sessionIdTitle = (id) => `Claude Code session ${id} \xB7 click to copy`;
@@ -21519,7 +24643,7 @@ var createSessionIdButton = () => {
   let id = "";
   const render = () => {
     const copied = feedback.active;
-    setText(element, copied ? COPIED_TEXT : shortSessionId(id));
+    setText(element, copied ? COPIED_TEXT2 : shortSessionId(id));
     setText(status, copied ? sessionIdAnnouncement(id) : "");
   };
   const feedback = createCopyFeedback({ write: clipboardWrite, change: render });
@@ -21551,7 +24675,7 @@ var NO_VERIFICATION = "No verification runs";
 var VERIFY_NOTE = "Failures count non-zero exits and test, tsc or ESLint failures in the output tail.";
 var TOOLS_NOTE = "Response sizes as Claude Code reports them: an image Read counts its encoded image, an Edit or Write echoes the file.";
 var OVERHEAD_NOTE = "Estimate from character counts, 3 characters per token.";
-var NO_OVERHEAD = "\u2013";
+var NO_OVERHEAD2 = "\u2013";
 var NO_OVERHEAD_NOTE = "Not recorded for this session: its hook predates the overhead count.";
 var NO_RESUMES = "No resumes";
 var OVERHEAD_PARTS = [
@@ -21621,10 +24745,10 @@ var overheadCost = (usd) => {
 };
 var overheadView = (overhead) => {
   if (!overhead) {
-    return { head: NO_OVERHEAD, bars: [], note: NO_OVERHEAD_NOTE };
+    return { head: NO_OVERHEAD2, bars: [], note: NO_OVERHEAD_NOTE };
   }
-  const percent = ((Number.isFinite(overhead.share) ? Math.max(0, overhead.share) : 0) * 100).toFixed(1);
-  const head = `\u2248\xA0${tokens(overhead.tokens)} tokens \xB7 ${overheadCost(overhead.usd)} \xB7 ${percent}\xA0% of cost`;
+  const percent2 = ((Number.isFinite(overhead.share) ? Math.max(0, overhead.share) : 0) * 100).toFixed(1);
+  const head = `\u2248\xA0${tokens(overhead.tokens)} tokens \xB7 ${overheadCost(overhead.usd)} \xB7 ${percent2}% of cost`;
   const bars = [];
   for (const { key, label } of OVERHEAD_PARTS) {
     const part = overhead.parts[key];
@@ -21802,7 +24926,9 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
   resumes.body.append(resumesHead, resumeList);
   left.append(agents.element, verification.element, resumes.element);
   right.append(branches2.element, tools.element, overhead.element);
-  inner.append(left, right);
+  const health = el("div", "hsum");
+  health.hidden = true;
+  inner.append(left, right, health);
   clip3.append(inner);
   panel.append(clip3);
   host.append(panel);
@@ -21848,6 +24974,20 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     element.append(cache, el("span", "summary-verify-mean", row2.usd));
     return element;
   };
+  const healthChip = (chip) => {
+    const element = el("span", "hchip");
+    const dot = el("i");
+    dot.setAttribute("aria-hidden", "true");
+    element.append(dot, el("span", void 0, `${chip.headline}: ${chip.value}`));
+    return element;
+  };
+  let drawnHealth;
+  const drawHealth = (session) => {
+    drawnHealth = context.health;
+    const chips = context.health ? sessionChips2(context.health, session.id) : [];
+    health.hidden = chips.length === 0;
+    health.replaceChildren(...chips.length > 0 ? [el("h4", "details-heading", "In workflow health"), ...chips.map(healthChip)] : []);
+  };
   const draw2 = (session) => {
     const metrics = metricsOf(session);
     const markOf2 = (model) => modelMark(model, context.config.modelLetters);
@@ -21872,6 +25012,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     resumesHead.className = continued.rows.length > 0 ? "summary-overhead-head" : "summary-empty";
     resumeList.replaceChildren(...continued.rows.map(resumeLine));
     resumeList.hidden = continued.rows.length === 0;
+    drawHealth(session);
   };
   let current;
   let shown = false;
@@ -21935,7 +25076,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
         shown = true;
         button.hidden = false;
         if (!first && !context.reducedMotion()) {
-          button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE8 });
+          button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE3 });
         }
       }
       first = false;
@@ -21944,6 +25085,9 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
       }
     },
     frame() {
+      if (open2 && current && context.health !== drawnHealth) {
+        drawHealth(current);
+      }
     },
     destroy() {
       destroyed = true;
@@ -21991,7 +25135,7 @@ var cumulativeSeries = (points, startMs, packages) => {
     }
   }
   const upper = [];
-  own.forEach((column, position) => upper.push(column.map((count, knot) => count + (position > 0 ? upper[position - 1][knot] : 0))));
+  own.forEach((column, position) => upper.push(column.map((count2, knot) => count2 + (position > 0 ? upper[position - 1][knot] : 0))));
   return { times, keys: keys2, upper };
 };
 var chartSpan = (endMs) => Math.max(MIN_SPAN_MS2, endMs);
@@ -22017,7 +25161,7 @@ var bucketSeries = (series, endMs, columns) => {
   return { times, keys: series.keys, upper };
 };
 var plotX = (plot, ms) => PAD_X + ms / plot.spanMs * (plot.width - 2 * PAD_X);
-var plotY = (plot, count) => plot.height - FLOOR - count / plot.top * (plot.height - FLOOR - CEIL);
+var plotY2 = (plot, count2) => plot.height - FLOOR - count2 / plot.top * (plot.height - FLOOR - CEIL);
 var topTarget = (total) => Math.max(MIN_TOP, total * TOP_FACTOR);
 var easeTop = (top, target, instant) => {
   if (top === void 0 || instant) {
@@ -22030,9 +25174,9 @@ var fixed3 = (value2) => Math.round(value2 * 10) / 10;
 var linePath = (xs, ys) => xs.map((x, i) => `${i === 0 ? "M" : "L"}${fixed3(x)} ${fixed3(ys[i])}`).join(" ");
 var stackPaths = (plot, times, upper, lower) => {
   const xs = times.map((time2) => plotX(plot, time2));
-  const line = linePath(xs, upper.map((count) => plotY(plot, count)));
+  const line = linePath(xs, upper.map((count2) => plotY2(plot, count2)));
   const floor = lower ?? upper.map(() => 0);
-  const back = xs.map((x, i) => `L${fixed3(x)} ${fixed3(plotY(plot, floor[i]))}`).reverse();
+  const back = xs.map((x, i) => `L${fixed3(x)} ${fixed3(plotY2(plot, floor[i]))}`).reverse();
   return { area: `${line} ${back.join(" ")} Z`, line };
 };
 var needsRedraw = (drawn, next) => {
@@ -22045,7 +25189,7 @@ var needsRedraw = (drawn, next) => {
   const pixel = chartSpan(next.endMs) / Math.max(1, next.width - 2 * PAD_X);
   return Math.abs(next.endMs - drawn.endMs) >= pixel;
 };
-var GROUPS = [
+var GROUPS2 = [
   { label: "Plan", includes: (stage) => stage === "plan" },
   { label: "Implement", includes: (stage) => stage.startsWith("implement:") },
   { label: "Review", includes: (stage) => stage === "review" },
@@ -22060,13 +25204,13 @@ var totalRows = (byStage, packages) => {
     const entry = Object.hasOwn(byStage, stage) ? byStage[stage] : void 0;
     return entry ? processedTokens(entry) : 0;
   };
-  const sums = GROUPS.map((group) => order.filter(group.includes).reduce((sum, stage) => sum + counts(stage), 0));
+  const sums = GROUPS2.map((group) => order.filter(group.includes).reduce((sum2, stage) => sum2 + counts(stage), 0));
   const max = Math.max(1, ...sums);
   const segmentOf = (stage) => {
     const width = counts(stage) / max * 100;
     return { stage, color: stageKeyColor(stage), title: stageKeyTitle(stage, packages), width };
   };
-  return GROUPS.map((group, i) => {
+  return GROUPS2.map((group, i) => {
     const filled = order.filter((stage) => group.includes(stage) && counts(stage) > 0);
     const segments = filled.map(segmentOf);
     return { label: group.label, total: sums[i], value: tokens(sums[i]), segments };
@@ -22115,7 +25259,7 @@ var createSessionTokensView = (host, context) => {
   root.append(details, toggle);
   host.append(root);
   clip3.inert = true;
-  const rowViews = GROUPS.map((group) => {
+  const rowViews = GROUPS2.map((group) => {
     const row2 = el("div", "tokens-row off");
     const bar = el("span", "tokens-bar");
     const value2 = el("span", "tokens-value num", "0");
@@ -22156,17 +25300,17 @@ var createSessionTokensView = (host, context) => {
       let previous;
       for (const segment of model.segments) {
         let item2 = view.segments.get(segment.stage);
-        const percent = `${segment.width}%`;
+        const percent2 = `${segment.width}%`;
         if (!item2) {
           item2 = el("i");
           item2.style.width = "0%";
           view.segments.set(segment.stage, item2);
           const target = item2;
           grow.push(() => {
-            target.style.width = percent;
+            target.style.width = percent2;
           });
         } else {
-          item2.style.width = percent;
+          item2.style.width = percent2;
         }
         setVars(item2, { "--c": segment.color });
         item2.title = segment.title;
@@ -22205,7 +25349,7 @@ var createSessionTokensView = (host, context) => {
       chart.setAttribute("viewBox", `0 0 ${frame.width} ${CHART_HEIGHT}`);
     }
     GRID_SHARES.forEach((share2, i) => {
-      const y = Math.round(plotY(plot, frame.top / TOP_FACTOR * share2)) + 0.5;
+      const y = Math.round(plotY2(plot, frame.top / TOP_FACTOR * share2)) + 0.5;
       const line = grid[i];
       line.setAttribute("x1", "0");
       line.setAttribute("x2", String(frame.width));
@@ -22366,13 +25510,13 @@ var createSessionCard = (context, onToggle, onHover) => {
   element.append(header, errorNote, hosts.chips, hosts.graph, hosts.questions, followupsBody.element, body.element, hosts.strip, logBody.element, tokensBody.element);
   const bubbleOf = (questionId) => hosts.graph.querySelector(`[data-question-ids~="${CSS.escape(questionId)}"]`) ?? hosts.graph;
   const questions = createSessionQuestionsView(hosts.questions, context, { layer: element, flySource: bubbleOf });
-  const listed = SESSION_VIEWS.map(({ host, make }) => ({ host: hosts[host], view: make(hosts[host], context) }));
-  const nodeView = listed.find((entry) => entry.view.agentNode)?.view;
+  const listed2 = SESSION_VIEWS.map(({ host, make }) => ({ host: hosts[host], view: make(hosts[host], context) }));
+  const nodeView = listed2.find((entry) => entry.view.agentNode)?.view;
   const agentNodeOf = (agentId) => nodeView?.agentNode?.(agentId) ?? hosts.graph;
   const followups = createSessionFollowupsView(hosts.followups, context, { layer: element, flySource: agentNodeOf, collapsed: () => collapsed ?? false });
   const summary = createSessionSummaryView(hosts.summary, context, sessionMetrics, { collapsed: () => collapsed ?? false, expand: () => onToggle(true) });
   meta.insertBefore(summary.button, toggle.element);
-  const mounted = [...listed, { host: hosts.questions, view: questions }, { host: hosts.followups, view: followups }, { host: hosts.summary, view: summary }];
+  const mounted = [...listed2, { host: hosts.questions, view: questions }, { host: hosts.followups, view: followups }, { host: hosts.summary, view: summary }];
   const views = mounted.map((entry) => entry.view);
   const folded = () => views.find((view) => view.folded)?.folded?.() ?? /* @__PURE__ */ new Set();
   let linkBranch;
@@ -22704,7 +25848,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     }
     return flights;
   };
-  const play2 = ({ before, change, rowRects, flights, emptyWasHidden }) => {
+  const play2 = ({ before: before2, change, rowRects, flights, emptyWasHidden }) => {
     const morphing = /* @__PURE__ */ new Set();
     for (const card of change.entered) {
       const from = rowRects.get(card.element.dataset.session ?? "");
@@ -22712,14 +25856,14 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
         morphFrom(card.element, from);
         morphing.add(card.element);
       } else {
-        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE8, fill: "backwards" });
+        card.element.animate(ENTER2, { duration: ENTER_MS, easing: EASE3, fill: "backwards" });
       }
     }
-    glide(before, measure(), morphing);
-    const folded = change.folded.reduce((sum, card) => sum + card.element.offsetHeight + flowGap(card.element), 0);
-    const count = panel.count.getBoundingClientRect();
+    glide(before2, measure(), morphing);
+    const folded = change.folded.reduce((sum2, card) => sum2 + card.element.offsetHeight + flowGap(card.element), 0);
+    const count2 = panel.count.getBoundingClientRect();
     for (const flight of flights) {
-      const animation = fly(flight.from, { left: count.left, top: count.top - folded }, flight.text, flight.land);
+      const animation = fly(flight.from, { left: count2.left, top: count2.top - folded }, flight.text, flight.land);
       inFlight.add(animation);
       const done = () => inFlight.delete(animation);
       animation.finished.then(done, done);
@@ -22737,7 +25881,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     const finishedChanged = !sameList(split.finished, panel.ids());
     const changed = stackChanged || conversationsChanged || finishedChanged;
     const motion = changed && !firstUpdate && !context.reducedMotion();
-    const before = motion ? measure() : /* @__PURE__ */ new Map();
+    const before2 = motion ? measure() : /* @__PURE__ */ new Map();
     const tops = motion ? offsetTops() : /* @__PURE__ */ new Map();
     const emptyWasHidden = empty.hidden === true;
     const moved = new Set(conversations.ids().filter((id) => split.stack.includes(id)));
@@ -22764,7 +25908,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     updateFootnote();
     lightRows();
     if (motion) {
-      play2({ before, change, rowRects, flights, emptyWasHidden });
+      play2({ before: before2, change, rowRects, flights, emptyWasHidden });
     }
     firstUpdate = false;
     prune();
@@ -22854,119 +25998,279 @@ var createSignInNotice = () => {
   return notice;
 };
 
-// src/ui/tabs.ts
-var TAB_PARAM = "repo";
-var wantedName = (search) => new URLSearchParams(search).get(TAB_PARAM) || void 0;
-var tabUrl = (href, name) => {
-  const url = new URL(href);
-  url.searchParams.set(TAB_PARAM, name);
-  return `${url.pathname}${url.search}${url.hash}`;
-};
-var VIEW_PARAM = "view";
-var pageView = (search) => new URLSearchParams(search).get(VIEW_PARAM) === "runs" ? "runs" : "sessions";
-var SESSION_PARAM = "session";
-var wantedSession = (search) => new URLSearchParams(search).get(SESSION_PARAM) || void 0;
-var withoutSession = (href) => {
-  const url = new URL(href);
-  url.searchParams.delete(SESSION_PARAM);
-  return `${url.pathname}${url.search}${url.hash}`;
-};
-var SESSION_WAIT_MS = 1e4;
-var sessionLinkStep = (canOpen, waitedMs) => {
-  if (canOpen) {
-    return "jump";
-  }
-  return waitedMs !== void 0 && waitedMs >= SESSION_WAIT_MS ? "drop" : "wait";
-};
-var mostRecentlyActive = (list) => {
-  let newest3;
-  for (const repository of list) {
-    if (!newest3 || (repository.lastLineAt ?? "") > (newest3.lastLineAt ?? "")) {
-      newest3 = repository;
+// src/ui/update.ts
+var SKIP_KEY = "nurselog.skipVersion";
+var NOTES_SHOWN = 6;
+var COPY_TEXT2 = "Copy";
+var COPIED_TEXT3 = "Copied";
+var COPY_FAILED_TEXT2 = "Select and copy";
+var COPY_RESET_MS2 = 1600;
+var POPOVER_ID = "update-popover";
+var TITLE_ID2 = "update-title";
+var ROOM_GAP = 12;
+var ENTER_MS5 = 420;
+var DOT_MS2 = 520;
+var DOT_DELAY_MS = 220;
+var OPEN_MS3 = 220;
+var CLOSE_MS2 = 140;
+var LEAVE_MS = 220;
+var GLIDE_ENTER = { duration: ENTER_MS5, easing: EASE3 };
+var GLIDE_LEAVE = { duration: LEAVE_MS, easing: "ease-in" };
+var ENTER_FRAMES2 = [{ opacity: 0, transform: "translateX(12px) scale(.96)" }, { opacity: 1, transform: "none" }];
+var DOT_FRAMES = [{ transform: "scale(0)" }, { transform: "scale(1.5)", offset: 0.6 }, { transform: "none" }];
+var OPEN_FRAMES = [{ opacity: 0, transform: "translateY(-6px) scale(.97)" }, { opacity: 1, transform: "none" }];
+var CLOSE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px) scale(.98)" }];
+var LEAVE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateX(8px) scale(.96)" }];
+var versionParts = (version) => version.split(".").map(Number);
+var newestFirst3 = (a, b) => {
+  const left = versionParts(a.version);
+  const right = versionParts(b.version);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (right[index] ?? 0) - (left[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
     }
   }
-  return newest3;
+  return 0;
 };
-var selectRepository = (list, wanted, currentId) => {
-  const current = currentId === void 0 ? void 0 : list.find((repository) => repository.id === currentId);
-  const named = wanted === void 0 ? void 0 : list.find((repository) => repository.name === wanted);
-  return current ?? named ?? mostRecentlyActive(list);
+var noteItems = (notes) => {
+  const all = [...notes].sort(newestFirst3).flatMap((note) => note.items);
+  return { items: all.slice(0, NOTES_SHOWN), more: all.length > NOTES_SHOWN };
 };
-var tabViews = (list, selectedId) => list.map((repository) => {
-  const running = Math.max(0, repository.running);
-  const waiting = Math.max(0, repository.waiting);
-  const label = `${repository.name}: ${running} running, ${waiting} waiting for you`;
-  return { id: repository.id, name: repository.name, running, waiting, selected: repository.id === selectedId, label };
-});
-var plainClick2 = (event) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
-var waitingTotal = (list) => list.reduce((sum, repository) => sum + Math.max(0, repository.waiting), 0);
-var documentTitle = (list, selected, label) => {
-  if (!selected) {
-    return label;
-  }
-  const waiting = waitingTotal(list);
-  const count = waiting > 0 ? `(${waiting}) ` : "";
-  return `${count}${selected.name} \xB7 ${label}`;
+var restartNote = () => {
+  const note = el("p", "update-restart");
+  const first = "The board closes itself within 10 seconds; the next session start, or ";
+  const second = ", starts the new version. Running sessions keep the old one until ";
+  note.append(first, el("code", void 0, "nurselog open"), second, el("code", void 0, "/reload-plugins"), ".");
+  return note;
 };
-var inView = (start, end, viewStart, viewEnd) => start >= viewStart - 0.5 && end <= viewEnd + 0.5;
-var hiddenWaiting = (boxes, viewStart, viewEnd) => {
-  let start;
-  let end;
-  for (const box of boxes) {
-    if (box.waiting <= 0) {
-      continue;
+var createUpdateButton = (options) => {
+  const element = el("div", "topbar-update");
+  element.hidden = true;
+  const button = el("button", "button update-button");
+  button.type = "button";
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-controls", POPOVER_ID);
+  button.setAttribute("aria-haspopup", "dialog");
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  const label = el("span", "update-label", "Update");
+  label.append(el("span", "update-more", " available"));
+  const version = el("span", "update-version");
+  button.append(dot, label, version);
+  const popover = el("div", "update-popover");
+  popover.id = POPOVER_ID;
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-labelledby", TITLE_ID2);
+  popover.hidden = true;
+  const title = el("h3", "update-title");
+  title.id = TITLE_ID2;
+  title.tabIndex = -1;
+  const current = el("span", "update-current");
+  const head = el("div", "update-head");
+  head.append(title, current);
+  const notesHeading = el("p", "update-heading", "What's new");
+  const notes = el("ul", "update-notes");
+  const allChanges = el("a", "update-all", "All changes");
+  allChanges.target = "_blank";
+  allChanges.rel = "noopener";
+  const command = el("code");
+  const copy = el("button", "button update-copy", COPY_TEXT2);
+  copy.type = "button";
+  const commandBox = el("div", "update-command");
+  commandBox.append(command, copy);
+  const laterButton = el("button", "button", "Remind me later");
+  laterButton.type = "button";
+  const skipButton = el("button", "update-skip", "Skip this version");
+  skipButton.type = "button";
+  const actions = el("div", "update-actions");
+  actions.append(laterButton, skipButton);
+  popover.append(head, notesHeading, notes, allChanges, el("p", "update-heading", "Update"), commandBox, restartNote(), actions);
+  element.append(button, popover);
+  let notice = null;
+  let noticeKey = "";
+  let deferred = false;
+  let shown = false;
+  let open2 = false;
+  let leaving;
+  let glides = [];
+  let copyReset;
+  const draw2 = (next) => {
+    setText(version, next.latest);
+    setText(title, `Nurselog ${next.latest}`);
+    setText(current, `You have ${next.current}`);
+    const { items, more } = noteItems(next.notes);
+    notes.replaceChildren(...items.map((item2) => el("li", void 0, item2)));
+    notesHeading.hidden = items.length === 0;
+    notes.hidden = items.length === 0;
+    const url = more ? next.changesUrl : void 0;
+    allChanges.hidden = url === void 0;
+    if (url === void 0) {
+      allChanges.removeAttribute("href");
+    } else {
+      allChanges.href = url;
     }
-    const spanStart = Math.min(box.nameStart, box.badgeStart);
-    const spanEnd = Math.max(box.nameEnd, box.badgeEnd);
-    const fits = spanEnd - spanStart <= viewEnd - viewStart + 1;
-    const shownStart = fits ? spanStart : box.nameStart;
-    const shownEnd = fits ? spanEnd : box.nameEnd;
-    if (shownStart < viewStart - 0.5 && (!start || box.start > start.start)) {
-      start = box;
+    setText(command, next.command);
+  };
+  const setOpen2 = (next) => {
+    if (next === open2) {
+      return;
     }
-    if (shownEnd > viewEnd + 0.5 && (!end || box.end < end.end)) {
-      end = box;
+    open2 = next;
+    button.setAttribute("aria-expanded", String(next));
+    for (const animation of popover.getAnimations()) {
+      animation.cancel();
     }
-  }
-  return { start: start?.id, end: end?.id };
-};
-var tabNameId = (id) => `repo-tab-${id}-name`;
-var INCHWORM_REACH = 0.42;
-var inchwormFrames = (from, to) => {
-  const left = Math.min(from.left, to.left);
-  const right = Math.max(from.left + from.width, to.left + to.width);
-  return [{ left: from.left, width: from.width }, { left, width: right - left, offset: INCHWORM_REACH }, { left: to.left, width: to.width }];
-};
-var centredScroll = (tab, viewWidth, scrollWidth) => {
-  const left = tab.left - (viewWidth - tab.width) / 2;
-  return Math.min(Math.max(0, left), Math.max(0, scrollWidth - viewWidth));
-};
-var travelDirection = (ids, fromId, toId) => {
-  const from = fromId === void 0 ? -1 : ids.indexOf(fromId);
-  const to = toId === void 0 ? -1 : ids.indexOf(toId);
-  return from >= 0 && to >= 0 && to < from ? -1 : 1;
-};
-var badgeMotion = (previous, next, selected) => {
-  const bump = previous !== void 0 && next > previous;
-  return { bump, ping: bump && !selected };
-};
-var keyTarget = (ids, currentId, key) => {
-  const index = ids.indexOf(currentId);
-  if (index < 0) {
-    return void 0;
-  }
-  switch (key) {
-    case "ArrowRight":
-      return ids[(index + 1) % ids.length];
-    case "ArrowLeft":
-      return ids[(index - 1 + ids.length) % ids.length];
-    case "Home":
-      return ids[0];
-    case "End":
-      return ids[ids.length - 1];
-    default:
-      return void 0;
-  }
+    if (next) {
+      popover.hidden = false;
+      const room = window.innerHeight - popover.getBoundingClientRect().top - ROOM_GAP;
+      popover.style.maxHeight = room > 0 ? `${Math.floor(room)}px` : "";
+      if (!options.reducedMotion()) {
+        popover.animate(OPEN_FRAMES, { duration: OPEN_MS3, easing: EASE3 });
+      }
+      title.focus({ preventScroll: true });
+      return;
+    }
+    const done = () => {
+      if (!open2) {
+        popover.hidden = true;
+      }
+    };
+    if (options.reducedMotion()) {
+      done();
+      return;
+    }
+    const fade = popover.animate(CLOSE_FRAMES, { duration: CLOSE_MS2, easing: "ease-in", fill: "forwards" });
+    fade.finished.then(done, () => void 0);
+  };
+  const place2 = (hidden, timing) => {
+    if (options.reducedMotion()) {
+      element.hidden = hidden;
+      return;
+    }
+    const items = Array.from(element.parentElement?.children ?? []).filter((item2) => item2 !== element);
+    const before2 = new Map(items.map((item2) => [item2, item2.getBoundingClientRect()]));
+    for (const glide2 of glides) {
+      glide2.cancel();
+    }
+    element.hidden = hidden;
+    glides = [];
+    for (const [item2, from] of before2) {
+      const to = item2.getBoundingClientRect();
+      const dx = from.left - to.left;
+      const dy = from.top - to.top;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        glides.push(item2.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], timing));
+      }
+    }
+  };
+  const enter = () => {
+    shown = true;
+    leaving?.cancel();
+    leaving = void 0;
+    if (element.hidden) {
+      place2(false, GLIDE_ENTER);
+    }
+    if (options.reducedMotion()) {
+      return;
+    }
+    button.animate(ENTER_FRAMES2, { duration: ENTER_MS5, easing: EASE3 });
+    dot.animate(DOT_FRAMES, { duration: DOT_MS2, delay: DOT_DELAY_MS, easing: EASE3, fill: "backwards" });
+  };
+  const leave = () => {
+    shown = false;
+    setOpen2(false);
+    const gone = () => {
+      if (shown) {
+        return;
+      }
+      if (element.contains(document.activeElement)) {
+        element.previousElementSibling?.focus({ preventScroll: true });
+      }
+      place2(true, GLIDE_LEAVE);
+      for (const animation of button.getAnimations()) {
+        animation.cancel();
+      }
+    };
+    if (options.reducedMotion()) {
+      gone();
+      return;
+    }
+    leaving = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS, easing: "ease-in", fill: "forwards" });
+    leaving.finished.then(gone, gone);
+  };
+  const sync = () => {
+    const wanted = notice !== null && !deferred && readValue(SKIP_KEY, true) !== notice.latest;
+    if (wanted && !shown) {
+      enter();
+    } else if (!wanted && shown) {
+      leave();
+    }
+  };
+  button.addEventListener("click", () => {
+    if (shown) {
+      setOpen2(!open2);
+    }
+  });
+  copy.addEventListener("click", () => {
+    const text2 = notice?.command;
+    if (text2 === void 0) {
+      return;
+    }
+    const done = (copied) => {
+      setText(copy, copied ? COPIED_TEXT3 : COPY_FAILED_TEXT2);
+      window.clearTimeout(copyReset);
+      copyReset = window.setTimeout(() => setText(copy, COPY_TEXT2), COPY_RESET_MS2);
+    };
+    try {
+      navigator.clipboard.writeText(text2).then(() => done(true), () => done(false));
+    } catch {
+      done(false);
+    }
+  });
+  laterButton.addEventListener("click", () => {
+    deferred = true;
+    button.focus({ preventScroll: true });
+    sync();
+  });
+  skipButton.addEventListener("click", () => {
+    if (notice) {
+      writeValue(SKIP_KEY, notice.latest, true);
+    }
+    button.focus({ preventScroll: true });
+    sync();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!open2 || event.key !== "Escape") {
+      return;
+    }
+    const focused = document.activeElement;
+    const inside = focused === button || focused !== null && popover.contains(focused);
+    setOpen2(false);
+    if (inside) {
+      button.focus({ preventScroll: true });
+    }
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (open2 && !element.contains(event.target)) {
+      setOpen2(false);
+    }
+  });
+  return {
+    element,
+    show(next) {
+      const key = next === null ? "" : JSON.stringify(next);
+      if (key === noticeKey) {
+        return;
+      }
+      noticeKey = key;
+      notice = next;
+      if (next) {
+        draw2(next);
+      }
+      sync();
+    }
+  };
 };
 
 // src/ui/topbar.ts
@@ -22992,11 +26296,11 @@ var tabCount = (kind) => {
   }
   return element;
 };
-var setCount = (count, value2) => {
-  setText(count.lastElementChild ?? count, String(value2));
-  count.hidden = value2 === 0;
+var setCount = (count2, value2) => {
+  setText(count2.lastElementChild ?? count2, String(value2));
+  count2.hidden = value2 === 0;
 };
-var px2 = (span) => ({ left: `${span.left}px`, width: `${span.width}px` });
+var px3 = (span) => ({ left: `${span.left}px`, width: `${span.width}px` });
 var createTopBar = (host, options) => {
   const brand = el("div", "topbar-brand");
   const name = el("strong", "topbar-name", "Nurselog");
@@ -23032,6 +26336,8 @@ var createTopBar = (host, options) => {
   warnings.append(button, list);
   status.append(connection, github, warnings);
   appendLegend(status, host);
+  const update = createUpdateButton({ reducedMotion: options.reducedMotion });
+  status.append(update.element);
   host.replaceChildren(brand, status);
   const sentinel = el("div", "topbar-sentinel");
   sentinel.setAttribute("aria-hidden", "true");
@@ -23068,7 +26374,7 @@ var createTopBar = (host, options) => {
       }
     });
     element.addEventListener("click", (event) => {
-      if (!plainClick2(event)) {
+      if (!plainClick(event)) {
         return;
       }
       event.preventDefault();
@@ -23158,7 +26464,7 @@ var createTopBar = (host, options) => {
       settle();
       return;
     }
-    const frames = inchwormFrames(from, to).map((frame) => ({ ...frame, ...px2(frame) }));
+    const frames = inchwormFrames(from, to).map((frame) => ({ ...frame, ...px3(frame) }));
     const move = indicator.animate(frames, { duration: INCHWORM_MS, easing: INCHWORM_EASE });
     inchworm = move;
     const done = () => {
@@ -23176,9 +26482,9 @@ var createTopBar = (host, options) => {
     }
   };
   const rearrange = (change) => {
-    const before = /* @__PURE__ */ new Map();
+    const before2 = /* @__PURE__ */ new Map();
     for (const tab of tabs.values()) {
-      before.set(tab.element, tab.element.getBoundingClientRect().left);
+      before2.set(tab.element, tab.element.getBoundingClientRect().left);
     }
     const indicatorLeft = placed ? indicator.getBoundingClientRect().left : void 0;
     const selected = selectedTab();
@@ -23191,7 +26497,7 @@ var createTopBar = (host, options) => {
     if (options.reducedMotion()) {
       return;
     }
-    for (const [element, left] of before) {
+    for (const [element, left] of before2) {
       if (element.isConnected) {
         glideFrom(element, left);
       }
@@ -23348,9 +26654,9 @@ var createTopBar = (host, options) => {
     updateEdges();
   });
   const applyTabs = (views, entering) => {
-    const listed = new Set(views.map((view) => view.id));
+    const listed2 = new Set(views.map((view) => view.id));
     for (const [id, tab] of tabs) {
-      if (!listed.has(id)) {
+      if (!listed2.has(id)) {
         tabs.delete(id);
         leaveTab(tab);
       }
@@ -23417,16 +26723,16 @@ var createTopBar = (host, options) => {
       setText(github, gh.text);
       github.dataset.tone = gh.tone;
       github.title = gh.text;
-      const count = board.warnings.length;
-      setText(button, plural(count, "warning"));
-      button.disabled = count === 0;
-      button.dataset.tone = count === 0 ? "none" : "some";
+      const count2 = board.warnings.length;
+      setText(button, plural(count2, "warning"));
+      button.disabled = count2 === 0;
+      button.dataset.tone = count2 === 0 ? "none" : "some";
       const newest3 = board.warnings.slice(-WARNINGS_SHOWN).reverse();
       const key = newest3.map((line) => `${line.at} ${line.text}`).join("\n");
       const changed = key !== shownKey;
       shown = newest3;
       shownKey = key;
-      if (count === 0) {
+      if (count2 === 0) {
         setOpen2(false);
       } else if (changed && !list.hidden) {
         renderList(options.now());
@@ -23476,6 +26782,9 @@ var createTopBar = (host, options) => {
           setText(element, ago(clock - at));
         }
       }
+    },
+    setUpdate(notice) {
+      update.show(notice);
     }
   };
 };
@@ -23489,13 +26798,16 @@ var parseSessionView = (data) => {
     if (!valid) {
       return void 0;
     }
-    const listed = Array.isArray(view.summaries) ? view.summaries : [];
-    const summaries = listed.map((summary) => Array.isArray(summary.branches) ? summary : { ...summary, branches: [] });
+    const listed2 = Array.isArray(view.summaries) ? view.summaries : [];
+    const summaries = listed2.map((summary) => Array.isArray(summary.branches) ? summary : { ...summary, branches: [] });
     const repositories = Array.isArray(view.repositories) ? view.repositories : [];
     const parsed = { ...view, summaries, repositories };
     const typical = view.typical;
     if (typeof typical !== "object" || typical === null || Array.isArray(typical)) {
       delete parsed.typical;
+    }
+    if (typeof view.insightsAt !== "string") {
+      delete parsed.insightsAt;
     }
     return parsed;
   } catch {
@@ -23529,7 +26841,7 @@ var branchLabels = (board, canOpen) => {
   const runsOn = (branch) => branchRunIds(board.branches, branch).flatMap((id) => board.runs[id] ?? []);
   return (branch) => runsOn(branch).flatMap((run) => run.key ?? run.title ?? []);
 };
-var RETRY_MS = 5e3;
+var RETRY_MS2 = 5e3;
 var OUT_MS = 150;
 var OUT_SHIFT = 16;
 var OUT_EASE = "cubic-bezier(.4,0,1,1)";
@@ -23542,6 +26854,8 @@ var RISE_STAGGER_MS = 45;
 var RISE_ITEMS = 9;
 var TOP_GAP = 12;
 var EASE13 = "cubic-bezier(.2,.8,.2,1)";
+var UPDATE_POLL_MS = 15 * 60 * 1e3;
+var UPDATE_FOLLOW_UP_MS = 15 * 1e3;
 var parseBoard = (data) => {
   try {
     const board = JSON.parse(String(data));
@@ -23561,7 +26875,7 @@ var emptied = (snapshot) => {
   }
   return { ...snapshot, runs: {}, order: [] };
 };
-var startBoard = async (source) => {
+var startBoard = async (source, options = {}) => {
   const topBarHost = document.getElementById("topbar");
   const boardHost = document.getElementById("board");
   if (!topBarHost || !boardHost) {
@@ -23575,6 +26889,7 @@ var startBoard = async (source) => {
   clock.configure({ replay, speed });
   const now = () => clock.now(Date.now());
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const appWindow = window.matchMedia(APP_WINDOW_QUERY);
   const reducedMotion = () => motion.matches;
   const view = pageView(window.location.search);
   const parse2 = view === "sessions" ? parseSessionView : parseBoard;
@@ -23593,10 +26908,28 @@ var startBoard = async (source) => {
   let failed = false;
   let signedOut = false;
   let wantedSessionId = view === "sessions" ? wantedSession(window.location.search) : void 0;
-  let firstSnapshotAt;
+  let waitFrom;
+  let handOff;
+  let ask;
+  let handOffNote;
+  let signInNotice;
+  const releaseHandOff = () => {
+    ask?.cancel();
+    ask = void 0;
+    handOff = void 0;
+    handOffNote?.remove();
+    handOffNote = void 0;
+    if (signInNotice && !signInNotice.isConnected) {
+      boardHost.append(signInNotice);
+    }
+  };
   const select = (id) => {
     const next = repositories.find((repository) => repository.id === id);
     if (next) {
+      if (handOff === "handed") {
+        drewStack = true;
+      }
+      releaseHandOff();
       void show(next);
     }
   };
@@ -23607,11 +26940,17 @@ var startBoard = async (source) => {
   });
   connection.set("connecting");
   const badge = createAppBadge(navigator);
-  window.addEventListener("pagehide", () => badge.clear());
+  window.addEventListener("pagehide", () => {
+    if (appWindow.matches) {
+      badge.clear();
+    }
+  });
   const drawTabs = () => {
     topBar.setTabs(repositories, selected?.id);
     document.title = documentTitle(repositories, selected, source.label);
-    badge.set(waitingTotal(repositories));
+    if (appWindow.matches) {
+      badge.set(waitingTotal(repositories));
+    }
     if (selected) {
       boardHost.setAttribute("aria-labelledby", tabNameId(selected.id));
     } else {
@@ -23646,6 +26985,18 @@ var startBoard = async (source) => {
       window.location.reload();
     }
   };
+  let updateAsk = 0;
+  const checkUpdate = async () => {
+    if (!source.update || signedOut) {
+      return;
+    }
+    updateAsk += 1;
+    const own = updateAsk;
+    const notice = await source.update();
+    if (own === updateAsk && !signedOut && notice !== void 0) {
+      topBar.setUpdate(notice);
+    }
+  };
   const checkList = async (own) => {
     const list = await source.repositories();
     if (list === SIGNED_OUT) {
@@ -23664,6 +27015,7 @@ var startBoard = async (source) => {
         if (failed) {
           failed = false;
           void checkRestart();
+          void checkUpdate();
         }
       },
       message(data) {
@@ -23688,7 +27040,7 @@ var startBoard = async (source) => {
         }
         stream.close();
         connection.set("disconnected");
-        retry = window.setTimeout(() => connect(own), RETRY_MS);
+        retry = window.setTimeout(() => connect(own), RETRY_MS2);
       }
     });
     events = stream;
@@ -23709,7 +27061,9 @@ var startBoard = async (source) => {
     }
     stack?.destroy();
     previous.overview?.destroy();
+    previous.strip?.destroy();
     clearSnapshot(previous.context);
+    previous.context.health = void 0;
     host.classList.add("leaving");
     if (reducedMotion()) {
       host.remove();
@@ -23727,8 +27081,9 @@ var startBoard = async (source) => {
       window.scrollTo({ top, behavior: "auto" });
     }
   };
-  const riseItems = (host) => {
-    const visible = (element) => element.getClientRects().length > 0;
+  const riseItems = (current, host) => {
+    const showsSoon = (element) => element === current.strip?.element && current.strip.waiting();
+    const visible = (element) => element.getClientRects().length > 0 || showsSoon(element);
     const risesAlone = (element) => ["card", "overview-panel"].some((name) => element.classList.contains(name));
     const items = [];
     for (const child of host.children) {
@@ -23754,7 +27109,7 @@ var startBoard = async (source) => {
       const below = { filter: "opacity(0)", transform: `translateY(${RISE_SHIFT}px)` };
       const rise = [below, { filter: "opacity(1)", transform: "none" }];
       const rising = [];
-      for (const [index, item2] of riseItems(host).entries()) {
+      for (const [index, item2] of riseItems(current, host).entries()) {
         const delay = RISE_DELAY_MS + index * RISE_STAGGER_MS;
         rising.push(item2.animate(rise, { duration: RISE_MS, delay, easing: EASE13, fill: "backwards" }));
       }
@@ -23837,6 +27192,29 @@ var startBoard = async (source) => {
     };
   };
   const canOpenOf = (current) => (sessionId) => current.stack?.canOpen?.(sessionId) ?? false;
+  const guardStrip = (step) => {
+    try {
+      step();
+    } catch (error) {
+      console.error("Nurselog: the workflow health strip failed to draw; the cards go on.", error);
+    }
+  };
+  const openReport = (current, link, opener, filter) => {
+    openHealthReport({
+      opener,
+      report: () => current.context.health,
+      filter,
+      opens: (sessionId) => link.opens({ kind: "session", sessionId }),
+      open: (sessionId) => link.open({ kind: "session", sessionId })
+    });
+  };
+  const repositoryName = (current) => repositories.find((item2) => item2.id === current.id)?.name ?? "";
+  const drawStrip = (current, board) => {
+    const strip = current.strip;
+    if (strip && isSessionView(board)) {
+      guardStrip(() => strip.update(board.insightsAt));
+    }
+  };
   const guardOverview = (step) => {
     try {
       step();
@@ -23881,6 +27259,7 @@ var startBoard = async (source) => {
   const drawStack = (current, board) => {
     if (current.stack) {
       drawOverview(current, board);
+      drawStrip(current, board);
       current.stack.update(board);
       return;
     }
@@ -23892,8 +27271,21 @@ var startBoard = async (source) => {
     const switched = drewStack;
     drewStack = true;
     drawn = current;
+    if (link) {
+      const refresh = () => guardOverview(() => current.overview?.health(current.context.health));
+      const reporter = healthReporter(current.context, () => repositoryName(current), refresh);
+      const hooks = {
+        report: (insights) => guardStrip(() => reporter(insights)),
+        open: (opener, filter) => openReport(current, link, opener, filter)
+      };
+      guardStrip(() => {
+        current.strip = createHealthStrip(current.context, hooks);
+        host.prepend(current.strip.element);
+      });
+    }
+    const openHealth = link ? (opener) => openReport(current, link, opener, { impact: "cost" }) : void 0;
     guardOverview(() => {
-      current.overview = createOverview(host, current.context, link);
+      current.overview = createOverview(host, current.context, link, openHealth);
       current.overview.mountBranches((panelHost) => {
         const branches2 = createBranchesOverview(panelHost, current.context, link);
         const labelsOf = (branch) => current.branchLabels?.(branch) ?? [];
@@ -23908,6 +27300,7 @@ var startBoard = async (source) => {
       showLegend(current.context.config);
     });
     drawOverview(current, board);
+    drawStrip(current, board);
     current.stack.update(board);
     if (switched) {
       enter(current, host);
@@ -23915,12 +27308,12 @@ var startBoard = async (source) => {
   };
   const settleSessionLink = () => {
     const sessionId = wantedSessionId;
-    if (sessionId === void 0) {
+    if (sessionId === void 0 || handOff !== void 0) {
       return;
     }
     const entered = drawn?.entering === void 0 || drawn.entering.playState === "finished";
     const opens = drawn !== void 0 && entered && canOpenOf(drawn)(sessionId);
-    const waited = firstSnapshotAt === void 0 ? void 0 : Date.now() - firstSnapshotAt;
+    const waited = waitFrom === void 0 ? void 0 : Date.now() - waitFrom;
     const step = sessionLinkStep(opens, waited);
     if (step === "jump") {
       drawn?.host?.dispatchEvent(new CustomEvent(SESSION_LINK, { detail: { sessionId } }));
@@ -23931,8 +27324,10 @@ var startBoard = async (source) => {
   };
   const tick = (time2) => {
     requestAnimationFrame(tick);
-    if (pending && latest && shown) {
+    let drew = false;
+    if (pending && latest && shown && handOff === void 0) {
       pending = false;
+      drew = true;
       const board = latest;
       takeSnapshot(shown.context, board);
       topBar.update(board);
@@ -23941,15 +27336,16 @@ var startBoard = async (source) => {
       if (shown.linkSource) {
         relink(shown);
       }
-      firstSnapshotAt ??= Date.now();
+      waitFrom ??= Date.now();
       settleSessionLink();
       follow(board.repositories);
-    } else {
-      settleSessionLink();
     }
     const clockNow = now();
     topBar.frame(clockNow);
     drawn?.stack?.frame(clockNow, time2);
+    if (!drew) {
+      settleSessionLink();
+    }
     guardOverview(() => drawn?.overview?.frame(clockNow, time2));
   };
   const signOut = () => {
@@ -23972,20 +27368,122 @@ var startBoard = async (source) => {
     selected = void 0;
     drawTabs();
     connection.set("disconnected");
-    boardHost.append(createSignInNotice());
+    signInNotice = createSignInNotice();
+    if (handOff !== "handed") {
+      boardHost.append(signInNotice);
+    }
     const check2 = async () => {
       if (Array.isArray(await source.repositories())) {
         window.location.reload();
         return;
       }
-      retry = window.setTimeout(() => void check2(), RETRY_MS);
+      retry = window.setTimeout(() => void check2(), RETRY_MS2);
     };
-    retry = window.setTimeout(() => void check2(), RETRY_MS);
+    retry = window.setTimeout(() => void check2(), RETRY_MS2);
   };
+  const receiveLink = (link) => {
+    const step = linkStep({ view, signedOut, repositories, selectedId: selected?.id, wantedSession: wantedSessionId }, link);
+    if (step.step !== "want") {
+      return step.step === "keep";
+    }
+    if (step.switchTo) {
+      void show(step.switchTo);
+    }
+    waitFrom = step.waitFrom === "now" ? Date.now() : void 0;
+    wantedSessionId = step.session;
+    return true;
+  };
+  const setTimer = (callback, ms) => {
+    const handle = window.setTimeout(callback, ms);
+    return () => window.clearTimeout(handle);
+  };
+  const showHandedOff = () => {
+    if (handOff !== "handed") {
+      return;
+    }
+    const note = el("p", "board-note hand-off-note");
+    note.setAttribute("role", "status");
+    const showHere = el("button", "hand-off-show", SHOW_HERE_TEXT);
+    showHere.type = "button";
+    showHere.addEventListener("click", releaseHandOff);
+    note.append(`${HANDED_OFF_TEXT} `, showHere);
+    boardHost.append(note);
+    handOffNote = note;
+  };
+  const startLinkHandOff = () => {
+    if (typeof BroadcastChannel !== "function") {
+      return;
+    }
+    const channel = new BroadcastChannel(HAND_OFF_CHANNEL);
+    const post = (message) => channel.postMessage(message);
+    let focusedAt = document.hasFocus() ? Date.now() : 0;
+    const noteFocus = () => {
+      focusedAt = Date.now();
+    };
+    window.addEventListener("focus", noteFocus);
+    window.addEventListener("blur", noteFocus);
+    const eligible = (repo) => {
+      const tabNames = repositories.map((repository) => repository.name);
+      const state = { appWindow: appWindow.matches, view, signedOut, asking: handOff !== void 0, tabNames };
+      return receiverEligible(state, repo);
+    };
+    const lastFocus = () => document.hasFocus() ? Date.now() : focusedAt;
+    const answerer = createAnswerer({ post, id: crypto.randomUUID(), eligible, focusedAt: lastFocus, take: receiveLink });
+    channel.addEventListener("message", (event) => {
+      const message = parseHandOffMessage(event.data);
+      if (message) {
+        ask?.receive(message);
+        answerer.receive(message);
+      }
+    });
+    const link = view === "sessions" ? askLink(window.location.search) : void 0;
+    if (link === void 0) {
+      return;
+    }
+    handOff = "asking";
+    ask = startAsk({ post, setTimer, newId: () => crypto.randomUUID() }, link, (outcome) => {
+      ask = void 0;
+      if (outcome === "fallback") {
+        handOff = void 0;
+        return;
+      }
+      handOff = "handed";
+      signInNotice?.remove();
+      window.close();
+      window.setTimeout(showHandedOff, CLOSE_WAIT_MS);
+    });
+  };
+  const consumeLaunches = () => {
+    window.launchQueue?.setConsumer((params) => {
+      const link = launchLink(params.targetURL);
+      if (link) {
+        receiveLink(link);
+      }
+    });
+  };
+  const guardHandOff = (step, undo) => {
+    try {
+      step();
+    } catch (error) {
+      undo?.();
+      console.error("Nurselog: the link hand-off failed to start; the board goes on without it.", error);
+    }
+  };
+  if (options.linkHandOff) {
+    guardHandOff(startLinkHandOff, releaseHandOff);
+  }
   if (firstList === SIGNED_OUT) {
     signOut();
   } else {
     void show(selectRepository(repositories, wantedName(window.location.search), void 0));
+  }
+  if (options.linkHandOff) {
+    guardHandOff(consumeLaunches);
+  }
+  if (source.update) {
+    void checkUpdate();
+    window.setTimeout(() => void checkUpdate(), UPDATE_FOLLOW_UP_MS);
+    window.setInterval(() => void checkUpdate(), UPDATE_POLL_MS);
   }
   requestAnimationFrame(tick);
 };
@@ -23993,37 +27491,31 @@ var startBoard = async (source) => {
 // src/ui/live-demo-source.ts
 var DEMO_FIXTURES = ["web-only", "api-first", "handed-back"];
 var DEMO_CONFIG_PATH = "fixtures/nurselog.config.json";
+var DEMO_AGGREGATES_PATH = "fixtures/aggregates.ndjson";
 var DEMO_SPEED = 50;
 var RELOAD_AFTER_MS = 2e4;
 var THROTTLE_MS = 100;
 var DEMO_REPOSITORY_ID = "demo";
 var DEMO_LABEL = "Nurselog demo";
-var activityAt = (text2) => {
-  let line;
-  try {
-    line = JSON.parse(text2);
-  } catch {
-    return void 0;
-  }
-  const { src, at } = line ?? {};
-  const time2 = typeof at === "string" && src !== "server" ? Date.parse(at) : Number.NaN;
-  return Number.isNaN(time2) ? void 0 : new Date(time2).toISOString();
-};
 var demoRepositoryName = (githubRepo) => githubRepo.split("/").pop() || "replay";
-var bodyOf = (answer) => answer.status === 200 ? JSON.parse(JSON.stringify(answer.body)) : void 0;
+var throughJson = (value2) => JSON.parse(JSON.stringify(value2));
+var bodyOf = (answer) => answer.status === 200 ? throughJson(answer.body) : void 0;
 var createLiveDemo = (texts, options = {}) => {
   const speed = options.speed ?? DEMO_SPEED;
   const startedAt = options.startedAt ?? (/* @__PURE__ */ new Date()).toISOString();
   const config = configOf(JSON.parse(texts.config), options.warn);
   const name = demoRepositoryName(config.github.repo);
   const ui = uiConfig(config, name);
-  const store = createStore(config);
+  const warn2 = options.warn ?? (() => void 0);
+  const sample2 = createSampleReport({ text: texts.aggregates, insights: config.insights, startAt: replayStartAt(texts.fixtures), onError: warn2 });
+  const store = createStore(config, { onFinish: (sessionId, finishedAt) => sample2.noteFinish(sessionId, finishedAt) });
   const handle = createLineHandler(store, config);
   let lastLineAt;
-  const repository = { id: DEMO_REPOSITORY_ID, name, store, lastLineAt: () => lastLineAt, typical: () => ({}) };
+  const repository = { id: DEMO_REPOSITORY_ID, name, store, lastLineAt: () => lastLineAt, typical: () => ({}), insights: () => sample2.current() };
   const replay = replayFixtureTexts(texts.fixtures, speed, (text2) => {
     handle(text2);
     lastLineAt = activityAt(text2) ?? lastLineAt;
+    sample2.noteLine(lineAt(text2), store);
   });
   const health = { mode: "replay", speed, startedAt };
   const ours = (repositoryId) => repositoryId === DEMO_REPOSITORY_ID;
@@ -24068,7 +27560,12 @@ var createLiveDemo = (texts, options = {}) => {
         if (closed) {
           return;
         }
-        unsubscribe = store.subscribe(schedule);
+        const unsubscribeStore = store.subscribe(schedule);
+        const unsubscribeInsights = sample2.subscribe(schedule);
+        unsubscribe = () => {
+          unsubscribeStore();
+          unsubscribeInsights();
+        };
       }, 0);
       return {
         close() {
@@ -24085,6 +27582,10 @@ var createLiveDemo = (texts, options = {}) => {
         return void 0;
       }
       return bodyOf(sessionBody(store, sessionId, agentId));
+    },
+    async insights(repositoryId, signal) {
+      const report = readable(repositoryId, signal) ? sample2.current() : null;
+      return report === null ? null : throughJson({ report, setup: workflowSetupOf(config) });
     }
   };
   return { source, done: replay.done, stop: () => replay.stop() };
@@ -24103,8 +27604,11 @@ var readText = async (read, path) => {
 };
 var fetchDemoTexts = async (read = fetch) => {
   const paths = DEMO_FIXTURES.map((name) => `fixtures/${name}.ndjson`);
-  const [config, ...fixtures] = await Promise.all([DEMO_CONFIG_PATH, ...paths].map((path) => readText(read, path)));
-  return { config, fixtures };
+  const texts = await Promise.all([DEMO_CONFIG_PATH, ...paths, DEMO_AGGREGATES_PATH].map((path) => readText(read, path)));
+  const config = texts[0];
+  const fixtures = texts.slice(1, -1);
+  const aggregates = texts[texts.length - 1];
+  return { config, fixtures, aggregates };
 };
 var failureText = (error) => {
   const reason = error instanceof Error ? error.message : String(error);

@@ -1,0 +1,319 @@
+/* The workflow health strip and its map (design section 15, "Workflow health strip"; decision 158), ported from the
+   workflow health styles of reference/demo.html. health-strip.ts draws the strip between the board panels and the card
+   stack of a session view. The colours are the tokens of board.css. The header is the toggle, its chevron the keyboard
+   control, and "Open report" (.hso, a .button) sits at its right; the body opens with a grid-rows transition and the
+   map fades and rises on the same one. The map: seven steps on one line, each a button that opens the report, four
+   columns without the line at 980 px and narrower, one column on a vertical line at 760 px and narrower. */
+
+.hstrip { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+.hsh {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 12px 10px 8px; border-radius: 14px;
+  cursor: pointer; transition: background .2s;
+}
+.hsh:hover { background: var(--card-2); }
+.hstrip.open .hsh { border-radius: 14px 14px 0 0; }
+/* a report without a work session: the header with its note, no toggle */
+.hstrip.empty .hsh { cursor: default; padding-left: 14px; }
+.hstrip.empty .hsh:hover { background: transparent; }
+.hsx {
+  display: grid; place-items: center; width: 24px; height: 24px; margin-right: -6px; border: 0; background: transparent;
+  border-radius: 6px; cursor: pointer; color: var(--fg-3); flex: none; padding: 0;
+}
+.hsx svg { width: 12px; height: 12px; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.hsx[aria-expanded="true"] svg { transform: none; }
+.hsh h2 { font-size: 13.5px; }
+.hsc { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg); }
+.hsc i { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.hsu, .hsn { color: var(--fg-3); font-size: 12px; }
+.hsu { margin-left: auto; }
+.hso { flex: none; }
+.hsb { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.hsb.open { grid-template-rows: 1fr; }
+.hsb > div { overflow: hidden; min-height: 0; }
+.hsb .wmap { opacity: 0; transform: translateY(-10px) scale(.985); transition: opacity .3s ease, transform .5s var(--ease); }
+.hsb.open .wmap { opacity: 1; transform: none; transition: opacity .4s ease .08s, transform .5s var(--ease); }
+.wmap {
+  list-style: none; margin: 0; padding: 4px 12px 12px; transform-origin: top center; position: relative;
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.wmap li { position: relative; min-width: 0; }
+/* one line from the first step to the last */
+.wmap .wline {
+  position: absolute; top: 21px; left: calc(12px + (100% - 24px) / 14); right: calc(12px + (100% - 24px) / 14);
+  height: 1px; background: var(--border-2); transform-origin: left center; pointer-events: none;
+}
+.wn {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; border: 0;
+  background: transparent; border-radius: 10px; padding: 10px 6px 8px; color: var(--fg-2); text-align: center;
+  cursor: pointer; transition: background .2s;
+}
+.wn:hover { background: var(--card-2); }
+/* inside the body's clip, so the ring sits within the step */
+.wn:focus-visible { outline-offset: -2px; }
+/* the dot: a dashed ring (not measured, not in this workflow), an amber ring (to consider), amber (to change) or a
+   green ring with a tick (working well) */
+.wd {
+  width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; background: var(--card);
+  border: 1.5px dashed var(--fg-3); margin-bottom: 6px; position: relative;
+}
+.wn.change .wd { background: var(--amber); border: 1.5px solid var(--amber); }
+.wn.consider .wd { border: 2px solid var(--amber); }
+.wn.ok .wd { border: 1.5px solid var(--rev); }
+.wn.ok .wd::after {
+  content: ""; position: absolute; left: 3.5px; top: 1.5px; width: 3px; height: 6px; border: solid var(--rev);
+  border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+}
+.wl { font-size: 12.5px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+.wn.absent .wl { color: var(--fg-3); }
+/* the setup line wraps in the column layouts, balanced, and keeps one line's height when empty (the main thread's), so
+   the verdicts of a row line up; a role name without a break point wraps anywhere rather than spilling over */
+.ws {
+  font: 500 10px var(--f-mono); color: var(--fg-3); max-width: 100%; min-height: 1lh; white-space: normal;
+  text-wrap: balance; overflow-wrap: anywhere;
+}
+.wv { font-size: 12px; line-height: 1.35; margin-top: 3px; color: var(--fg-3); overflow-wrap: anywhere; }
+.wn.change .wv { color: var(--fg); }
+.wn.consider .wv { color: var(--fg-2); }
+.wv b { font: 600 10.5px var(--f-mono); color: var(--amber); margin-left: .35em; }
+/* a step whose verdict or "+N" changed between two reports */
+.wn.bump .wd { animation: health-bump .5s var(--ease); }
+@keyframes health-bump { 35% { transform: scale(1.12); } }
+@media (max-width: 980px) {
+  .wmap { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 6px; }
+  .wmap .wline { display: none; }
+}
+@media (max-width: 760px) {
+  .hsh h2 { flex: 1 1 auto; }
+  .hso { order: 2; }
+  .hsc { order: 3; flex-basis: calc(100% - 30px); margin-left: 30px; }
+  .hsu { order: 4; flex-basis: calc(100% - 30px); margin: -4px 0 0 30px; }
+  .wmap { grid-template-columns: 1fr; row-gap: 0; }
+  .wmap .wline {
+    display: block; top: calc(4px + (100% - 16px) / 14); bottom: calc(12px + (100% - 16px) / 14); left: 30px;
+    right: auto; width: 1px; height: auto; transform-origin: center top;
+  }
+  /* each step a row: the dot, the name over the setup line, and the verdict at the right */
+  .wn {
+    display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; grid-template-areas: "d l v" "d s v";
+    align-items: center; gap: 0 12px; text-align: left; padding: 8px 8px 8px 11px;
+  }
+  .wd { grid-area: d; margin: 0; }
+  .wl { grid-area: l; }
+  /* in the row layout the setup line keeps one line with an ellipsis (its title holds the full text), and an empty one
+     takes no height */
+  .ws { grid-area: s; min-height: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wv { grid-area: v; margin: 0; text-align: right; max-width: 46vw; }
+}
+
+/* The report in the main-thread modal's health mode (design section 15, "Workflow health report"; decisions 159 and
+   160), after the demo's "the report in the modal" with its suggested changes: health-report-view.ts draws it,
+   modal.ts shows it in a wider box in place of the turns. The impacts take the demo's colours, the tokens --imp-cost, --imp-time and --imp-quality of board.css. The token ranking's link (.hlink,
+   overview.ts) and the Summary panel's "In workflow health" (.hsum, summary.ts) follow the report's end. */
+.main-box.health-mode { width: min(920px, 100%); }
+.main-box.health-mode .main-empty, .main-box.health-mode .main-latest, .main-box.health-mode .main-earlier { display: none; }
+.main-box:not(.health-mode) .hrep { display: none; }
+.hrep { flex: none; display: flex; flex-direction: column; gap: 16px; }
+/* the filters: two labelled segmented controls, in the toolbar's visual language */
+.hflt { display: flex; flex-direction: column; gap: 8px; }
+.hfr { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 12px; }
+.hfk { font: 600 10px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
+.hseg {
+  display: flex; gap: 2px; justify-self: start; max-width: 100%; overflow-x: auto; scrollbar-width: none;
+  border: 1px solid var(--border-2); border-radius: 9px; padding: 2px; background: var(--page);
+}
+.hseg::-webkit-scrollbar { display: none; }
+/* a control wider than the modal scrolls, its edges faded where there is more */
+.hseg.ofr { mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+.hseg.ofl { mask-image: linear-gradient(90deg, transparent, #000 36px); }
+.hseg.ofl.ofr { mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+.hseg button {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; border: 0; background: transparent; border-radius: 7px;
+  padding: 4px 10px; font-size: 12px; color: var(--fg-2); cursor: pointer; white-space: nowrap; transition: background .2s, color .2s;
+}
+.hseg button:hover { color: var(--fg); }
+.hseg button:focus-visible { outline-offset: -2px; }
+.hseg button[aria-pressed="true"] { background: var(--card-3); color: var(--fg); }
+.hseg button.z { color: var(--fg-3); }
+.hseg .n { font: 500 10.5px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.hseg .n:empty { display: none; }
+.hseg button[aria-pressed="true"] .n { color: var(--fg-2); }
+.hseg i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.hseg i.cost { background: var(--imp-cost); }
+.hseg i.time { background: var(--imp-time); }
+.hseg i.quality { background: var(--imp-quality); }
+.hfsum { display: flex; align-items: center; gap: 10px; margin: 0 0 0 76px; min-height: 22px; font-size: 11.5px; color: var(--fg-3); }
+.hfsum.on { color: var(--fg-2); }
+.hclr {
+  border: 0; background: transparent; padding: 0; font-size: 11.5px; color: var(--fg-2); text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer;
+}
+.hclr:hover { color: var(--fg); }
+.hnone { margin: 0; padding: 18px 0; text-align: center; color: var(--fg-3); font-size: 12.5px; }
+.hnote { margin: 0; color: var(--fg-3); font-size: 12px; border-left: 2px solid var(--border-2); padding: 2px 0 2px 10px; }
+/* the groups, each headed with its count */
+.hgh {
+  margin: 0 0 8px; display: flex; align-items: center; gap: 8px; font: 600 10.5px var(--f-mono); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--fg-3);
+}
+.hg.chg .hgh { color: var(--amber); }
+.hgn { font: 600 10.5px var(--f-mono); color: var(--fg-2); background: var(--card-3); border-radius: 999px; padding: 0 7px; letter-spacing: 0; }
+.hfl { list-style: none; margin: 0; padding: 0; }
+.hg.chg .hfl, .hg.con .hfl { display: flex; flex-direction: column; gap: 10px; }
+/* a finding to change or to consider, verdict first */
+.hf.change, .hf.consider {
+  display: flex; flex-direction: column; gap: 8px; background: var(--card-2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 14px; min-width: 0;
+}
+.hf.consider { background: transparent; border-style: dashed; border-color: var(--border-2); }
+.fdh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.stg {
+  font: 600 10px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--fg-2); background: var(--card-3);
+  border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+}
+.imp {
+  font: 600 10px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; border: 1px solid currentColor;
+  border-radius: 999px; padding: 0 7px; white-space: nowrap;
+}
+.imp.cost { color: var(--imp-cost); }
+.imp.time { color: var(--imp-time); }
+.imp.quality { color: var(--imp-quality); }
+.bas { font-size: 11.5px; color: var(--fg-3); }
+.fdt { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--fg); line-height: 1.3; }
+.fdl { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg-2); max-width: 78ch; }
+/* a suggested change: the "Fix" tag, the fix and its effect under it */
+.fdx { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.ftag {
+  font: 600 10px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink); background: var(--shared);
+  border-radius: 999px; padding: 1px 7px;
+}
+.fdx p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg); max-width: 78ch; }
+.sav { display: block; margin-top: 3px; font: 500 11px var(--f-mono); color: var(--gain); }
+.fda {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+.xb {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; border: 1px solid var(--border-2); background: transparent;
+  border-radius: 7px; padding: 2px 9px; font-size: 12px; color: var(--fg-2); cursor: pointer;
+}
+.xb:hover { color: var(--fg); background: var(--card-3); }
+/* the chevron points down while the change or the evidence is closed and up while it is open */
+.xb svg { width: 11px; height: 11px; transition: transform .3s var(--ease); }
+.fda .xb svg { transform: rotate(180deg); }
+.fda .xb[aria-expanded="true"] svg { transform: none; }
+/* the change and evidence panels open and close on their rows; a closed one takes the gap above it back */
+.xp { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--ease); }
+.xp.open { grid-template-rows: 1fr; }
+.xp > div { overflow: hidden; min-height: 0; }
+.hf.change .xp:not(.open), .hf.consider .xp:not(.open) { margin-top: -8px; }
+/* the change: the file and "Copy added lines" over the lines to add */
+.diff { background: var(--page); border: 1px solid var(--border); border-radius: 8px; margin-top: 2px; }
+.dfh { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--border); }
+.dfh .dff { font: 600 11px var(--f-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* as wide as its widest label, "Copy added lines", so its left edge stays put when the label changes */
+.hcp {
+  margin-left: auto; min-width: 10em; min-height: 24px; border: 1px solid var(--border-2); background: var(--card-2);
+  border-radius: 6px; padding: 1px 8px; font-size: 11px; color: var(--fg-2); text-align: center; cursor: pointer;
+  white-space: nowrap;
+}
+.hcp:hover { color: var(--fg); }
+.diff pre { margin: 0; padding: 6px 0; font: 400 11.5px/1.55 var(--f-mono); white-space: pre-wrap; word-break: break-word; }
+/* a line: the mark in its own column, so a wrapped line hangs beside it; the mark stays out of a selection */
+.dl { display: grid; grid-template-columns: 14px minmax(0, 1fr); padding: 0 10px; }
+.dl i { font-style: normal; color: var(--fg-3); -webkit-user-select: none; user-select: none; }
+.dl.add { background: color-mix(in srgb, var(--gain) 8%, transparent); color: color-mix(in srgb, var(--gain) 45%, var(--fg)); }
+.dl.add i { color: var(--gain); }
+/* the evidence: the setup line, the numbers and the sparkline, then the window's sessions; without a session key in the
+   report the rows leave out the key column */
+.evb { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.evs { margin: 0; font-size: 12.5px; color: var(--fg-2); }
+.evs span { font: 600 10px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); margin-right: 8px; }
+.evm { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 16px; }
+.evm > div { display: flex; flex-direction: column; gap: 1px; }
+.evm span { font: 500 10px var(--f-mono); color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; }
+.evm b { font: 600 13.5px var(--f-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.evm .was b { color: var(--fg-3); }
+.evm .gd b { color: var(--fg-2); font-weight: 500; }
+.hsp { margin-left: auto; max-width: 100%; height: auto; overflow: visible; }
+.hsp .p { fill: var(--fg-3); opacity: .45; }
+.hsp .r { fill: var(--fg-2); }
+.hsp .p.over { fill: var(--amber); opacity: .35; }
+.hsp .r.over { fill: var(--amber); }
+.hsp .hz { fill: var(--fg-3); opacity: .6; }
+.hsp .sep { stroke: var(--border-2); stroke-width: 1; }
+.hsp .hgl { stroke: var(--amber); stroke-width: 1; stroke-dasharray: 3 2; opacity: .75; }
+.hevl { list-style: none; margin: 0; padding: 0 0 4px; }
+.hevr {
+  display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; grid-template-areas: "k t go" ". v v"; gap: 1px 10px;
+  align-items: baseline; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px;
+}
+.hevl.keyless .hevr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "t go" "v v"; }
+.hevr .k { grid-area: k; font: 600 11px var(--f-mono); color: var(--fg); overflow-wrap: anywhere; }
+.hevr .t { grid-area: t; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hevr .v { grid-area: v; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.hevr .go {
+  grid-area: go; min-height: 24px; border: 1px solid var(--border-2); background: transparent; border-radius: 6px; padding: 1px 8px;
+  font-size: 11px; color: var(--fg-2); cursor: pointer; white-space: nowrap;
+}
+.hevr .go:hover { color: var(--fg); background: var(--card-3); }
+/* inside the evidence panel's clip, so the ring sits within the button */
+.hevr .go:focus-visible { outline-offset: -2px; }
+.hevr .go.off { min-height: 0; border: 0; cursor: default; color: var(--fg-3); font: 500 10.5px var(--f-mono); padding: 0; }
+/* working well, for reference and not measured: still there, quieter */
+.hg.okg .hfl, .hg.ifg .hfl, .hg.nmg .hfl { border-top: 1px solid var(--border); }
+.hf.ok, .hf.info, .hf.nm { border-bottom: 1px solid var(--border); }
+.okr {
+  display: grid; grid-template-columns: 120px minmax(0, 1fr) auto 12px; gap: 12px; align-items: center; width: 100%;
+  padding: 8px 4px; border: 0; background: transparent; text-align: left; color: var(--fg-2); font-size: 12.5px;
+}
+.okr .stg { justify-self: start; background: transparent; border: 1px solid var(--border); color: var(--fg-3); }
+button.okr { cursor: pointer; border-radius: 6px; transition: background .2s; }
+button.okr:hover { background: var(--card-2); }
+button.okr:focus-visible { outline-offset: -2px; }
+/* the row's chevron points right while the evidence is closed and down while it is open */
+.okr svg { width: 11px; height: 11px; color: var(--fg-3); transform: rotate(90deg); transition: transform .3s var(--ease); }
+.okr[aria-expanded="true"] svg { transform: rotate(180deg); }
+.okv { font: 500 11.5px var(--f-mono); color: var(--fg-2); white-space: nowrap; }
+.hf.ok .xp > div > .evb, .hf.info .xp > div > .evb { padding: 0 4px 12px 136px; }
+.hf.nm .okr { grid-template-columns: 120px minmax(0, 1fr) auto; padding-bottom: 2px; }
+.hf.nm .okt { color: var(--fg-3); }
+.hnm { font: 500 10.5px var(--f-mono); color: var(--fg-3); border: 1px dashed var(--border-2); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
+.hreason { margin: 0; padding: 0 4px 9px 136px; font-size: 12px; color: var(--fg-3); line-height: 1.45; }
+/* a finding whose group changed between two reports */
+.hf.hflash { animation: health-flash 1.4s ease; }
+@keyframes health-flash { 0%, 30% { background-color: rgba(255, 255, 255, .12); } }
+.hfoot { margin: 0; font-size: 11.5px; color: var(--fg-3); line-height: 1.5; }
+/* the token ranking's link to the report: an amber dot, the text and a chevron turned right */
+.hlink {
+  display: flex; align-items: center; gap: 7px; width: 100%; margin: 8px 0 0; padding: 6px; border: 0;
+  border-top: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--fg-2); font-size: 12px;
+  text-align: left; cursor: pointer; transition: color .2s;
+}
+.hlink:hover { color: var(--fg); }
+.hlink:focus-visible { outline-offset: -2px; }
+.hlink i { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
+.hlink svg { width: 11px; height: 11px; margin-left: auto; color: var(--fg-3); flex: none; transform: rotate(90deg); }
+/* a session's "In workflow health" under both columns of its Summary panel: its .details-heading and the chips with an
+   amber dot */
+.hsum { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 11.5px; color: var(--fg-2); }
+.hsum .details-heading { margin: 0; }
+.hsum .hchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; }
+.hsum i { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
+@media (max-width: 760px) {
+  /* minmax(0, 1fr), so a control wider than the modal scrolls with its faded edge instead of widening the column */
+  .hfr { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .hfsum { margin-left: 0; }
+  /* a quiet row: the step chip over the headline and the value */
+  .okr, .hf.nm .okr { grid-template-columns: minmax(0, 1fr) auto 12px; grid-template-areas: "s s s" "t v c"; gap: 4px 10px; }
+  .hf.nm .okr { grid-template-areas: "s s" "t v"; grid-template-columns: minmax(0, 1fr) auto; }
+  .okr .stg { grid-area: s; }
+  .okr .okt { grid-area: t; }
+  .okr .okv, .hf.nm .hnm { grid-area: v; }
+  .okr svg { grid-area: c; }
+  .hf.ok .xp > div > .evb, .hf.info .xp > div > .evb, .hreason { padding-left: 4px; }
+  .hsp { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wn.bump .wd, .hf.hflash { animation: none; }
+  .hsb, .hsx svg, .hsb .wmap, .hsb.open .wmap, .xp, .xb svg, .okr svg, .wn, .hlink { transition: none; }
+}
