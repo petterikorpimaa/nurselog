@@ -608,7 +608,7 @@ var DEFAULT_CONFIG = {
     baseline: 20,
     minBaseline: 10,
     keepDays: 365,
-    guidelines: { budgetFirstStop: 0.3, quietReviewer: 0.3, overheadShare: 0.01, mainPeakContext: 0.4, mainLargeOutputs: 2, cachePerOutput: { main: 350, agents: 100 } }
+    guidelines: { budgetFirstStop: 0.3, quietReviewer: 0.3, overheadShare: 0.01, mainPeakContext: 0.4, mainLargeOutputs: 2, cachePerOutput: { main: 350, agents: 100 }, mainReadChars: 1e5, mainCheckChars: 2e4, uncheckedSessions: 0.8 }
   },
   retention: { indexHours: 6 },
   server: { host: "127.0.0.1" },
@@ -729,7 +729,10 @@ var DEFAULTED_KEYS = [
   ["insights.guidelines.mainLargeOutputs", LIMIT, isLimit],
   ["insights.guidelines.cachePerOutput", OBJECT, isPlainObject],
   ["insights.guidelines.cachePerOutput.main", POSITIVE_LIMIT, isPositiveLimit],
-  ["insights.guidelines.cachePerOutput.agents", POSITIVE_LIMIT, isPositiveLimit]
+  ["insights.guidelines.cachePerOutput.agents", POSITIVE_LIMIT, isPositiveLimit],
+  ["insights.guidelines.mainReadChars", LIMIT, isLimit],
+  ["insights.guidelines.mainCheckChars", LIMIT, isLimit],
+  ["insights.guidelines.uncheckedSessions", SHARE_LIMIT, isShareLimit]
 ];
 var valueAt = (root, path) => {
   let value2 = root;
@@ -2447,6 +2450,7 @@ ${spawn.paths.map((path) => relativePath(run, path, state.index.worktreeAliases)
 };
 var reviewerWithChanges = (run) => [...run.reviewers].reverse().find((reviewer) => reviewer.state === "changes");
 var sessionReviewerWithChanges = (run, sessionId, sessions) => [...run.reviewers].reverse().find((reviewer) => reviewer.state === "changes" && ownValue(sessions, reviewer.agentId) === sessionId);
+var fixReviewerFor = (run, agent, sessionId, sessions) => sessionReviewerWithChanges(run, ownValue(sessions, agent.id) ?? sessionId, sessions);
 var openFixOf = (fix, agentId, sessionId) => fix.state === "running" && fix.agentId === agentId && (sessionId === void 0 || fix.sessionId === sessionId);
 var startFix = (run, reviewer, streamId, agentId, line, sessionId) => {
   const base = `fix-${streamId ?? "main"}`;
@@ -2526,7 +2530,7 @@ var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
 };
 var startImplementer = (run, agent, target, line, sessions) => {
   endPlan(run, line);
-  const reviewer = reviewerWithChanges(run);
+  const reviewer = fixReviewerFor(run, agent, line.sessionId, sessions);
   if (reviewer) {
     agent.streamId = fixStreamFor(run, target);
     startFix(run, reviewer, agent.streamId, agent.id, line);
@@ -2564,10 +2568,10 @@ var startReviewer = (run, agent, line, config) => {
   }
   checkReview(run, at);
 };
-var resumeRoleStage = (run, agent, line, config) => {
+var resumeRoleStage = (run, agent, line, config, sessions) => {
   const { at } = line;
   const fix = agentFix(run, agent.id);
-  const changes = reviewerWithChanges(run);
+  const changes = fixReviewerFor(run, agent, line.sessionId, sessions);
   const reviewer = run.reviewers.find((item2) => item2.id === agent.reviewerId);
   if (fix && (!fix.reReview || !changes)) {
     fix.state = "running";
@@ -2715,6 +2719,8 @@ var swapBindings = (run, a, b, at) => {
 
 // src/model/metrics.ts
 var VERIFY_KINDS = ["typecheck", "lint", "test"];
+var noStepUse = () => ({ calls: 0, chars: 0, largeOutputs: 0 });
+var newMainSteps = () => ({ calls: 0, explore: noStepUse(), implement: noStepUse(), verify: noStepUse() });
 var processedTokens = (counts) => counts.input + counts.cacheWrite + counts.cacheWrite1h + counts.cacheRead + counts.output;
 var byStart = (a, b) => time(a.startedAt) - time(b.startedAt) || compareText(a.id, b.id);
 var entryOf = (map, key, create) => {
@@ -3311,7 +3317,15 @@ var hookPayloadToEvent = (payload, options) => {
       return { ...envelope, src: "hook", event: "tool.post", data };
     }
     case "PostToolUseFailure": {
-      const data = { ...base, toolUseId: str(payload.tool_use_id) ?? "", tool, durationMs: num(payload.duration_ms), isInterrupt: payload.is_interrupt === true, error: cap(payload.error, FAILURE_ERROR_CHARS) };
+      const data = {
+        ...base,
+        toolUseId: str(payload.tool_use_id) ?? "",
+        tool,
+        durationMs: num(payload.duration_ms),
+        isInterrupt: payload.is_interrupt === true,
+        error: cap(payload.error, FAILURE_ERROR_CHARS),
+        errorChars: num(payload.errorChars)
+      };
       return { ...envelope, src: "hook", event: "tool.fail", data };
     }
     case "PermissionRequest":
@@ -4669,20 +4683,68 @@ var clearItems = (entry) => {
   delete entry.items;
   delete entry.matched;
 };
-var markItems = (entry, path, aliases) => {
+var markWhere = (entry, hit) => {
   const { worktree, items, matched } = entry;
   if (worktree === void 0 || !items || !matched) {
     return false;
   }
   let changed = false;
   items.forEach((item2, index) => {
-    if (!matched[index] && itemPath(worktree, item2, aliases) === path) {
+    if (!matched[index] && hit(item2, worktree)) {
       matched[index] = true;
       changed = true;
     }
   });
   return changed;
 };
+var itemHit = (worktree, item2, paths, aliases) => {
+  const own = itemPath(worktree, item2, aliases);
+  if (own === void 0) {
+    return false;
+  }
+  const suffix = !isAbsolute(item2) && item2.includes("/") ? `/${item2}` : void 0;
+  return paths.some((path) => path === own || path === item2 || suffix !== void 0 && path.endsWith(suffix));
+};
+var markPathItems = (entry, paths, aliases) => markWhere(entry, (item2, worktree) => itemHit(worktree, item2, paths, aliases));
+var WORD_BREAK = /[\s'"`()[\]{}<>,;|&=:#]+/;
+var wordPath = (word, aliases) => {
+  if (isAbsolute(word)) {
+    return resolveAlias(normalizePath(word), aliases);
+  }
+  return word.replace(/^(?:\.\/)+/, "");
+};
+var pathWords = (command, aliases) => {
+  const words = command.split(WORD_BREAK).filter((word) => word !== "");
+  return words.map((word) => wordPath(word, aliases));
+};
+var INTERPRETER = /^(?:python[0-9.]*|node|ruby|perl|bash|sh)$/;
+var NO_FILE_REDIRECT = /[0-9&]*>>?\s*\/dev\/\S*|[0-9]*>&[0-9-]+/g;
+var commandWords = (words) => {
+  const at = words.findIndex((word) => !PREFIX_WORD.test(word));
+  return at < 0 ? [] : words.slice(at);
+};
+var writingCommand = (segment) => {
+  const words = shellWords(segment);
+  const [first = "", ...args] = commandWords(words);
+  const name = first.slice(first.lastIndexOf("/") + 1);
+  if (name === "sed") {
+    return args.some((word) => /^-[a-zA-Z]*i|^--in-place/.test(word));
+  }
+  if (name === "perl" && args.some((word) => /^-[a-z0-9]*i/.test(word))) {
+    return true;
+  }
+  if (name === "tee") {
+    return args.some((word) => !word.startsWith("-") && !word.startsWith("/dev/"));
+  }
+  if (name === "patch") {
+    return true;
+  }
+  if (name === "git") {
+    return gitArgs(words)?.[0] === "apply";
+  }
+  return INTERPRETER.test(name) && segment.code.includes("<<");
+};
+var writesFiles = (command) => shellSegments(command).some((segment) => segment.code.replace(NO_FILE_REDIRECT, "").includes(">") || writingCommand(segment));
 var knowsPr = (run, agentId, config) => {
   const holds = Object.hasOwn(run.agents, agentId) && !isTrunkLike(run.branch, config);
   return holds || run.pr?.openedBy?.agentId === agentId;
@@ -4697,18 +4759,19 @@ var fixPackage = (run, fix, config) => {
   const pkg = config.packages.find((item2) => item2.id === id);
   return pkg && pkg.paths.length > 0 ? pkg.id : void 0;
 };
-var fixItems = (run, fix, config, aliases) => {
-  const reviewers = run.reviewers.filter((reviewer) => reviewer.state === "changes");
+var fixItems = (run, fix, config, aliases, sessions) => {
+  const sessionId = ownValue(sessions, fix.agentId) ?? fix.sessionId;
+  const reviewers = run.reviewers.filter((reviewer) => reviewer.state === "changes" && (sessionId === void 0 || ownValue(sessions, reviewer.agentId) === sessionId));
   const followups = reviewers.flatMap((reviewer) => ownValue(run.agents, reviewer.agentId)?.report?.block?.followups ?? []);
   const files = followups.flatMap((item2) => item2.type === "fix" && item2.file ? [fixItemFile(item2.file, run.worktree, aliases)] : []).filter((file) => file !== "");
   const pkg = fixPackage(run, fix, config);
   const inPackage = pkg === void 0 ? [] : files.filter((file) => packageOf(file, config) === pkg);
   return (inPackage.length > 0 ? inPackage : files).slice(0, PROGRESS_ITEMS_CAP);
 };
-var fixTarget = (run, home, agentId, config, aliases) => {
+var fixTarget = (run, home, agentId, config, aliases, sessions) => {
   const fixRun = agentFix(run, agentId) ? run : home;
   const fix = agentFix(fixRun, agentId);
-  const items = fix ? fixItems(fixRun, fix, config, aliases) : [];
+  const items = fix ? fixItems(fixRun, fix, config, aliases, sessions) : [];
   return items.length > 0 ? { worktree: fixRun.worktree, items } : void 0;
 };
 var matchedPaths = (entry, aliases) => {
@@ -4722,7 +4785,7 @@ var matchedPaths = (entry, aliases) => {
   });
   return paths;
 };
-var openedPaths = (entry, aliases) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry, aliases)]);
+var lookedPaths = (entry, aliases) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry, aliases)]);
 var matchesOf = (worktree, items, paths, aliases) => {
   const real = new Set([...paths].map((path) => resolveAlias(path, aliases)));
   return items.map((item2) => real.has(itemPath(worktree, item2, aliases) ?? ""));
@@ -4760,7 +4823,7 @@ var beginLeg = (state, run, agentId, at, config) => {
   delete agent.progress;
   if (agent.stage === "implement") {
     const aliases = state.index.worktreeAliases;
-    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config, aliases), aliases);
+    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config, aliases, state.index.agentSessions), aliases);
   } else if (agent.stage === "pr") {
     const known = Object.values(state.board.runs).some((item2) => item2.pr !== void 0 && knowsPr(item2, agentId, config));
     agent.progress = phaseProgress("pr", known ? FINISHING : PUSH);
@@ -4772,29 +4835,50 @@ var refreshFixItems = (state, run, agentId, at, config) => {
     return;
   }
   const aliases = state.index.worktreeAliases;
-  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config, aliases), aliases);
+  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config, aliases, state.index.agentSessions), aliases);
   touch(found.entry, at);
+};
+var lookAt = (found, paths, at, aliases) => {
+  const { entry, agent } = found;
+  touch(entry, at);
+  if (entry.items && entry.matched) {
+    if (markPathItems(entry, paths, aliases)) {
+      agent.progress = itemsProgress("files", entry.matched);
+    }
+    return;
+  }
+  const seen = entry.seen ?? [];
+  for (const path of paths) {
+    if (!seen.includes(path) && seen.length < PROGRESS_SEEN_CAP) {
+      seen.push(path);
+    }
+  }
+  entry.seen = seen;
 };
 var noteRead = (state, agentId, filePath, at) => {
   const found = runningEntry(state, agentId, "review");
   if (!found || !isAbsolute(filePath)) {
     return;
   }
-  const { entry, agent } = found;
   const aliases = state.index.worktreeAliases;
-  const path = resolveAlias(normalizePath(filePath), aliases);
-  touch(entry, at);
-  if (entry.items && entry.matched) {
-    if (markItems(entry, path, aliases)) {
-      agent.progress = itemsProgress("files", entry.matched);
-    }
+  lookAt(found, [resolveAlias(normalizePath(filePath), aliases)], at, aliases);
+};
+var noteBashRead = (state, agentId, command, at) => {
+  const found = runningEntry(state, agentId, "review");
+  if (!found) {
     return;
   }
-  const seen = entry.seen ?? [];
-  if (!seen.includes(path) && seen.length < PROGRESS_SEEN_CAP) {
-    seen.push(path);
+  const aliases = state.index.worktreeAliases;
+  lookAt(found, pathWords(command, aliases), at, aliases);
+};
+var noteGrepPath = (state, agentId, path, at) => {
+  const found = runningEntry(state, agentId, "review");
+  const word = path.trim();
+  if (!found || word === "") {
+    return;
   }
-  entry.seen = seen;
+  const aliases = state.index.worktreeAliases;
+  lookAt(found, [wordPath(word, aliases)], at, aliases);
 };
 var noteEdit = (state, agentId, filePath, at) => {
   const found = runningEntry(state, agentId, "implement");
@@ -4805,12 +4889,30 @@ var noteEdit = (state, agentId, filePath, at) => {
   const aliases = state.index.worktreeAliases;
   touch(entry, at);
   if (entry.items && entry.matched) {
-    if (markItems(entry, resolveAlias(normalizePath(filePath), aliases), aliases)) {
+    if (markPathItems(entry, [resolveAlias(normalizePath(filePath), aliases)], aliases)) {
       agent.progress = itemsProgress("fixes", entry.matched);
     }
     return;
   }
   if (agent.progress?.kind === "implement" && agent.progress.current !== EDIT) {
+    agent.progress = phaseProgress("implement", EDIT);
+  }
+};
+var noteBashEdit = (state, agentId, command, at) => {
+  const found = runningEntry(state, agentId, "implement");
+  if (!found || !writesFiles(command)) {
+    return;
+  }
+  const { entry, agent } = found;
+  const aliases = state.index.worktreeAliases;
+  touch(entry, at);
+  if (entry.items && entry.matched) {
+    if (markPathItems(entry, pathWords(command, aliases), aliases)) {
+      agent.progress = itemsProgress("fixes", entry.matched);
+    }
+    return;
+  }
+  if (agent.progress?.kind === "implement" && agent.progress.current === READ) {
     agent.progress = phaseProgress("implement", EDIT);
   }
 };
@@ -4852,9 +4954,9 @@ var applyDiff = (state, data, at, truncated) => {
   touch(entry, at);
   const counted = data.total >= 1 && data.total <= PROGRESS_ITEMS_CAP && data.files.length === data.total;
   const aliases = state.index.worktreeAliases;
-  const opened = openedPaths(entry, aliases);
+  const looked = [...lookedPaths(entry, aliases)];
   if (!counted) {
-    entry.seen = [...opened].slice(0, PROGRESS_SEEN_CAP);
+    entry.seen = looked.slice(0, PROGRESS_SEEN_CAP);
     clearItems(entry);
     delete agent.progress;
     return run;
@@ -4863,7 +4965,8 @@ var applyDiff = (state, data, at, truncated) => {
   const items = [...data.files];
   entry.worktree = worktree;
   entry.items = items;
-  entry.matched = matchesOf(worktree, items, opened, aliases);
+  const real = looked.map((path) => isAbsolute(path) ? resolveAlias(path, aliases) : path);
+  entry.matched = items.map((item2) => itemHit(worktree, item2, real, aliases));
   delete entry.seen;
   agent.progress = itemsProgress("files", entry.matched);
   return run;
@@ -6457,7 +6560,7 @@ var tokenStage = (state, run, agent, sessionId, config) => {
   if (run.fixes.some((fix) => fix.agentId === agent.id && agent.id !== "main")) {
     return "fix";
   }
-  if (agent.stage === "implement" && !roleStageStarted(run, agent) && reviewerWithChanges(run)) {
+  if (agent.stage === "implement" && !roleStageStarted(run, agent) && fixReviewerFor(run, agent, sessionId, state.index.agentSessions)) {
     return "fix";
   }
   if (agent.stage === "implement") {
@@ -7175,7 +7278,7 @@ var resumeCopies = (state, home, agentId, line, config) => {
     copy.state = "running";
     copy.resumedAt = line.at;
     delete copy.endedAt;
-    resumeRoleStage(run, copy, line, config);
+    resumeRoleStage(run, copy, line, config, state.index.agentSessions);
   }
 };
 var changedCopyRuns = (state, event, run) => {
@@ -7506,7 +7609,7 @@ var onAgentStart = (state, event, config) => {
   }
   logRun(run, event, "started", "normal", agentId);
   if (resumed) {
-    resumeRoleStage(run, agent, event, config);
+    resumeRoleStage(run, agent, event, config, state.index.agentSessions);
     resumeCopies(state, run, agentId, event, config);
     beginLeg(state, run, agentId, event.at, config);
   } else if (stoppedAt) {
@@ -7624,21 +7727,56 @@ var endCall = (call, event) => {
 };
 var LARGE_OUTPUT_CHARS = 2e4;
 var BINARY_READ = /\.(png|jpe?g|gif|webp|pdf)$/i;
+var isBinaryRead = (tool, call) => tool === "Read" && BINARY_READ.test(call?.summary ?? "");
 var isLargeOutput = (tool, chars, call) => {
   if (chars <= LARGE_OUTPUT_CHARS || EDIT_TOOLS.has(tool)) {
     return false;
   }
-  return tool !== "Read" || !BINARY_READ.test(call?.summary ?? "");
+  return !isBinaryRead(tool, call);
+};
+var outputChars = (event) => {
+  const size = event.event === "tool.post" ? event.data.responseChars : event.data.errorChars;
+  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0;
 };
 var countOutput = (agent, event, call) => {
-  const size = event.event === "tool.post" ? event.data.responseChars : void 0;
-  const chars = typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0;
+  const chars = outputChars(event);
   const output = ownEntry(agent.budget.toolOutput, event.data.tool, () => ({ calls: 0, chars: 0, maxChars: 0 }));
   output.calls += 1;
   output.chars += chars;
   output.maxChars = Math.max(output.maxChars, chars);
   if (isLargeOutput(event.data.tool, chars, call)) {
     agent.budget.largeOutputs += 1;
+  }
+};
+var EXPLORE_TOOLS = /* @__PURE__ */ new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch"]);
+var bashStep = (command, match) => {
+  if (match && match.kinds.length > 0) {
+    return "verify";
+  }
+  return command.trim() !== "" && readsOnly(command) ? "explore" : void 0;
+};
+var callStep = (tool, carried) => {
+  if (tool === "Bash") {
+    return carried;
+  }
+  if (EXPLORE_TOOLS.has(tool)) {
+    return "explore";
+  }
+  return EDIT_TOOLS.has(tool) ? "implement" : void 0;
+};
+var countStep = (own, event, call, carried) => {
+  const steps = own.mainSteps ??= newMainSteps();
+  steps.calls += 1;
+  const step = callStep(event.data.tool, carried);
+  if (!step) {
+    return;
+  }
+  const chars = isBinaryRead(event.data.tool, call) ? 0 : outputChars(event);
+  const use = steps[step];
+  use.calls += 1;
+  use.chars += chars;
+  if (isLargeOutput(event.data.tool, chars, call)) {
+    use.largeOutputs += 1;
   }
 };
 var PROTOTYPE_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -7789,6 +7927,9 @@ var onToolPre2 = (state, event, config, touched) => {
   if (tool === "Read" && input.filePath) {
     noteRead(state, agentKey, input.filePath, event.at);
   }
+  if (tool === "Grep" && input.path) {
+    noteGrepPath(state, agentKey, input.path, event.at);
+  }
   if (tool === "Agent" || tool === "Task") {
     onAgentPre(state, run, agentKey, event, config);
   }
@@ -7853,11 +7994,20 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   }
   if (match && match.kinds.length > 0) {
     noteVerification(state, agent.id, event.at);
+  } else if (agent.id !== "main") {
+    noteBashEdit(state, agent.id, command, event.at);
+  }
+  if (agent.id !== "main") {
+    noteBashRead(state, agent.id, command, event.at);
   }
   const own = agent.id === "main" ? mainOf(state, event.sessionId) : void 0;
   const mainVerify = own ? countMainVerification(own, match, config.budgets.warnAt) : [];
   if (mainVerify.length > 0) {
     callIndex.mainVerify = mainVerify;
+  }
+  const step = own ? bashStep(command, match) : void 0;
+  if (step) {
+    callIndex.mainStep = step;
   }
   updateMeter(state, run, agent, "verification rounds", agent.budget.verifyRounds, config.budgets.warnAt, event);
   const worktreeAdd = worktreeAddOf(ensureSession(state, event), event);
@@ -7972,6 +8122,7 @@ var onToolEnd = (state, event, config, touched) => {
   }
   if (own && !repeated(ownCall)) {
     countOutput(own, event, ownCall ?? call);
+    countStep(own, event, ownCall ?? call, index?.mainStep);
   }
   if (index?.mainVerify && own) {
     settleVerification(own, index.mainVerify, event, config);
@@ -9109,7 +9260,12 @@ var implementOf = (agent) => {
   const callLimit = toolCalls.limit > 0 ? toolCalls.limit : null;
   return { role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, callLimit, commands, failed };
 };
-var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null });
+var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, stage: agent.stage });
+var useOf = ({ calls, chars, largeOutputs: largeOutputs2 }) => ({ calls, chars, largeOutputs: largeOutputs2 });
+var stepsOf = (main) => {
+  const { calls, explore, implement, verify } = main?.mainSteps ?? newMainSteps();
+  return { calls, explore: useOf(explore), implement: useOf(implement), verify: useOf(verify) };
+};
 var reviewOf = (agent) => {
   const block = agent.report?.block;
   const fixItems2 = block ? block.followups.filter((item2) => item2.type === "fix").length : null;
@@ -9173,7 +9329,7 @@ var sessionAggregate = (session) => {
     finishedAt,
     work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
     metrics: { ...metrics, branches: branches2, resumes: { count: count2, expired, cacheWriteUsd } },
-    main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit: contextLimit2 },
+    main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit: contextLimit2, steps: stepsOf(main) },
     builds: subagentsOf(session, "implement").map(implementOf),
     reviews: subagentsOf(session, "review").map(reviewOf),
     agents: allSubagents(session).map(agentOf),
@@ -9385,9 +9541,10 @@ var percentile = (values, p) => {
 };
 
 // src/insights/insights.ts
-var AREAS = ["delivery", "implementers", "review", "verification", "tokens", "questions"];
+var AREAS = ["delivery", "explore", "implementers", "review", "verification", "tokens", "questions"];
 var AREA_NAMES = {
   delivery: "Delivery",
+  explore: "Explore",
   implementers: "Implementers",
   review: "Review",
   verification: "Verification",
@@ -9410,6 +9567,10 @@ var SIGNAL_NAMES = {
   "main-cost-share": "main-thread cost share",
   "overhead-share": "Nurselog overhead share",
   "main-large-outputs": "main-thread large outputs",
+  "main-steps": "main-thread steps",
+  "main-reads": "main-thread reads",
+  "main-check-output": "main-thread check output",
+  "unchecked-sessions": "sessions without a check",
   "question-open-time": "question open time",
   "questions-per-session": "questions per session",
   "developer-wait": "developer wait"
@@ -9420,6 +9581,8 @@ var QUIET_RUNS = 10;
 var GUIDELINE_SESSIONS = 3;
 var SPREAD_VALUES = 3;
 var MAIN_ROLE = "main";
+var MAIN_STEPS = ["explore", "implement", "verify"];
+var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 var MAX_SESSION_ID = 256;
 var MAX_SHOWN_TEXT = 200;
 var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
@@ -9440,6 +9603,7 @@ var NO_PR = "no work session opened a PR (PRs come from the gh poll of github.re
 var NO_PR_AFTER_WORK = "no PR was opened after the session's first work on its branch";
 var NO_PR_SIZE = "no PR size is known (the gh poll of github.repo reads it)";
 var NO_CHANGED_LINE = "the PRs changed no line";
+var NO_EDIT = "no work session edited a file";
 var PR = ["PR", "PRs"];
 var LINE = ["line", "lines"];
 var IMPLEMENT_RUN = ["implement run", "implement runs"];
@@ -9449,6 +9613,9 @@ var RUN = ["run", "runs"];
 var SESSION = ["session", "sessions"];
 var WORK_SESSION = ["work session", "work sessions"];
 var ANSWERED = ["answered question", "answered questions"];
+var EDITED = ["session with a file edit", "sessions with a file edit"];
+var CHARACTER = ["character", "characters"];
+var MAIN_CALL = ["main-thread call", "main-thread calls"];
 var isRecord = (value2) => typeof value2 === "object" && value2 !== null && !Array.isArray(value2);
 var fieldsOf = (value2) => isRecord(value2) ? value2 : {};
 var entriesOf = (value2) => Array.isArray(value2) ? value2.filter(isRecord) : void 0;
@@ -9456,6 +9623,7 @@ var numberOf = (value2) => typeof value2 === "number" && Number.isFinite(value2)
 var timeOf3 = (value2) => typeof value2 === "string" ? time(value2) : Number.NaN;
 var isNumber2 = (value2) => value2 !== null;
 var lineCountOf = (value2) => typeof value2 === "number" && Number.isInteger(value2) && value2 >= 0 ? value2 : null;
+var countOf = (value2) => typeof value2 === "number" && Number.isSafeInteger(value2) && value2 >= 0 ? value2 : null;
 var implementRun = (entry) => ({
   callsAtFirstStop: numberOf(entry.callsAtFirstStop),
   callLimit: numberOf(entry.callLimit),
@@ -9498,6 +9666,44 @@ var openTime = (entry) => {
   const answered = timeOf3(entry.answeredAt);
   return Number.isFinite(asked) && Number.isFinite(answered) ? Math.max(0, answered - asked) : null;
 };
+var stepUse = (value2) => {
+  const fields = fieldsOf(value2);
+  const calls = countOf(fields.calls);
+  const chars = countOf(fields.chars);
+  const largeOutputs2 = countOf(fields.largeOutputs);
+  return calls === null || chars === null || largeOutputs2 === null ? void 0 : { calls, chars };
+};
+var stepCalls = (value2) => {
+  const fields = fieldsOf(value2);
+  const calls = countOf(fields.calls);
+  const explore = stepUse(fields.explore);
+  const implement = stepUse(fields.implement);
+  const verify = stepUse(fields.verify);
+  if (calls === null || explore === void 0 || implement === void 0 || verify === void 0) {
+    return void 0;
+  }
+  const inSteps = explore.calls + implement.calls + verify.calls;
+  return inSteps > calls ? void 0 : { calls, explore, implement, verify };
+};
+var ranCheck = (entry) => {
+  const commands = fieldsOf(entry.commands);
+  return (numberOf(commands.typecheck) ?? 0) > 0 || (numberOf(commands.test) ?? 0) > 0;
+};
+var editedWith = (entry) => {
+  const editTool = typeof entry.tool === "string" && EDIT_TOOLS2.has(entry.tool);
+  return editTool && (numberOf(entry.calls) ?? 0) > 0;
+};
+var checksOf = (metrics) => {
+  const tools = fieldsOf(metrics.tools);
+  const main = entriesOf(tools.main);
+  const subagents = entriesOf(tools.subagents);
+  const verification = entriesOf(metrics.verification);
+  if (main === void 0 || subagents === void 0 || verification === void 0) {
+    return void 0;
+  }
+  const edited = [...main, ...subagents].some(editedWith);
+  return { edited, checked: verification.some(ranCheck) };
+};
 var shownText = (value2) => {
   if (typeof value2 !== "string") {
     return void 0;
@@ -9524,7 +9730,10 @@ var readSession = (aggregate, finished) => {
     largeOutputs: numberOf(main.largeOutputs),
     contextLimit: numberOf(main.contextLimit),
     questions: entriesOf(aggregate.questions)?.map(openTime),
-    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs)
+    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs),
+    steps: stepCalls(main.steps),
+    otherAgent: entriesOf(aggregate.agents)?.some((entry) => entry.stage === "other") ?? false,
+    checks: checksOf(metrics)
   };
 };
 var pad2 = (value2) => String(value2).padStart(2, "0");
@@ -9533,7 +9742,9 @@ var sum = (values) => values.reduce((total, value2) => total + value2, 0);
 var median = (values) => percentile(values, 50);
 var count = (value2, noun3) => `${value2} ${value2 === 1 ? noun3[0] : noun3[1]}`;
 var groupedCount = (value2, noun3) => `${value2.toLocaleString("en-US")} ${value2 === 1 ? noun3[0] : noun3[1]}`;
+var grouped = (value2) => Math.round(value2).toLocaleString("en-US");
 var percent = (fraction) => Math.round(fraction * 100);
+var stepPercent = (fraction) => fraction > 0 && fraction < 5e-3 ? "<1%" : `${percent(fraction)}%`;
 var percentTenths = (fraction) => (fraction * 100).toFixed(1);
 var listText = (items) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 var noRuns = (reason) => ({ lacks: reason, runCheck: true });
@@ -9683,6 +9894,60 @@ var costPer100Lines = (sides) => {
   const comparedTo = before(sides, baseline, PR, (evidence) => evidence.value === void 0 ? "no changed lines" : cost(evidence.value));
   const body = `100 changed lines cost ${cost(window2.value ?? 0)}, over ${count(window2.n, PR)} of ${groupedCount(sized.lines, LINE)} (${comparedTo})`;
   return { lines: [{ flag: comparison(factorFlag(window2, baseline)), window: window2, baseline, body }] };
+};
+var recordedSteps = (sessions) => sessions.flatMap((session) => session.steps ?? []);
+var stepChars = (step) => (sessions) => recordedSteps(sessions).map((steps) => steps[step].chars);
+var stepCharsLine = (sides, step, limit, what) => {
+  const values = stepChars(step);
+  const chars = values(sides.window);
+  if (chars.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window: window2, baseline, flag } = spreadSides(sides, values);
+  const guideline = guidelineOf(limit);
+  const broken = guideline !== void 0 && window2.n >= GUIDELINE_SESSIONS && Math.round(window2.value ?? 0) > Math.round(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `at most ${grouped(guideline.limit)} per session`;
+  const returned = `returned ${groupedCount(Math.round(sum(chars)), CHARACTER)} in the last ${count(window2.n, SESSION)}`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => grouped(evidence.value ?? 0));
+  const body = `the main thread's own ${what} ${returned}, a median of ${grouped(window2.value ?? 0)} per session ${aside(comparedTo, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, flag !== void 0), window: window2, baseline, guideline, body }] };
+};
+var mainReads = (sides) => stepCharsLine(sides, "explore", sides.guidelines.mainReadChars, "reads and searches");
+var mainCheckOutput = (sides) => stepCharsLine(sides, "verify", sides.guidelines.mainCheckChars, "verification commands");
+var pooledSteps = (sessions) => {
+  const recorded = recordedSteps(sessions);
+  const stepSum = (step) => sum(recorded.map((steps2) => steps2[step].calls));
+  const steps = { explore: stepSum("explore"), implement: stepSum("implement"), verify: stepSum("verify") };
+  return { sessions: recorded.length, calls: sum(recorded.map((entry) => entry.calls)), steps };
+};
+var stepShares = (pooled) => {
+  if (pooled.calls <= 0) {
+    return void 0;
+  }
+  return { explore: pooled.steps.explore / pooled.calls, implement: pooled.steps.implement / pooled.calls, verify: pooled.steps.verify / pooled.calls };
+};
+var mainStepsLine = (sides) => {
+  const pooled = pooledSteps(sides.window);
+  if (pooled.sessions === 0) {
+    return { lines: [] };
+  }
+  const shares = stepShares(pooled);
+  if (shares === void 0) {
+    return { lines: [{ window: { n: pooled.sessions }, body: `no main-thread call ended in the last ${count(pooled.sessions, SESSION)}` }] };
+  }
+  const inSteps = shares.explore + shares.implement + shares.verify;
+  const printed = MAIN_STEPS.map((step) => percent(shares[step]));
+  const other = Math.max(0, 100 - sum(printed));
+  const parts = [...MAIN_STEPS.map((step) => `${step} ${stepPercent(shares[step])}`), `other ${other}%`];
+  const body = `${listText(parts)} of ${groupedCount(pooled.calls, MAIN_CALL)}`;
+  return { lines: [{ window: { n: pooled.sessions, value: inSteps }, steps: shares, body }] };
+};
+var mainStepsOf = (window2) => {
+  const shares = stepShares(pooledSteps(window2));
+  const built = window2.some((session) => (session.builds?.length ?? 0) > 0);
+  const explored = window2.some((session) => session.otherAgent);
+  const shareOf = (step, subagents) => ({ share: shares?.[step] ?? null, subagents });
+  return { explore: shareOf("explore", explored), implement: shareOf("implement", built), verify: shareOf("verify", built) };
 };
 var buildsOf = (sessions) => sessions.flatMap((session) => session.builds ?? []);
 var budgetRuns = (sessions) => {
@@ -9834,6 +10099,24 @@ var failedRuns = (sides) => {
     return { lacks: NOT_STORED };
   }
   return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENT_RUN, "had a failed full-package command")] };
+};
+var editedSessions = (sessions) => sessions.filter((session) => session.checks?.edited === true);
+var isUnchecked = (session) => session.checks?.checked === false;
+var uncheckedSessions = (sides) => {
+  const units = editedSessions(sides.window);
+  if (units.length === 0) {
+    return { lacks: sides.window.some((session) => session.checks !== void 0) ? NO_EDIT : NOT_STORED };
+  }
+  const window2 = kOfN(units, isUnchecked);
+  const baseline = onBaseline(sides, (sessions) => kOfN(editedSessions(sessions), isUnchecked));
+  const k = window2.k ?? 0;
+  const floored = Math.floor(k * 100 / window2.n);
+  const guideline = guidelineOf(sides.guidelines.uncheckedSessions);
+  const broken = guideline !== void 0 && window2.n >= GUIDELINE_SESSIONS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const share2 = `${floored}%; ${before(sides, baseline, EDITED, kOfNText)}`;
+  const body = `${k} of the last ${count(window2.n, EDITED)} ran no typecheck or test command matched by verification.kinds ${aside(share2, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, rateFlag(window2, baseline)), window: window2, baseline, guideline, body }] };
 };
 var outputRoles = (sessions, role) => {
   const entries = sessions.flatMap((session) => session.roles ?? []);
@@ -10004,6 +10287,7 @@ var SIGNALS = [
   { id: "cost-per-pr", area: "delivery", of: costPerPr },
   { id: "time-to-pr", area: "delivery", of: timeToPr },
   { id: "cost-per-100-lines", area: "delivery", of: costPer100Lines },
+  { id: "main-reads", area: "explore", of: mainReads },
   { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
   { id: "second-implementer", area: "implementers", of: secondImplementer },
   { id: "second-round", area: "review", of: secondRound },
@@ -10012,11 +10296,15 @@ var SIGNALS = [
   { id: "quiet-reviewer", area: "review", of: quietReviewer, off: (guidelines) => guidelines.quietReviewer === null },
   { id: "verify-commands", area: "verification", of: verifyCommands },
   { id: "failed-runs", area: "verification", of: failedRuns },
+  { id: "main-check-output", area: "verification", of: mainCheckOutput },
+  { id: "unchecked-sessions", area: "verification", of: uncheckedSessions },
   { id: "cache-per-output", area: "tokens", of: cachePerOutput },
   { id: "main-peak-context", area: "tokens", of: mainPeakContext },
   { id: "main-cost-share", area: "tokens", of: mainCostShare },
   { id: "overhead-share", area: "tokens", of: overheadShare },
   { id: "main-large-outputs", area: "tokens", of: mainLargeOutputs },
+  // Informational: no flag, no guideline and no not-measured line.
+  { id: "main-steps", area: "tokens", of: mainStepsLine },
   { id: "question-open-time", area: "questions", of: questionOpenTime },
   { id: "questions-per-session", area: "questions", of: questionsPerSession },
   { id: "developer-wait", area: "questions", of: developerWait }
@@ -10026,12 +10314,15 @@ var outcomesAlone = (signal, read, sides) => {
 };
 var pointOf = (entry, outcome, role) => {
   const session = entry.session.id;
-  const evidence = "lines" in outcome ? outcome.lines.find((line) => line.role === role)?.window : void 0;
+  const line = "lines" in outcome ? outcome.lines.find((found) => found.role === role) : void 0;
+  const evidence = line?.window;
   if (evidence === void 0) {
     return { session, value: null, window: entry.window };
   }
   const share2 = evidence.k !== void 0 && evidence.n > 0 ? evidence.k / evidence.n : null;
-  return { session, value: evidence.value ?? share2, ...evidence.k === void 0 ? {} : { k: evidence.k }, n: evidence.n, window: entry.window };
+  const counted = evidence.k === void 0 ? {} : { k: evidence.k };
+  const steps = line?.steps === void 0 ? {} : { steps: line.steps };
+  return { session, value: evidence.value ?? share2, ...counted, n: evidence.n, window: entry.window, ...steps };
 };
 var signalLine = (area, signal, line, series) => ({
   area,
@@ -10056,7 +10347,7 @@ var notMeasuredOf = (area, lacks, every, sessions) => {
     });
     text2 = `${AREA_NAMES[area]}: ${parts.join("; ")} ${span}.`;
   }
-  const unused = every && lacks.every((lack) => lack.runCheck);
+  const unused = lacks.every((lack) => lack.runCheck);
   const notMeasured = { signals, reason: reasons.join("; "), ...unused ? { unused: true } : {} };
   return { area, signal: signals[0], notMeasured, series: [], text: text2 };
 };
@@ -10102,8 +10393,10 @@ var reportSession = (session) => ({
 });
 var guidelinesOf = (guidelines) => {
   const { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cachePerOutput2 } = guidelines;
+  const { mainReadChars, mainCheckChars, uncheckedSessions: uncheckedSessions2 } = guidelines;
   const cache = { main: cachePerOutput2.main, agents: cachePerOutput2.agents };
-  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache };
+  const main = { mainReadChars, mainCheckChars, uncheckedSessions: uncheckedSessions2 };
+  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache, ...main };
 };
 var insightsOf = (aggregates, options, now) => {
   const sessions = selectSessions(aggregates, options, now);
@@ -10124,7 +10417,8 @@ var insightsOf = (aggregates, options, now) => {
   const settings = { window: options.window, baseline: options.baseline, minBaseline: options.minBaseline, keepDays: options.keepDays, guidelines };
   const listed2 = oldest.map((entry) => reportSession(entry.session));
   const insights = window2.length === 0 ? [] : reportLines(sides, oldest);
-  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, closing };
+  const mainSteps = mainStepsOf(window2);
+  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, mainSteps, closing };
 };
 
 // src/spool/report-keeper.ts
@@ -10538,11 +10832,11 @@ var splitSessions = (view, now, clearedAt) => {
   split.finished = finished.sort(newestFirst2).map((entry) => entry.id);
   return split;
 };
-var defaultSessionCollapsed = (session) => isSessionDone(session);
-var isSessionCollapsed = (session, stored) => stored ?? defaultSessionCollapsed(session);
-var storedAfterSessionToggle = (session, collapsed) => {
+var defaultSessionCollapsed = () => true;
+var isSessionCollapsed = (stored) => stored ?? defaultSessionCollapsed();
+var storedAfterSessionToggle = (collapsed) => {
   const next = !collapsed;
-  return next === defaultSessionCollapsed(session) ? void 0 : next;
+  return next === defaultSessionCollapsed() ? void 0 : next;
 };
 
 // src/ui/board-link.ts
@@ -10824,10 +11118,10 @@ var enterStarts = (fresh, placed, useFrom) => {
   const resolving = /* @__PURE__ */ new Set();
   const positionOf = (key) => {
     const item2 = byKey.get(key);
-    return item2 ? startOf2(item2) : placed(key);
+    return item2 ? startOf3(item2) : placed(key);
   };
   const fallbackOf = (item2) => item2.fromElse === void 0 ? void 0 : positionOf(item2.fromElse);
-  function startOf2(item2) {
+  function startOf3(item2) {
     const known = starts.get(item2.key);
     if (known || resolving.has(item2.key)) {
       return known;
@@ -10842,7 +11136,7 @@ var enterStarts = (fresh, placed, useFrom) => {
     return start;
   }
   for (const item2 of fresh) {
-    startOf2(item2);
+    startOf3(item2);
   }
   return starts;
 };
@@ -12038,6 +12332,7 @@ var createBranchesOverview = (host, context, link) => {
   let width = 0;
   let empty = true;
   let first = true;
+  let held = false;
   let lastTime;
   let destroyed = false;
   let hovered;
@@ -12060,7 +12355,7 @@ var createBranchesOverview = (host, context, link) => {
     measure(box ? Math.floor(box.width) : 0);
   });
   resize.observe(wrap);
-  const motion = () => !first && !context.reducedMotion();
+  const motion = () => !first && !held && !context.reducedMotion();
   const recent = (at) => motion() && now - at < DRAIN_MS;
   const ripple = (x, y, color, delay) => {
     const circle = svgEl("circle", { class: "br-ripple", cx: value(x), cy: value(y), r: 5 });
@@ -12201,11 +12496,11 @@ var createBranchesOverview = (host, context, link) => {
       }
     });
     element.addEventListener("pointerleave", () => {
-      const held = hovered !== void 0;
+      const wasHovered = hovered !== void 0;
       hovered = void 0;
       pointer = void 0;
       applyHover();
-      if (held) {
+      if (wasHovered) {
         link?.hover(void 0);
       }
     });
@@ -12458,7 +12753,7 @@ var createBranchesOverview = (host, context, link) => {
       tipText = "";
       setText(subtitle, branchesSubtitle(next.branches.trunk, next.branches.promote));
       write(svg, { "aria-label": next.repositoryName ? `Branches of ${next.repositoryName}` : "Branches" });
-      render(context.now(), first ? 1 : 0);
+      render(context.now(), first || held ? 1 : 0);
       first = false;
     },
     isEmpty() {
@@ -12467,7 +12762,7 @@ var createBranchesOverview = (host, context, link) => {
     frame(clock, time2) {
       const elapsed2 = lastTime === void 0 ? 1e3 / 60 : Math.min(100, Math.max(0, time2 - lastTime));
       lastTime = time2;
-      if (destroyed || empty) {
+      if (destroyed || empty || held) {
         return;
       }
       render(clock, context.reducedMotion() ? 1 : easeShare(elapsed2));
@@ -12475,6 +12770,15 @@ var createBranchesOverview = (host, context, link) => {
     highlight(branches2) {
       outside = branches2;
       applyHover();
+    },
+    hold(next) {
+      try {
+        if (!next && held) {
+          render(context.now(), 1);
+        }
+      } finally {
+        held = next;
+      }
     },
     // Stops only: the panel stays drawn while the leaving tab slides out, and goes with its host.
     destroy() {
@@ -12497,6 +12801,7 @@ var FAN_DELAY = 500;
 var FAN_STAGGER = 120;
 var POP_MS2 = 550;
 var SHEEN_MS = 1400;
+var FILL_MS = 300;
 var NONE = { pops: [], dots: [], sweep: false };
 var isActive2 = (state) => state === "running" || state === "waiting";
 var hasLeftPending = (state) => state !== "pending" && state !== "skipped";
@@ -12933,7 +13238,7 @@ var currentOf = (progress, count2) => {
 var progressText = (progress, current) => {
   const { kind, done, total } = progress;
   if (kind === "files") {
-    return `Changed files: ${done} of ${total} opened`;
+    return `Changed files: ${done} of ${total} looked at`;
   }
   if (kind === "fixes") {
     return `Fix items: ${done} of ${total} edited`;
@@ -12942,19 +13247,25 @@ var progressText = (progress, current) => {
   const phase = current ?? Math.min(done, names.length - 1);
   return `Phase ${phase + 1} of ${names.length}: ${names[phase]}`;
 };
-var fromProgress = (progress) => {
+var isProgress = (progress) => {
   const { kind, total, done } = progress;
   const known = isPhase(kind) || kind === "files" || kind === "fixes";
-  const valid = known && Number.isInteger(total) && total >= 1 && Number.isInteger(done) && done >= 0 && done <= total;
-  if (!valid || kind === "files" && done === 0) {
+  return known && Number.isInteger(total) && total >= 1 && Number.isInteger(done) && done >= 0 && done <= total;
+};
+var fromProgress = (progress) => {
+  const { kind, total, done } = progress;
+  if (!isProgress(progress) || kind === "files" && done === 0) {
     return void 0;
   }
-  const current = currentOf(progress, isPhase(kind) ? PHASE_NAMES[kind].length : total);
+  const files = kind === "files";
+  const firstUndone = done < total ? done : void 0;
+  const current = files ? firstUndone : currentOf(progress, isPhase(kind) ? PHASE_NAMES[kind].length : total);
   const text2 = progressText(progress, current);
-  const parts = partsOf(progress);
-  if (parts === void 0) {
+  const flags = partsOf(progress);
+  if (flags === void 0) {
     return { kind: "arc", done: done / total, text: text2 };
   }
+  const parts = files ? flags.map((part, index) => ({ share: part.share, done: index < done })) : flags;
   return current !== void 0 && current < parts.length ? { kind: "parts", parts, current, text: text2 } : { kind: "parts", parts, text: text2 };
 };
 var isTypicalLength = (value2) => {
@@ -12975,29 +13286,69 @@ var typicalText = (used, length) => {
   const range = length.p25 === length.p75 ? `${length.p25}` : `${length.p25} to ${length.p75}`;
   return `${calls}, usually ${range} (${length.runs} earlier runs)`;
 };
-var fromTypical = (agent, typical) => {
+var typicalOf = (agent, typical) => {
   const firstLeg = agent.resumedAt === void 0 && agent.budget.toolCallsAtFirstStop === void 0;
   const length = typical !== void 0 && firstLeg ? ownValue(typical, agent.role) : void 0;
   if (!isTypicalLength(length)) {
     return void 0;
   }
-  const used = isCount2(agent.budget.toolCalls.used) ? agent.budget.toolCalls.used : 0;
-  const text2 = typicalText(used, length);
-  const ticks = [...new Set([length.p25, length.p75].map((calls) => Math.min(calls / length.p90, 1)))];
-  return { kind: "arc", done: Math.min(used / length.p90, 1), ticks, text: text2 };
+  return { length, used: isCount2(agent.budget.toolCalls.used) ? agent.budget.toolCalls.used : 0 };
 };
-var progressRing = (agent, typical) => {
+var typicalShare = ({ length, used }) => Math.min(used / length.p90, 1);
+var fromTypical = (typical) => {
+  const { length, used } = typical;
+  const ticks = [...new Set([length.p25, length.p75].map((calls) => Math.min(calls / length.p90, 1)))];
+  return { kind: "arc", done: typicalShare(typical), ticks, text: typicalText(used, length) };
+};
+var pruneRingForms = (forms, agents) => {
+  for (const [agentId, startedAt] of forms) {
+    const agent = ownValue(agents, agentId);
+    if (agent === void 0 || agent.endedAt !== void 0 || agent.startedAt !== startedAt) {
+      forms.delete(agentId);
+    }
+  }
+};
+var fromFiles = (agent, progress, typical, forms) => {
+  const { done, total } = progress;
+  const { length, used } = typical;
+  const share2 = typicalShare(typical);
+  const filesLead = done > 0 && share2 <= done / total;
+  const lead = `${typicalText(used, length)}; changed files: ${done} of ${total} looked at`;
+  const text2 = filesLead ? progressText(progress, void 0) : lead;
+  const parts = partsOf(progress);
+  if (parts === void 0) {
+    return { kind: "arc", done: Math.max(done / total, share2), text: text2 };
+  }
+  if (filesLead) {
+    forms?.set(agent.id, agent.startedAt);
+  }
+  if (!filesLead && forms?.get(agent.id) !== agent.startedAt) {
+    return { ...fromTypical(typical), text: text2 };
+  }
+  const shown = Math.max(done, Math.floor(Math.min(used, length.p90) * total / length.p90));
+  const lit = parts.map((part, index) => ({ share: part.share, done: index < shown }));
+  if (shown < lit.length) {
+    return { kind: "parts", parts: lit, current: shown, text: text2 };
+  }
+  return { kind: "parts", parts: lit, text: text2 };
+};
+var progressRing = (agent, typical, forms) => {
   if (agent.id === "main") {
     return void 0;
   }
-  const own = agent.progress === void 0 ? void 0 : fromProgress(agent.progress);
-  return own ?? fromTypical(agent, typical);
+  const length = typicalOf(agent, typical);
+  const progress = agent.progress;
+  if (progress?.kind === "files" && length !== void 0 && isProgress(progress)) {
+    return fromFiles(agent, progress, length, forms);
+  }
+  const own = progress === void 0 ? void 0 : fromProgress(progress);
+  return own ?? (length === void 0 ? void 0 : fromTypical(length));
 };
-var agentRing = (agent, run, typical) => {
+var agentRing = (agent, run, typical, forms) => {
   if (!run.running || run.stale || run.idle || agent.staleSince !== void 0) {
     return void 0;
   }
-  return progressRing(agent, typical);
+  return progressRing(agent, typical, forms);
 };
 var round2 = (value2) => String(Math.round(value2 * 100) / 100);
 var pointAt = (r, share2) => {
@@ -13122,6 +13473,21 @@ var updateProgressRing = (group, ring, draw2) => {
     childrenOf(group, "progress-tick").forEach((tick, index) => setAttribute(tick, "d", tickPath(draw2.radius, ticks[index] ?? 0)));
   }
   placeLight(group, ring, draw2);
+};
+var fillProgressRing = (group, ms) => {
+  group.classList.remove("full");
+  group.classList.add("filling");
+  const undone = childrenOf(group, "progress-part").filter((part) => !part.classList.contains("done"));
+  const step = undone.length > 0 ? ms / undone.length : 0;
+  undone.forEach((part, index) => {
+    setStyle(part, "transition-duration", `${round2(step)}ms`);
+    setStyle(part, "transition-delay", `${round2(index * step)}ms`);
+    part.classList.add("done");
+  });
+  childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", "100 100"));
+};
+var settleFilledRing = (group) => {
+  childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", "none"));
 };
 var drawProgressRing = (ring, draw2) => {
   const group = svgEl("g", { class: "node-progress" });
@@ -13440,15 +13806,18 @@ var implementWidth = (plan) => {
 var sessionLayout = (session, options) => {
   const first = placeSession(session, options, { a: {}, b: {} });
   const layout = first.room === void 0 ? first.layout : placeSession(session, options, first.room).layout;
-  return withProgress(layout, session, options.typical);
+  return withProgress(layout, session, options.typical, options.ringForms);
 };
-var withProgress = (layout, session, typical) => {
+var withProgress = (layout, session, typical, forms) => {
+  if (forms) {
+    pruneRingForms(forms, session.agents);
+  }
   const items = layout.items.map((item2) => {
     const agent = item2.kind === "node" && item2.agentId !== void 0 ? ownValue(session.agents, item2.agentId) : void 0;
     if (item2.kind !== "node" || agent === void 0) {
       return item2;
     }
-    const ring = agentRing(agent, { running: item2.state === "running", stale: item2.stale === true, idle: item2.idle === true }, typical);
+    const ring = agentRing(agent, { running: item2.state === "running", stale: item2.stale === true, idle: item2.idle === true }, typical, forms);
     if (ring === void 0) {
       return item2;
     }
@@ -14528,6 +14897,137 @@ var drawRoll = (core, radius) => {
   return { wrench: glyph, count: count2, distance: Math.round(radius * 14) / 10, settle };
 };
 
+// src/ui/graph/stop-motion.ts
+var SHEEN = [{ transform: "translateX(-16px)" }, { transform: "translateX(16px)" }];
+var SHEEN_EASING = "cubic-bezier(.5,0,.3,1)";
+var ROLL_MS = 450;
+var RING_OUT = [{ opacity: 1 }, { opacity: 0 }];
+var RING_OUT_MS = 180;
+var createStopMotion = (entries, hooks) => {
+  const end = (entry, motion) => {
+    const hold = entry.hold;
+    if (!hold) {
+      return;
+    }
+    entry.hold = void 0;
+    hold.timers.forEach((timer) => clearTimeout(timer));
+    if (hooks.destroyed()) {
+      return;
+    }
+    const ring = hold.filling ? entry.orbit : void 0;
+    hooks.rebuild(entry);
+    if (motion && ring && entry.element && entry.core && entry.orbit !== ring) {
+      settleFilledRing(ring);
+      entry.element.insertBefore(ring, entry.core);
+      const out = ring.animate(RING_OUT, { duration: RING_OUT_MS, easing: "ease-out", fill: "forwards" });
+      out.onfinish = () => ring.remove();
+      out.oncancel = () => ring.remove();
+    }
+    if (motion) {
+      const elapsed2 = performance.now() - hold.begin;
+      hold.after.forEach((start) => start(elapsed2));
+    }
+  };
+  return {
+    held(entry, signature) {
+      const { item: item2 } = entry;
+      const state = item2.kind === "node" ? item2.state : void 0;
+      if (entry.hold?.state === state) {
+        return true;
+      }
+      if (entry.hold) {
+        end(entry, false);
+        return false;
+      }
+      const ringShown = entry.orbit?.classList.contains("node-progress") === true;
+      const stops = signature !== entry.signature && item2.kind === "node" && !isActive2(item2.state);
+      if (!hooks.session || !stops || !ringShown || hooks.reducedMotion()) {
+        return false;
+      }
+      entry.hold = { begin: performance.now(), state: item2.state, filling: false, after: [], timers: [] };
+      return true;
+    },
+    releaseUnclaimed() {
+      for (const entry of entries.values()) {
+        if (entry.hold && !entry.hold.filling) {
+          end(entry, true);
+        }
+      }
+    },
+    dropLeaving() {
+      for (const entry of entries.values()) {
+        if (entry.hold && !entry.alive) {
+          end(entry, false);
+        }
+      }
+    },
+    fill(fill) {
+      const entry = entries.get(fill.key);
+      const ring = entry?.orbit;
+      const hold = entry?.hold;
+      if (!entry || !hold || hold.filling || !ring) {
+        return;
+      }
+      hold.filling = true;
+      if (fill.delay > 0) {
+        hold.timers.push(setTimeout(() => fillProgressRing(ring, FILL_MS), fill.delay));
+      } else {
+        fillProgressRing(ring, FILL_MS);
+      }
+      hold.timers.push(setTimeout(() => end(entry, true), fill.delay + FILL_MS));
+    },
+    whenShown(key, delay, start) {
+      const entry = entries.get(key);
+      if (!entry) {
+        return;
+      }
+      if (entry.hold) {
+        entry.hold.after.push((elapsed2) => start(entry, Math.max(0, delay - elapsed2)));
+        return;
+      }
+      start(entry, delay);
+    },
+    clear() {
+      for (const entry of entries.values()) {
+        entry.hold?.timers.forEach((timer) => clearTimeout(timer));
+      }
+    }
+  };
+};
+var playSheen = (entry, delay) => {
+  if (entry.item.kind !== "node" || !entry.core) {
+    return;
+  }
+  const drawn = drawSheen(entry.core, entry.item.radius, entry.item.state);
+  const crossing = drawn.band.animate(SHEEN, { duration: SHEEN_MS, delay, easing: SHEEN_EASING, fill: "both" });
+  crossing.onfinish = () => drawn.sheen.remove();
+  crossing.oncancel = () => drawn.sheen.remove();
+};
+var playRoll = (entry, delay) => {
+  const drawn = entry.item.kind === "node" && entry.core ? drawRoll(entry.core, entry.item.radius) : void 0;
+  if (!drawn) {
+    return;
+  }
+  const timing = { duration: ROLL_MS, delay, easing: SHEEN_EASING };
+  const out = drawn.wrench.animate([{ transform: "none" }, { transform: `translateY(-${drawn.distance}px)` }], { ...timing, fill: "both" });
+  const rise = [{ transform: `translateY(${drawn.distance}px)`, opacity: 1 }, { transform: "none", opacity: 1 }];
+  const up = drawn.count.animate(rise, { ...timing, fill: "forwards" });
+  let ended = false;
+  const finish = () => {
+    if (ended) {
+      return;
+    }
+    ended = true;
+    drawn.settle();
+    out.cancel();
+    up.cancel();
+  };
+  for (const animation of [out, up]) {
+    animation.onfinish = finish;
+    animation.oncancel = finish;
+  }
+};
+
 // src/ui/graph/scene.ts
 var TRAIL = [
   { r: 5, opacity: 1 },
@@ -14542,9 +15042,6 @@ var POP2 = [{ transform: "scale(.4)" }, { transform: "scale(1.22)", offset: 0.6 
 var SWEEP = [{ transform: "none" }, { transform: "scale(1.35)", offset: 0.4 }, { transform: "none" }];
 var SWEEP_STEP_MS = 55;
 var ORBIT_IN = [{ opacity: 0 }, { opacity: 1 }];
-var SHEEN = [{ transform: "translateX(-16px)" }, { transform: "translateX(16px)" }];
-var SHEEN_EASING = "cubic-bezier(.5,0,.3,1)";
-var ROLL_MS = 450;
 var DIM_MS = 200;
 var PIXEL_EPSILON = 1e-6;
 var HIT_REACH = 5;
@@ -14735,6 +15232,22 @@ var createScene = (host, context, options = {}) => {
       }
     }
   };
+  const rebuild = (entry) => {
+    const { item: item2, element } = entry;
+    if (!element) {
+      return;
+    }
+    const clickable = element.classList.contains("clickable");
+    entry.signature = signatureOf(item2);
+    render(entry);
+    element.classList.toggle("clickable", clickable);
+    element.classList.toggle("dim", !lit(item2));
+    if (item2.kind === "node") {
+      placeRing(entry);
+      retitle(entry, item2.tip);
+    }
+  };
+  const stops = createStopMotion(entries, { session, reducedMotion: () => context.reducedMotion(), destroyed: () => destroyed, rebuild });
   const render = (entry) => {
     const { item: item2, element } = entry;
     if (!element) {
@@ -15018,6 +15531,7 @@ var createScene = (host, context, options = {}) => {
       if (destroyed) {
         return;
       }
+      stops.releaseUnclaimed();
       svg.setAttribute("aria-label", label);
       viewTarget = { w: layout.width, h: layout.height, pw: layout.width * scale };
       if (!view) {
@@ -15032,12 +15546,16 @@ var createScene = (host, context, options = {}) => {
         return entry;
       };
       entered = new Set(placeLayout(entries, layout, first, create));
+      stops.dropLeaving();
       for (const key of tween ? entered : []) {
         tween?.starts.set(key, tweenStart(entries.get(key)));
       }
       for (const item2 of layout.items) {
         const entry = entries.get(item2.key);
         const signature = signatureOf(item2);
+        if (stops.held(entry, signature)) {
+          continue;
+        }
         if (signature !== entry.signature) {
           entry.signature = signature;
           render(entry);
@@ -15056,55 +15574,29 @@ var createScene = (host, context, options = {}) => {
     },
     play(effects) {
       if (destroyed || context.reducedMotion()) {
+        stops.releaseUnclaimed();
         return;
       }
+      (effects.fills ?? []).forEach((fill) => stops.fill(fill));
       for (const pop of effects.pops) {
         const fill = entered.has(pop.key) ? "backwards" : "none";
-        const entry = entries.get(pop.key);
-        entry?.core?.animate(POP2, { duration: POP_MS2, delay: pop.delay, easing: EASING2, fill });
-        if (entered.has(pop.key)) {
-          entry?.orbit?.animate(ORBIT_IN, { duration: POP_MS2, delay: pop.delay, easing: EASING2, fill });
-        }
+        stops.whenShown(pop.key, pop.delay, (entry, delay) => {
+          entry.core?.animate(POP2, { duration: POP_MS2, delay, easing: EASING2, fill });
+          if (entered.has(pop.key)) {
+            entry.orbit?.animate(ORBIT_IN, { duration: POP_MS2, delay, easing: EASING2, fill });
+          }
+        });
       }
       if (effects.sweep) {
         const nodes = [...entries.values()].filter((entry) => entry.item.kind === "node" && entry.alive).sort((a, b) => a.x - b.x);
-        nodes.forEach((entry, index) => entry.core?.animate(SWEEP, { duration: 700, delay: index * SWEEP_STEP_MS, easing: EASING2 }));
-      }
-      for (const sheen of effects.sheens ?? []) {
-        const entry = entries.get(sheen.key);
-        if (entry?.item.kind !== "node" || !entry.core) {
-          continue;
-        }
-        const drawn = drawSheen(entry.core, entry.item.radius, entry.item.state);
-        const crossing = drawn.band.animate(SHEEN, { duration: SHEEN_MS, delay: sheen.delay, easing: SHEEN_EASING, fill: "both" });
-        crossing.onfinish = () => drawn.sheen.remove();
-        crossing.oncancel = () => drawn.sheen.remove();
-      }
-      for (const roll of effects.rolls ?? []) {
-        const entry = entries.get(roll.key);
-        const drawn = entry?.item.kind === "node" && entry.core ? drawRoll(entry.core, entry.item.radius) : void 0;
-        if (!drawn) {
-          continue;
-        }
-        const timing = { duration: ROLL_MS, delay: roll.delay, easing: SHEEN_EASING };
-        const out = drawn.wrench.animate([{ transform: "none" }, { transform: `translateY(-${drawn.distance}px)` }], { ...timing, fill: "both" });
-        const rise = [{ transform: `translateY(${drawn.distance}px)`, opacity: 1 }, { transform: "none", opacity: 1 }];
-        const up = drawn.count.animate(rise, { ...timing, fill: "forwards" });
-        let ended = false;
-        const end = () => {
-          if (ended) {
-            return;
-          }
-          ended = true;
-          drawn.settle();
-          out.cancel();
-          up.cancel();
+        const sweep = (entry, delay) => {
+          entry.core?.animate(SWEEP, { duration: 700, delay, easing: EASING2 });
         };
-        for (const animation of [out, up]) {
-          animation.onfinish = end;
-          animation.oncancel = end;
-        }
+        nodes.forEach((entry, index) => stops.whenShown(entry.item.key, index * SWEEP_STEP_MS, sweep));
       }
+      (effects.sheens ?? []).forEach((sheen) => stops.whenShown(sheen.key, sheen.delay, playSheen));
+      (effects.rolls ?? []).forEach((roll) => stops.whenShown(roll.key, roll.delay, playRoll));
+      stops.releaseUnclaimed();
       const now = performance.now();
       for (const dot of effects.dots) {
         dots.push({ edges: dot.edges, color: colorValue(dot.color, context), start: now + dot.delay, reverse: dot.reverse === true, trail: [] });
@@ -15149,6 +15641,7 @@ var createScene = (host, context, options = {}) => {
       if (destroyed) {
         return;
       }
+      stops.releaseUnclaimed();
       tween = void 0;
       svg.classList.remove("tweening");
       settled = step(1, performance.now());
@@ -15175,6 +15668,7 @@ var createScene = (host, context, options = {}) => {
       destroyed = true;
       tween = void 0;
       clearTimeout(dimTimer);
+      stops.clear();
       svg.removeEventListener("pointerover", onPointer);
       svg.removeEventListener("pointerleave", onPointer);
       for (const dot of dots) {
@@ -16929,6 +17423,9 @@ var COPY_TEXT = "Copy added lines";
 var COPIED_TEXT = "Copied";
 var COPY_FAILED_TEXT = "Select and copy";
 var COPY_RESET_MS = 1600;
+var START_TEXT = "Start here";
+var START_TITLE = "Furthest from its guideline of the findings with a fix; another takes its place once this one is no longer the furthest";
+var START_REASON = ", furthest from its guideline of the findings with a fix";
 var COPIED_STATUS = "Added lines copied.";
 var COPY_FAILED_STATUS = "Copy failed. Select and copy selects the lines.";
 var IMPACTS = ["cost", "time", "quality"];
@@ -16936,6 +17433,12 @@ var IMPACT_NAMES = { cost: "Cost", time: "Time", quality: "Quality" };
 var GROUP_CLASSES = { change: "chg", consider: "con", ok: "okg", info: "ifg", unmeasured: "nmg" };
 var FINDING_CLASSES = { change: "change", consider: "consider", ok: "ok", info: "info", unmeasured: "nm" };
 var SUGGESTED = /* @__PURE__ */ new Set(["change", "consider"]);
+var unmeasuredLabel = (finding) => {
+  if (finding.byMain) {
+    return "by the main thread";
+  }
+  return finding.absent ? "not in this workflow" : "not measured";
+};
 var stageHit = (finding, stage) => stage === "all" || finding.step === stage;
 var impactHit = (finding, impact) => impact === "all" || finding.impact === impact;
 var filterView = (report, filter) => {
@@ -17262,6 +17765,12 @@ var createHealthReportView = (hooks) => {
   };
   const suggestionItem = (finding, item2) => {
     const head = el("div", "fdh");
+    if (report?.startHere === finding.id) {
+      const tag2 = el("span", "shtag", START_TEXT);
+      tag2.title = START_TITLE;
+      tag2.append(el("span", "visually-hidden", START_REASON));
+      head.append(tag2);
+    }
     head.append(stepChip(finding), el("span", `imp ${finding.impact}`, finding.impact));
     if (finding.basis) {
       head.append(el("span", "bas", finding.basis));
@@ -17303,12 +17812,15 @@ var createHealthReportView = (hooks) => {
   };
   const unmeasuredItem = (finding, item2) => {
     const row2 = el("div", "okr");
-    const label = finding.absent ? "not in this workflow" : "not measured";
+    const label = unmeasuredLabel(finding);
     row2.append(stepChip(finding), el("span", "okt", finding.headline), el("span", "hnm", label));
     item2.append(row2, el("p", "hreason", finding.line));
   };
   const findingItem = (finding) => {
     const item2 = el("li", `hf ${FINDING_CLASSES[finding.group]}`);
+    if (report?.startHere === finding.id) {
+      item2.classList.add("start");
+    }
     item2.dataset.id = finding.id;
     item2.addEventListener("animationend", () => item2.classList.remove("hflash"));
     if (SUGGESTED.has(finding.group)) {
@@ -17380,7 +17892,9 @@ var createHealthReportView = (hooks) => {
       for (const finding of group.findings) {
         const was = before2.get(finding.id);
         const item2 = items.get(finding.id);
-        if (was !== void 0 && was !== finding.group && item2) {
+        const moved = was !== void 0 && was !== finding.group;
+        const started = next.startHere === finding.id && previous.startHere !== finding.id;
+        if ((moved || started) && item2) {
           flash(item2);
         }
       }
@@ -21859,11 +22373,16 @@ var createConnectionState = (show, delay = CONNECTING_DELAY_MS) => {
 // src/ui/suggested-changes.ts
 var CHANGE_FILE = "CLAUDE.md";
 var LARGE_OUTPUTS = {
-  fix: "Cut long command output with tail, and run full test suites in a subagent.",
-  lines: [
-    "Pipe a command that can print more than 200 lines through `tail -n 80`.",
-    "Run a full test suite in a subagent and keep only its summary."
-  ]
+  fix: "Cut long command output with tail.",
+  lines: ["Pipe a command that can print more than 200 lines through `tail -n 80`."]
+};
+var EXPLORE_LINES = [
+  "Send a search or a read across more than a few files to the Explore agent, and ask for file paths, line ranges and a short summary, not file contents.",
+  "Read a file by line range when you know where to look."
+];
+var MAIN_READS = {
+  fix: "Hand wide reads and searches to the Explore agent, which runs on a cheaper model.",
+  lines: [...EXPLORE_LINES]
 };
 var PEAK_CONTEXT = {
   fix: "Start a new session for each task.",
@@ -21874,8 +22393,8 @@ var COST_SHARE = {
   lines: ["When the decisions are made and the work spans several files, hand the writing to a subagent."]
 };
 var MAIN_CACHE = {
-  fix: "Hand wide searches to a subagent and read files by line range.",
-  lines: ["Send a search across many files to a subagent and read only the line ranges it returns."]
+  fix: "Hand wide searches to the Explore agent and read files by line range.",
+  lines: [...EXPLORE_LINES]
 };
 var SECOND_IMPLEMENTER = {
   fix: "Give each brief what one run needs to finish.",
@@ -21918,15 +22437,29 @@ var quietChange = (role) => {
   const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
   return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
 };
-var checksLine = (setup) => {
+var checksText = (setup) => {
   const kinds = setup?.verification ?? [];
-  const checks = kinds.length === 0 ? "the project's checks" : `the ${kindsText(kinds)} commands`;
-  return `Before a subagent hands back a change, it runs ${checks} and fixes what fails.`;
+  return kinds.length === 0 ? "the project's checks" : `the ${kindsText(kinds)} commands`;
+};
+var checksLine = (setup) => `Before a subagent hands back a change, it runs ${checksText(setup)} and fixes what fails.`;
+var checkOutputChange = (setup) => {
+  const line = `Run ${checksText(setup)} in a subagent, and have it report the failures and a one-line summary.`;
+  return { fix: "Run the full checks in a subagent that returns only the result.", lines: [line] };
+};
+var uncheckedChange = (setup) => {
+  const line = `Before you report a change as done, run ${checksText(setup)} and fix what fails.`;
+  return { fix: "Name the checks to run before a change is done.", lines: [line] };
 };
 var changeOf = (source, role) => {
   switch (source.line.insight.signal) {
     case "main-large-outputs":
       return LARGE_OUTPUTS;
+    case "main-reads":
+      return MAIN_READS;
+    case "main-check-output":
+      return checkOutputChange(source.setup);
+    case "unchecked-sessions":
+      return uncheckedChange(source.setup);
     case "main-peak-context":
       return PEAK_CONTEXT;
     case "main-cost-share":
@@ -21989,6 +22522,7 @@ var STEPS = [
 ];
 var AREA_STEPS = {
   delivery: "merge",
+  explore: "explore",
   implementers: "implement",
   review: "review",
   verification: "verify",
@@ -22000,7 +22534,8 @@ var STEP_STAGES = { explore: "other", implement: "implement", review: "review", 
 var NEUTRAL = {
   "fix-followups": "fix follow-ups recorded",
   "verify-commands": "verification recorded",
-  "questions-per-session": "questions recorded"
+  "questions-per-session": "questions recorded",
+  "main-steps": "calls recorded"
 };
 var PHRASES = {
   "cost-per-pr": ["PRs cost more", "cost per PR in range"],
@@ -22016,9 +22551,14 @@ var PHRASES = {
   "main-cost-share": ["carries most of the cost", "cost share in range"],
   "overhead-share": ["Nurselog overhead high", "overhead small"],
   "main-large-outputs": ["reads raw output", "keeps output short"],
+  // These two name the main thread, as on a step a subagent covers they would read as the agent's.
+  "main-reads": ["main thread reads a lot", "main thread reads little"],
+  "main-check-output": ["main thread reads raw checks", "main thread keeps checks short"],
+  "unchecked-sessions": ["sessions end unchecked", "checks run"],
   "question-open-time": ["questions wait long", "quick answers"],
   "developer-wait": ["work waits for you", "little waiting"]
 };
+var MAIN_PHRASES = { explore: "searches itself", implement: "edits itself", verify: "runs its own checks" };
 var MAIN_CACHE_PROBLEM = "re-reads a long context";
 var NO_ROLE = "a role";
 var MERGE_TEXT = { developer: "you merge", agent: "agent merges" };
@@ -22027,6 +22567,23 @@ var isPlainObject3 = (value2) => typeof value2 === "object" && value2 !== null &
 var isArea = (value2) => typeof value2 === "string" && Object.hasOwn(AREA_STEPS, value2);
 var isInformational = (signal) => Object.hasOwn(NEUTRAL, signal);
 var isSignal = (value2) => typeof value2 === "string" && (Object.hasOwn(NEUTRAL, value2) || Object.hasOwn(PHRASES, value2));
+var isMainStep = (id) => Object.hasOwn(MAIN_PHRASES, id);
+var stepPercent2 = (fraction) => fraction > 0 && fraction < 5e-3 ? "<1%" : `${Math.round(fraction * 100)}%`;
+var mainEntry = (mainSteps, id) => {
+  const entry = isPlainObject3(mainSteps) && Object.hasOwn(mainSteps, id) ? mainSteps[id] : void 0;
+  return isPlainObject3(entry) ? entry : void 0;
+};
+var mainShare = (mainSteps, id) => {
+  const share2 = mainEntry(mainSteps, id)?.share;
+  return typeof share2 === "number" && Number.isFinite(share2) ? Math.min(1, Math.max(0, share2)) : void 0;
+};
+var ownShare = (mainSteps, id) => {
+  if (!isMainStep(id) || mainEntry(mainSteps, id)?.subagents !== false) {
+    return void 0;
+  }
+  const share2 = mainShare(mainSteps, id);
+  return share2 !== void 0 && share2 > 0 ? share2 : void 0;
+};
 var lineVerdict = (line, signal) => {
   if (isPlainObject3(line.notMeasured)) {
     return line.notMeasured.unused === true ? "unused" : "unmeasured";
@@ -22082,7 +22639,10 @@ var stepVerdict = (lines) => {
   const order = ["change", "consider", "ok", "unmeasured"];
   return order.find((verdict) => counted.some((line) => line.verdict === verdict)) ?? "ok";
 };
-var stepPhrase = (lines, verdict, shortName) => {
+var stepPhrase = (id, lines, verdict, shortName) => {
+  if (verdict === "main") {
+    return isMainStep(id) ? MAIN_PHRASES[id] : "";
+  }
   if (verdict === "absent") {
     return "";
   }
@@ -22170,11 +22730,19 @@ var workflowMap = (insights, roleShorts) => {
   }
   const steps = STEPS.map(({ id, name }) => {
     const own = byStep.get(id) ?? [];
-    const verdict = stepVerdict(own);
+    const share2 = ownShare(report.mainSteps, id);
+    const counted = stepVerdict(own);
+    const verdict = counted === "absent" && share2 !== void 0 ? "main" : counted;
     const flagged = own.filter((line) => line.verdict === "change" || line.verdict === "consider").length;
     const setupText = verdict === "absent" ? ABSENT_TEXT : setupLine(id, own, setup, shortName);
-    const phrase = stepPhrase(own, verdict, shortName);
-    return { id, name, lines: own, verdict, setup: setupText, phrase, more: Math.max(0, flagged - 1) };
+    const phrase = stepPhrase(id, own, verdict, shortName);
+    const more = Math.max(0, flagged - 1);
+    if (share2 === void 0) {
+      return { id, name, lines: own, verdict, setup: setupText, setupTitle: setupText, phrase, more };
+    }
+    const shareText = stepPercent2(share2);
+    const title = `${shareText} of the main thread's tool calls`;
+    return { id, name, lines: own, verdict, setup: `main thread \xB7 ${shareText}`, setupTitle: title, phrase, more };
   });
   const change = lines.filter((line) => line.verdict === "change").length;
   const consider = lines.filter((line) => line.verdict === "consider").length;
@@ -22193,8 +22761,19 @@ var ANSWERED2 = ["answered question", "answered questions"];
 var QUIET_RUNS2 = 10;
 var HEADROOM = 1.08;
 var MAX_CHIPS = 4;
+var RATIO_CAP = 10;
 var noun2 = (count2, unit) => count2 === 1 ? unit[0] : unit[1];
 var wholePercent = (fraction) => `${Math.round(fraction * 100)}%`;
+var characters = (count2) => `${Math.round(count2).toLocaleString("en-US")} characters`;
+var MAIN_STEP_IDS = ["explore", "implement", "verify"];
+var NO_BREAK = "\xA0";
+var stepsText = (shares) => {
+  const printed = MAIN_STEP_IDS.map((id) => Math.round(shares[id] * 100));
+  const other = Math.max(0, 100 - printed.reduce((total, part) => total + part, 0));
+  const parts = MAIN_STEP_IDS.map((id) => `${id}${NO_BREAK}${stepPercent2(shares[id])}`);
+  return [...parts, `other${NO_BREAK}${other}%`].join(" \xB7 ");
+};
+var ownStepsShare = (fraction) => `${stepPercent2(fraction)} in explore, implement and verify`;
 var tenthPercent = (fraction) => `${(fraction * 100).toFixed(1)}%`;
 var rateText = (k, n2, unit, hit) => `${k} of ${n2} ${noun2(n2, unit)} ${hit}`;
 var rate = (hit) => ({
@@ -22238,7 +22817,8 @@ var SIGNALS2 = {
     headline: ["Implementers stop at their tool-call budget", "Implementers finish within their budget"],
     ...rate("reached the budget"),
     limit: (limit) => `under ${Math.round(limit * 100)}%`,
-    scale: true
+    scale: true,
+    against: "share"
   },
   "second-implementer": {
     impact: "time",
@@ -22259,7 +22839,8 @@ var SIGNALS2 = {
     // A quiet-reviewer point is one run; a session's points merge into one row, "2 of 3 runs had a fix follow-up".
     ...rate("had a fix follow-up"),
     limit: (limit) => `at least ${quietLeast2(limit)} of ${QUIET_RUNS2}`,
-    perRun: true
+    perRun: true,
+    against: "share"
   },
   "failed-runs": {
     impact: "quality",
@@ -22273,7 +22854,8 @@ var SIGNALS2 = {
     headline: ["<role> reads whole files", "<role> reads selectively"],
     ...valued((value2) => `${Math.round(value2)} per output token`),
     limit: (limit) => `at most ${Math.round(limit)}`,
-    scale: true
+    scale: true,
+    against: "value"
   },
   "main-peak-context": {
     impact: "quality",
@@ -22295,7 +22877,8 @@ var SIGNALS2 = {
     headline: ["The Nurselog overhead is high", "The Nurselog overhead stays small"],
     ...valued(tenthPercent),
     limit: (limit) => `at most ${tenthPercent(limit)}`,
-    scale: true
+    scale: true,
+    against: "value"
   },
   "main-large-outputs": {
     impact: "cost",
@@ -22303,7 +22886,42 @@ var SIGNALS2 = {
     headline: ["The main thread reads raw command output", "The main thread keeps long output out of its context"],
     ...valued((value2) => `a median of ${value2} per session`, (value2) => plural(value2, "large output")),
     limit: (limit) => `at most ${limit} per session`,
-    scale: true
+    scale: true,
+    against: "value"
+  },
+  "main-steps": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["How the main thread spends its calls", "How the main thread spends its calls"],
+    // The window's number reads `report.mainSteps` (`measuredFinding`), a session's row its shares per step.
+    ...valued(ownStepsShare, (value2, point2) => point2.steps === void 0 ? ownStepsShare(value2) : stepsText(point2.steps)),
+    plots: "Share of calls in explore, implement and verify"
+  },
+  "main-reads": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["The main thread's own reads fill its context", "The main thread's own reads stay small"],
+    ...valued((value2) => `a median of ${characters(value2)} per session`, characters),
+    limit: (limit) => `at most ${characters(limit)} per session`,
+    scale: true,
+    against: "value"
+  },
+  "main-check-output": {
+    impact: "cost",
+    unit: SESSION2,
+    headline: ["The main thread reads raw check output", "The main thread keeps check output short"],
+    ...valued((value2) => `a median of ${characters(value2)} per session`, characters),
+    limit: (limit) => `at most ${characters(limit)} per session`,
+    scale: true,
+    against: "value"
+  },
+  "unchecked-sessions": {
+    impact: "quality",
+    unit: SESSION2,
+    headline: ["Sessions edit files without a check", "Sessions with edits run their checks"],
+    ...rate("edited without a typecheck or test"),
+    limit: (limit) => `under ${Math.round(limit * 100)}%`,
+    against: "share"
   },
   "question-open-time": {
     impact: "time",
@@ -22341,6 +22959,7 @@ var NO_ROLE2 = "A role";
 var NO_TITLE = "recorded session";
 var AREA_NAMES2 = {
   delivery: "Delivery",
+  explore: "Explore",
   implementers: "Implementers",
   review: "Review",
   verification: "Verification",
@@ -22383,6 +23002,12 @@ var pointNumber = (value2, k, n2) => {
   }
   return k !== void 0 && n2 !== void 0 && n2 > 0 ? k / n2 : null;
 };
+var readSteps = (value2) => {
+  if (!isPlainObject4(value2) || !finite(value2.explore) || !finite(value2.implement) || !finite(value2.verify)) {
+    return void 0;
+  }
+  return { explore: value2.explore, implement: value2.implement, verify: value2.verify };
+};
 var readPoints = (series) => {
   if (!Array.isArray(series)) {
     return [];
@@ -22393,8 +23018,15 @@ var readPoints = (series) => {
     }
     const k = finite(item2.k) ? item2.k : void 0;
     const n2 = finite(item2.n) ? item2.n : void 0;
-    return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2 }];
+    return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2, steps: readSteps(item2.steps) }];
   });
+};
+var readMainSteps = (mainSteps) => {
+  const [explore, implement, verify] = MAIN_STEP_IDS.map((id) => mainShare(mainSteps, id));
+  if (explore === void 0 || implement === void 0 || verify === void 0) {
+    return void 0;
+  }
+  return { explore, implement, verify };
 };
 var readFacts = (report) => {
   const basis = report.basis;
@@ -22416,6 +23048,7 @@ var readFacts = (report) => {
   if (isPlainObject4(options)) {
     facts.minBaseline = finite(options.minBaseline) ? options.minBaseline : void 0;
   }
+  facts.mainSteps = readMainSteps(report.mainSteps);
   return facts;
 };
 var sideText = (format, evidence) => {
@@ -22431,7 +23064,7 @@ var nowLabel = (signal, window2, facts) => {
   }
   return facts.window === void 0 ? "recent sessions" : `last ${plural(facts.window, "session")}`;
 };
-var sparkline = (points, limit, unit) => {
+var sparkline = (points, limit, unit, plots) => {
   if (points.length === 0) {
     return void 0;
   }
@@ -22449,7 +23082,8 @@ var sparkline = (points, limit, unit) => {
   });
   const first = points.findIndex((point2) => point2.window);
   const highlighted = points.filter((point2) => point2.window).length;
-  const label = `${plural(points.length, unit)}, the latest ${highlighted} highlighted${guide ? ", dashed line is the guideline" : ""}`;
+  const across = `${plural(points.length, unit)}, the latest ${highlighted} highlighted${guide ? ", dashed line is the guideline" : ""}`;
+  const label = plots === void 0 ? across : `${plots}: ${across}`;
   const spark = { bars, windowStart: first === -1 ? points.length : first, label };
   if (guide) {
     spark.guide = guide.limit / max;
@@ -22459,7 +23093,7 @@ var sparkline = (points, limit, unit) => {
 var mergeRuns = (session, runs) => {
   const k = runs.reduce((total, run) => total + (run.k ?? ((run.number ?? 0) >= 1 ? 1 : 0)), 0);
   const n2 = runs.reduce((total, run) => total + (run.n ?? 1), 0);
-  return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2 };
+  return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2, steps: void 0 };
 };
 var rowPoints = (points, perRun) => {
   const newestFirst4 = [...points].reverse().filter((point2) => point2.window && point2.number !== null);
@@ -22526,11 +23160,30 @@ var unmeasuredFinding = (line, step) => ({
   stepName: step.name,
   group: "unmeasured",
   absent: line.verdict === "unused",
+  byMain: line.verdict === "unused" && step.verdict === "main",
   impact: unmeasuredImpact(line.insight),
   headline: AREA_NAMES2[line.insight.area],
   line: lineText(line.insight),
   sessionValues: /* @__PURE__ */ new Map()
 });
+var guidelineRatio = (number, limit, worse) => {
+  const over = worse === "above" ? number : limit;
+  const under = worse === "above" ? limit : number;
+  if (under <= 0) {
+    return over > 0 ? RATIO_CAP : 1;
+  }
+  return Math.min(RATIO_CAP, over / under);
+};
+var ratioOf2 = (format, window2, limit) => {
+  if (window2 === void 0 || limit === void 0 || format.against === void 0) {
+    return 1;
+  }
+  let number = window2.value;
+  if (format.against === "share") {
+    number = window2.k === void 0 || window2.n <= 0 ? void 0 : window2.k / window2.n;
+  }
+  return number === void 0 ? 1 : Math.max(1, guidelineRatio(number, limit.limit, limit.worse));
+};
 var measuredFinding = (line, step, facts, changes) => {
   const insight = line.insight;
   const format = SIGNALS2[insight.signal];
@@ -22538,10 +23191,11 @@ var measuredFinding = (line, step, facts, changes) => {
   const baseline = readEvidence(insight.baseline);
   const limit = readLimit(insight.guideline);
   const points = readPoints(insight.series);
-  const now = numberOf2(nowLabel(insight.signal, window2, facts), sideText(format, window2));
+  const shares = insight.signal === "main-steps" ? facts.mainSteps : void 0;
+  const now = numberOf2(nowLabel(insight.signal, window2, facts), shares === void 0 ? sideText(format, window2) : stepsText(shares));
   const before2 = numberOf2(facts.baseline === void 0 ? "before" : `${facts.baseline} before`, sideText(format, baseline));
   const guideline = limit === void 0 || format.limit === void 0 ? void 0 : numberOf2("guideline", format.limit(limit.limit));
-  const spark = sparkline(points, format.scale === true ? limit : void 0, insight.signal === "quiet-reviewer" ? "run" : "session");
+  const spark = sparkline(points, format.scale === true ? limit : void 0, insight.signal === "quiet-reviewer" ? "run" : "session", format.plots);
   const { rows, sessionValues } = pointRows(points, format, facts);
   const evidence = { setup: step.verdict === "absent" ? "" : step.setup, rows };
   if (now) {
@@ -22562,6 +23216,7 @@ var measuredFinding = (line, step, facts, changes) => {
     stepName: step.name,
     group: groupOf(line.verdict),
     absent: false,
+    byMain: false,
     impact: format.impact,
     headline: headlineOf(line),
     line: lineText(insight, line.role),
@@ -22570,6 +23225,7 @@ var measuredFinding = (line, step, facts, changes) => {
   };
   if (line.verdict === "change") {
     finding.basis = "worse than the guideline";
+    finding.ratio = ratioOf2(format, window2, limit);
   }
   if (line.verdict === "consider") {
     finding.basis = "worse than before";
@@ -22582,6 +23238,15 @@ var measuredFinding = (line, step, facts, changes) => {
     finding.change = change;
   }
   return finding;
+};
+var startOf = (findings) => {
+  let start;
+  for (const finding of findings) {
+    if (finding.group === "change" && finding.change !== void 0 && (start === void 0 || (finding.ratio ?? 1) > (start.ratio ?? 1))) {
+      start = finding;
+    }
+  }
+  return start;
 };
 var noteOf = (facts) => {
   const { window: window2, baseline, minBaseline } = facts;
@@ -22617,7 +23282,9 @@ var healthReport = (insights, roleShorts, repositoryName) => {
     const unmeasured = owner.line.verdict === "unmeasured" || owner.line.verdict === "unused";
     return [unmeasured ? unmeasuredFinding(owner.line, owner.step) : measuredFinding(owner.line, owner.step, facts, changes)];
   });
-  const groups2 = GROUPS.map(({ group, label }) => ({ group, label, findings: findings.filter((finding) => finding.group === group) }));
+  const start = startOf(findings);
+  const ordered = start === void 0 ? findings : [start, ...findings.filter((finding) => finding !== start)];
+  const groups2 = GROUPS.map(({ group, label }) => ({ group, label, findings: ordered.filter((finding) => finding.group === group) }));
   const stages = map.steps.filter((step) => findings.some((finding) => finding.step === step.id)).map(({ id, name }) => ({ id, name }));
   const report = {
     title: `Workflow health \xB7 ${repositoryName}`,
@@ -22628,6 +23295,9 @@ var healthReport = (insights, roleShorts, repositoryName) => {
     closing: typeof insights.report.closing === "string" ? insights.report.closing : "",
     footer: FOOTER
   };
+  if (start !== void 0) {
+    report.startHere = start.id;
+  }
   const updated = updatedOf(facts.newest);
   if (updated) {
     report.updated = updated;
@@ -22659,7 +23329,14 @@ var sessionChips2 = (report, sessionId) => {
 // src/ui/health-strip.ts
 var healthOpenKey = (repositoryId) => `nurselog.health.${repositoryId}`;
 var RETRY_MS = 3e4;
-var VERDICT_LABELS = { change: "to change", consider: "to consider", ok: "working well", unmeasured: "", absent: ABSENT_TEXT };
+var VERDICT_LABELS = {
+  change: "to change",
+  consider: "to consider",
+  ok: "working well",
+  unmeasured: "",
+  main: "by the main thread",
+  absent: ABSENT_TEXT
+};
 var stepLabel = (step) => {
   const change = step.lines.filter((line) => line.verdict === "change").length;
   const consider = step.lines.filter((line) => line.verdict === "consider").length;
@@ -22796,7 +23473,7 @@ var createHealthStrip = (context, hooks) => {
     }
     setText(parts.name, step.name);
     setText(parts.setup, step.setup);
-    setTitle2(parts.setup, step.setup);
+    setTitle2(parts.setup, step.setupTitle);
     setText(parts.phrase, step.phrase);
     setText(parts.more, step.more > 0 ? `+${step.more}` : "");
     parts.more.hidden = step.more === 0;
@@ -23526,6 +24203,8 @@ var createAnswerer = (deps) => {
 };
 
 // src/ui/overview.ts
+var overviewOpenKey = (repositoryId) => `nurselog.overview.${repositoryId}`;
+var GLANCE_DOTS = 8;
 var EASE11 = "cubic-bezier(.2,.8,.2,1)";
 var ENTER3 = [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
 var ENTER_MS2 = 450;
@@ -23590,7 +24269,7 @@ var createHealthLink = (openHealth) => {
     }
   };
 };
-var createRanking = (context, link, openHealth, reveal) => {
+var createRanking = (context, link, openHealth, reveal, still) => {
   overviewCount += 1;
   const element = el("div", link ? "overview-panel overview-ranking linkable" : "overview-panel overview-ranking");
   const head = el("div", "overview-head");
@@ -23722,7 +24401,7 @@ var createRanking = (context, link, openHealth, reveal) => {
       top.setAttribute("aria-label", copy.title);
       rest.setAttribute("aria-label", copy.more);
       setText(sub, input.repository ? `${input.repository} \xB7 split by stage, live` : "Split by stage, live");
-      const motion = !context.reducedMotion();
+      const motion = !context.reducedMotion() && !still();
       const keep2 = new Set([...ranking.top, ...ranking.rest].map((row2) => row2.key));
       for (const [key, row2] of rows) {
         if (!keep2.has(key)) {
@@ -23748,7 +24427,9 @@ var createRanking = (context, link, openHealth, reveal) => {
         focused.focus({ preventScroll: true });
       }
       if (grow.length > 0) {
-        void element.offsetWidth;
+        if (motion) {
+          void element.offsetWidth;
+        }
         for (const step of grow) {
           step();
         }
@@ -23774,29 +24455,197 @@ var createRanking = (context, link, openHealth, reveal) => {
     }
   };
 };
+var laneName = (lane) => lane.branchLabel === void 0 ? shortBranch(lane.branch) : labelText(lane.branchLabel);
+var branchGlance = (branches2) => {
+  const forkAt = (lane) => parseTime(lane.forkedAt) ?? 0;
+  const isLive = (lane) => lane.mergedAt === void 0 && !lane.deleted;
+  const live = branches2.lanes.filter(isLive).sort((a, b) => forkAt(a) - forkAt(b));
+  const dots = live.slice(0, GLANCE_DOTS).map((lane) => {
+    const stage = STAGE_LABELS2[lane.head.stage];
+    const state = lane.head.waiting ? `${stage} \xB7 waiting for you` : stage;
+    const color = colorVar(stageColor(lane.head.stage));
+    return { branch: lane.branch, color, waiting: lane.head.waiting, title: `${laneName(lane)}: ${state}` };
+  });
+  const waiting = live.filter((lane) => lane.head.waiting).length;
+  const merged = branches2.lanes.filter((lane) => lane.mergedAt !== void 0).length;
+  return { dots, more: live.length - dots.length, live: live.length, waiting, merged, none: live.length === 0 && merged === 0 };
+};
+var tokenGlance = (entries, packages) => {
+  const split = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    for (const [stage, value2] of Object.entries(entry.byStage)) {
+      split.set(stage, (split.get(stage) ?? 0) + (value2 ?? 0));
+    }
+  }
+  const order = stageOrder(split.keys(), packages).filter((stage) => (split.get(stage) ?? 0) > 0);
+  const sum2 = order.reduce((total2, stage) => total2 + (split.get(stage) ?? 0), 0);
+  const segments = order.map((stage) => {
+    const width = (split.get(stage) ?? 0) / sum2 * 100;
+    return { stage, color: stageKeyColor(stage), title: stageKeyTitle(stage, packages), width };
+  });
+  const total = entries.reduce((count2, entry) => count2 + entry.tokens, 0);
+  const usd = entries.reduce((count2, entry) => count2 + entry.usd, 0);
+  return { tokens: total, usd, segments };
+};
+var createGlance = (context) => {
+  const branches2 = el("span", "ovs ovb");
+  const dots = el("span", "ovd");
+  dots.setAttribute("aria-hidden", "true");
+  const branchText = el("span", "ovv");
+  const liveText = el("span");
+  const waitPart = el("span");
+  const waitText2 = el("span", "you");
+  waitPart.append(" \xB7 ", waitText2);
+  const mergedPart = el("span");
+  const mergedText2 = el("span");
+  mergedPart.append(" \xB7 ", mergedText2);
+  branchText.append(liveText, waitPart, mergedPart);
+  branches2.append(el("span", "ovk", "Branches"), dots, branchText);
+  const tokenPart = el("span", "ovs ovt");
+  const bar = el("span", "ovm");
+  bar.setAttribute("aria-hidden", "true");
+  const tokenText = el("span", "ovv");
+  tokenPart.append(el("span", "ovk", "Tokens"), bar, tokenText);
+  const segments = /* @__PURE__ */ new Map();
+  let drawnDots = "";
+  const drawBranches = (glance) => {
+    const nextDots = JSON.stringify([glance.dots, glance.more]);
+    if (nextDots !== drawnDots) {
+      drawnDots = nextDots;
+      const items = glance.dots.map((dot) => {
+        const item2 = el("i", dot.waiting ? "w" : void 0);
+        setVars(item2, { "--c": dot.color });
+        item2.title = dot.title;
+        return item2;
+      });
+      const more = glance.more > 0 ? [el("em", void 0, `+${glance.more}`)] : [];
+      dots.replaceChildren(...items, ...more);
+    }
+    setText(liveText, glance.none ? "none yet" : `${glance.live} live`);
+    waitPart.hidden = glance.waiting === 0;
+    setText(waitText2, `${glance.waiting} waiting for you`);
+    mergedPart.hidden = glance.merged === 0;
+    setText(mergedText2, `${glance.merged} merged`);
+  };
+  const drawTokens = (glance) => {
+    const shown = glance.tokens > 0 ? glance.segments : [];
+    const present = new Set(shown.map((segment) => segment.stage));
+    for (const [stage, drawn] of segments) {
+      if (!present.has(stage)) {
+        drawn.element.remove();
+        segments.delete(stage);
+      }
+    }
+    let previous;
+    for (const segment of shown) {
+      let drawn = segments.get(segment.stage);
+      if (!drawn) {
+        drawn = { element: el("i"), width: "", color: "", title: "" };
+        segments.set(segment.stage, drawn);
+      }
+      const item2 = drawn.element;
+      const width = `${segment.width.toFixed(2)}%`;
+      if (drawn.width !== width) {
+        drawn.width = width;
+        item2.style.width = width;
+      }
+      if (drawn.color !== segment.color) {
+        drawn.color = segment.color;
+        setVars(item2, { "--c": segment.color });
+      }
+      if (drawn.title !== segment.title) {
+        drawn.title = segment.title;
+        item2.title = segment.title;
+      }
+      const expected = previous ? previous.nextSibling : bar.firstChild;
+      if (item2 !== expected) {
+        bar.insertBefore(item2, expected);
+      }
+      previous = item2;
+    }
+    bar.hidden = shown.length === 0;
+    setText(tokenText, glance.tokens > 0 ? `${tokens(glance.tokens)} \xB7 ${cost(glance.usd)}` : "none yet");
+  };
+  return {
+    branches: branches2,
+    tokens: tokenPart,
+    draw(input) {
+      drawBranches(branchGlance(input.branches));
+      drawTokens(tokenGlance(input.tokenRanking, context.config.packages));
+    }
+  };
+};
+var barCount = 0;
 var createOverview = (host, context, link, openHealth) => {
-  const element = el("section", "overview");
-  element.setAttribute("aria-label", "Board overview");
+  barCount += 1;
+  const element = el("section", "ovw");
+  element.setAttribute("aria-label", "Branches and token use");
   element.hidden = true;
+  const header = el("div", "ovh");
+  const toggle = el("button", "hsx ovx");
+  toggle.type = "button";
+  const bodyId = `overview-body-${barCount}`;
+  toggle.setAttribute("aria-controls", bodyId);
+  toggle.append(chevronIcon());
+  const glance = createGlance(context);
+  header.append(toggle, el("h2", void 0, "Branches and token use"), glance.branches, glance.tokens);
+  const body = el("div", "ovbody");
+  body.id = bodyId;
+  const clip3 = el("div");
+  const section2 = el("div", "overview");
+  clip3.append(section2);
+  body.append(clip3);
+  element.append(header, body);
   const branchesHost = el("div", "overview-panel overview-branches");
   branchesHost.hidden = true;
   let branches2;
   let branchesFailed = false;
   let last;
   let linked;
+  const openKey = overviewOpenKey(context.repositoryId);
+  let open2 = readValue(openKey, true) === "1";
   const layout = () => {
     branchesHost.hidden = !branches2 || branchesFailed || branches2.isEmpty();
     const shown = [branchesHost, ranking.element].filter((panel) => !panel.hidden).length;
-    element.dataset.panels = String(shown);
+    section2.dataset.panels = String(shown);
     element.hidden = shown === 0;
   };
-  const ranking = createRanking(context, link, openHealth, (shown) => {
-    ranking.element.hidden = !shown;
-    layout();
-  });
+  const ranking = createRanking(
+    context,
+    link,
+    openHealth,
+    (shown) => {
+      ranking.element.hidden = !shown;
+      layout();
+    },
+    () => !open2
+  );
   ranking.element.hidden = true;
-  element.append(branchesHost, ranking.element);
+  section2.append(branchesHost, ranking.element);
   host.prepend(element);
+  const drawOpen = () => {
+    element.classList.toggle("open", open2);
+    body.classList.toggle("open", open2);
+    body.inert = !open2;
+    toggle.setAttribute("aria-expanded", String(open2));
+    toggle.setAttribute("aria-label", open2 ? "Hide branches and token use" : "Show branches and token use");
+  };
+  const holdBranches = () => {
+    try {
+      branches2?.hold?.(!open2);
+    } catch (error) {
+      branchesFailed = true;
+      console.error("Nurselog: the branches overview failed to draw; it is hidden until the next snapshot.", error);
+      layout();
+    }
+  };
+  header.addEventListener("click", () => {
+    open2 = !open2;
+    writeValue(openKey, open2 ? "1" : void 0, true);
+    drawOpen();
+    holdBranches();
+  });
+  drawOpen();
   return {
     element,
     branchesHost,
@@ -23805,6 +24654,7 @@ var createOverview = (host, context, link, openHealth) => {
       branchesHost.replaceChildren();
       branchesFailed = false;
       branches2 = create(branchesHost);
+      holdBranches();
       if (last) {
         branches2.update(last);
       }
@@ -23827,9 +24677,14 @@ var createOverview = (host, context, link, openHealth) => {
       } catch (error) {
         console.error("Nurselog: the token ranking failed to draw; the branches overview goes on.", error);
       }
+      try {
+        glance.draw(input);
+      } catch (error) {
+        console.error("Nurselog: the board panels' glance failed to draw; the panels go on.", error);
+      }
     },
     frame(clock, time2) {
-      if (!branches2 || branchesFailed) {
+      if (!open2 || !branches2 || branchesFailed) {
         return;
       }
       try {
@@ -24260,7 +25115,7 @@ var fitGraph = (session, options, hostWidth, wrapped) => {
 // src/ui/graph/session-effects.ts
 var MESSAGE_POP_MS = 80;
 var QUESTION_POP_MS = 80;
-var NONE2 = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [] };
+var NONE2 = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [], fills: [] };
 var isEnded2 = (state) => !isActive2(state) && state !== "pending" && state !== "skipped";
 var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
 var SHEEN_STATES = ["done", "approved", "changes"];
@@ -24278,6 +25133,20 @@ var sheensOf = (previous, current, pops) => {
     }
   }
   return sheens;
+};
+var filledKeys = (previous, current) => {
+  const before2 = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const keys2 = [];
+  for (const item2 of current.items) {
+    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
+      continue;
+    }
+    const old = before2.get(item2.key);
+    if (old?.kind === "node" && old.state === "running" && old.stale !== true && old.progress !== void 0) {
+      keys2.push(item2.key);
+    }
+  }
+  return keys2;
 };
 var rollsOf = (previous, current, pops) => {
   const before2 = new Map(previous.items.map((item2) => [item2.key, item2]));
@@ -24347,7 +25216,15 @@ var chain = (queue, current) => {
   }
   return chained;
 };
-var dotsOf2 = (previous, current, unfolded) => {
+var leaves = (dot, edges) => {
+  const edge = edges.get((dot.reverse ? dot.edges[dot.edges.length - 1] : dot.edges[0]) ?? "");
+  const end = dot.reverse ? edge?.b : edge?.a;
+  if (end === void 0) {
+    return void 0;
+  }
+  return "key" in end ? end.key : end.xKey;
+};
+var dotsOf2 = (previous, current, unfolded, filled) => {
   const before2 = new Map(previous.items.map((item2) => [item2.key, item2]));
   const edgeItems = new Map(current.items.filter((item2) => item2.kind === "edge").map((item2) => [item2.key, item2]));
   const queue = [];
@@ -24385,7 +25262,8 @@ var dotsOf2 = (previous, current, unfolded) => {
     }
   }
   const drawn = (dot) => dot.edges.every((key) => edgeItems.has(key));
-  const dots = chain(queue.filter(drawn), current).map((dot, index) => ({ ...dot, delay: index * DOT_STAGGER }));
+  const waits2 = (dot) => filled.has(leaves(dot, edgeItems) ?? "") ? FILL_MS : 0;
+  const dots = chain(queue.filter(drawn), current).map((dot, index) => ({ ...dot, delay: index * DOT_STAGGER + waits2(dot) }));
   let slot = dots.length;
   for (const [branch, reviewers] of fans) {
     if (reviewers.length === 1) {
@@ -24419,14 +25297,17 @@ var sessionEffects = (previous, current) => {
   }
   const folds = foldsOf(previous, current);
   const unfolded = new Set(folds.filter((fold) => fold.open).map((fold) => fold.pipeline));
-  const planned = dotsOf2(previous.layout, current.layout, unfolded);
+  const filled = filledKeys(previous.layout, current.layout);
+  const planned = dotsOf2(previous.layout, current.layout, unfolded, new Set(filled));
   const popKeys = popsOf(previous.layout, current.layout);
   for (const key of planned.flatMap((dot) => [...dot.to === void 0 ? [] : [dot.to], ...(dot.stops ?? []).map((stop) => stop.key)])) {
     if (!popKeys.includes(key)) {
       popKeys.push(key);
     }
   }
-  const pops = popsAtArrival(popKeys, planned).map((pop) => pop.key.startsWith("bubble:") ? { ...pop, delay: QUESTION_POP_MS } : pop);
+  const arrivals = popsAtArrival(popKeys, planned).map((pop) => pop.key.startsWith("bubble:") ? { ...pop, delay: QUESTION_POP_MS } : pop);
+  const fills = filled.map((key) => ({ key, delay: arrivals.find((pop) => pop.key === key)?.delay ?? 0 }));
+  const pops = arrivals.map((pop) => filled.includes(pop.key) ? { ...pop, delay: pop.delay + FILL_MS } : pop);
   const plan = current.layout.items.find((item2) => item2.key === "node:plan");
   const message = newestMessage(current.session);
   if (plan && message !== void 0 && message !== newestMessage(previous.session) && !pops.some((pop) => pop.key === plan.key)) {
@@ -24436,7 +25317,7 @@ var sessionEffects = (previous, current) => {
   const dots = planned.map(({ edges, color, delay, reverse }) => reverse ? { edges, color, delay, reverse } : { edges, color, delay });
   const sheens = sheensOf(previous.layout, current.layout, pops);
   const rolls = rollsOf(previous.layout, current.layout, pops);
-  return { pops, dots, sweep, folds, sheens, rolls };
+  return { pops, dots, sweep, folds, sheens, rolls, fills };
 };
 
 // src/ui/graph/session-view.ts
@@ -24450,6 +25331,7 @@ var createSessionGraphView = (host, context) => {
   host.replaceChildren(wrapper);
   const scene = createScene(wrapper, context, { session: true });
   const expandedBySession = /* @__PURE__ */ new Map();
+  const ringForms = /* @__PURE__ */ new Map();
   let last;
   let hostWidth = 0;
   let wrapped = false;
@@ -24481,7 +25363,8 @@ var createSessionGraphView = (host, context) => {
     if (!(hostWidth > 0)) {
       hostWidth = Math.floor(wrapper.clientWidth);
     }
-    const fit = fitGraph(session, { modelLetters: context.config.modelLetters, expanded, now, typical: context.typical }, hostWidth, wrapped);
+    const options = { modelLetters: context.config.modelLetters, expanded, now, typical: context.typical, ringForms };
+    const fit = fitGraph(session, options, hostWidth, wrapped);
     wrapped = fit.wrap;
     const current = { session, layout: fit.layout, expanded };
     scene.set(fit.layout, labelOf(session), fit.scale);
@@ -24998,9 +25881,9 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     verifyEmpty.hidden = rows.length > 0;
     verifyNote.hidden = rows.length === 0;
     branchList.set(branchBars(metrics, session.rows).map((bar) => ({ ...bar, color: colorValue(bar.color, context) })));
-    const grouped = toolBars(metrics.tools);
-    mainList.set(grouped.main);
-    subagentsList.set(grouped.subagents);
+    const grouped2 = toolBars(metrics.tools);
+    mainList.set(grouped2.main);
+    subagentsList.set(grouped2.subagents);
     const nurselog = overheadView(metrics.overhead);
     setText(overheadHead, nurselog.head);
     overheadHead.className = metrics.overhead ? "summary-overhead-head" : "summary-empty";
@@ -25216,7 +26099,7 @@ var totalRows = (byStage, packages) => {
     return { label: group.label, total: sums[i], value: tokens(sums[i]), segments };
   });
 };
-var startOf = (session) => parseTime(session.startedAt) ?? parseTime(session.tokens.points[0]?.at) ?? 0;
+var startOf2 = (session) => parseTime(session.startedAt) ?? parseTime(session.tokens.points[0]?.at) ?? 0;
 var seriesKey = (session) => {
   const last = session.tokens.points[session.tokens.points.length - 1];
   const total = processedTokens(session.tokens.total);
@@ -25402,12 +26285,12 @@ var createSessionTokensView = (host, context) => {
       return;
     }
     const session = current;
-    series ??= cumulativeSeries(session.tokens.points, startOf(session), context.config.packages);
+    series ??= cumulativeSeries(session.tokens.points, startOf2(session), context.config.packages);
     const stacked = series.upper[series.upper.length - 1];
     const seriesTotal = stacked ? stacked[stacked.length - 1] : 0;
     top = easeTop(top, topTarget(Math.max(sessionTokens(session), seriesTotal)), context.reducedMotion());
     const planAt = parseTime(session.planAt);
-    const planMs = planAt === void 0 ? void 0 : planAt - startOf(session);
+    const planMs = planAt === void 0 ? void 0 : planAt - startOf2(session);
     const next = { series, width: available, endMs: sessionElapsedMs(session, clock), top, planMs };
     if (needsRedraw(drawn, next)) {
       render(next);
@@ -25769,6 +26652,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   const makeCard = (id) => {
     const card = createSessionCard(context, (collapsed) => toggle(id, collapsed), (on) => point2(card.element, id, on));
     linkCard(id, card);
+    card.setCollapsed(isSessionCollapsed(collapses.get(id)));
     return card;
   };
   const stack = createCardList(stackList, context, "session", makeCard);
@@ -25785,7 +26669,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     cleared,
     onCleared: () => redraw(),
     makeCard,
-    collapsed: (session) => isSessionCollapsed(session, collapses.get(session.id)),
+    collapsed: (session) => isSessionCollapsed(collapses.get(session.id)),
     onShownChange: () => updateFootnote(),
     onHover: onRowHover
   });
@@ -25807,15 +26691,15 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   const updateFootnote = () => {
     const ids = [...stack.ids(), ...panel.visibleCards()];
     const shown = ids.map((id) => cardOf(id)?.session).filter((session) => session !== void 0);
-    footnote.hidden = !shown.some((session) => showsSubagentCost(session, isSessionCollapsed(session, collapses.get(session.id))));
+    footnote.hidden = !shown.some((session) => showsSubagentCost(session, isSessionCollapsed(collapses.get(session.id))));
   };
   const toggle = (sessionId, collapsed) => {
     const found = cardOf(sessionId);
     if (!found) {
       return;
     }
-    collapses.set(sessionId, storedAfterSessionToggle(found.session, collapsed));
-    found.card.setCollapsed(isSessionCollapsed(found.session, collapses.get(sessionId)));
+    collapses.set(sessionId, storedAfterSessionToggle(collapsed));
+    found.card.setCollapsed(isSessionCollapsed(collapses.get(sessionId)));
     updateFootnote();
   };
   const measure = () => {
@@ -25900,7 +26784,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       const session = sessionOf(view.sessions, id);
       const card = stack.cards.get(id);
       if (card && session) {
-        guard2("session", id, card, () => card.update(session, isSessionCollapsed(session, collapses.get(id))));
+        guard2("session", id, card, () => card.update(session, isSessionCollapsed(collapses.get(id))));
       }
     }
     conversations.update(view);
@@ -25932,7 +26816,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       }
       return;
     }
-    if (isSessionCollapsed(session, collapses.get(sessionId))) {
+    if (isSessionCollapsed(collapses.get(sessionId))) {
       toggle(sessionId, true);
     }
     const top = layoutTop(card.element) - options.topOffset();
@@ -27084,7 +27968,7 @@ var startBoard = async (source, options = {}) => {
   const riseItems = (current, host) => {
     const showsSoon = (element) => element === current.strip?.element && current.strip.waiting();
     const visible = (element) => element.getClientRects().length > 0 || showsSoon(element);
-    const risesAlone = (element) => ["card", "overview-panel"].some((name) => element.classList.contains(name));
+    const risesAlone = (element) => element.classList.contains("card");
     const items = [];
     for (const child of host.children) {
       if (!visible(child)) {
@@ -27293,6 +28177,7 @@ var startBoard = async (source, options = {}) => {
           update: (input) => branches2.update({ branches: input.branches, labelsOf, repositoryName: input.repository }),
           isEmpty: () => branches2.isEmpty(),
           frame: (clock2, time2) => branches2.frame(clock2, time2),
+          hold: (held) => branches2.hold(held),
           link: (lit) => branches2.highlight(lit),
           destroy: () => branches2.destroy()
         };

@@ -399,8 +399,8 @@ p { margin: 0; }
 /* a lost event stream (board-page.ts sets data-connection): the board panels, the workflow health strip, the cards, the
    conversations and the Finished runs panel dim and their CSS animations hold still, so a stale board shows no motion
    that looks live; the next snapshot brings both back */
-.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .hstrip, .cards, .conversations, .finished-panel) { opacity: .6; }
-.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.overview, .hstrip, .cards, .conversations, .finished-panel) :is(*, *::before, *::after) {
+.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.ovw, .hstrip, .cards, .conversations, .finished-panel) { opacity: .6; }
+.board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.ovw, .hstrip, .cards, .conversations, .finished-panel) :is(*, *::before, *::after) {
   animation-play-state: paused !important;
 }
 
