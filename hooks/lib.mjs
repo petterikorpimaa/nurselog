@@ -1036,17 +1036,24 @@ const slimFailureError = (error, sensitive) => {
 
 /**
  * What the hook keeps of a payload (design section 2.2): tool inputs without file bodies (lengths instead),
- * tool responses reduced to `slimResponse`, a failure's `error` cut to its start (none for a sensitive call), and
- * nothing but paths and the command for a tool that touches a denylisted path or prints secrets. Other fields pass
- * unchanged; redaction runs on the result.
+ * tool responses reduced to `slimResponse`, a failure's `error` cut to its start (none for a sensitive call) with
+ * `errorChars`, the length of the whole error text (kept for a sensitive call too, never the text; a stray one beside
+ * an `error` that is no string is dropped), and nothing but paths and the command for a tool that touches a denylisted path or prints secrets. Other fields
+ * pass unchanged; redaction runs on the result.
  */
 export const minimizePayload = (payload) => {
-  if (payload.tool_input === undefined && payload.tool_response === undefined && payload.error === undefined) {
+  const failure = payload.error !== undefined || payload.errorChars !== undefined;
+  if (payload.tool_input === undefined && payload.tool_response === undefined && !failure) {
     return payload;
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
   const sensitive = touchesSecret(input);
   const slim = { ...payload };
+  if (typeof payload.error === 'string') {
+    slim.errorChars = payload.error.length;
+  } else {
+    delete slim.errorChars;
+  }
   if (payload.error !== undefined) {
     const error = slimFailureError(payload.error, sensitive);
     if (error === undefined) {

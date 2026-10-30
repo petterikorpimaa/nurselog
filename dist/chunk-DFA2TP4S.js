@@ -40,7 +40,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-YQE4KOST.js";
+} from "./chunk-XWSOY4J2.js";
 
 // src/config.ts
 import { existsSync } from "fs";

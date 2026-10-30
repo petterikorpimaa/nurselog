@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-4YEIGH7M.js";
+} from "./chunk-DFA2TP4S.js";
 import {
   FIELD_NAMES,
   HOOK_DEFAULTS,
@@ -51,6 +51,7 @@ import {
   localDay,
   loopbackJson,
   newLineId,
+  newMainSteps,
   notSetUpMessage,
   openNoFollow,
   ownEntry,
@@ -84,7 +85,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-YQE4KOST.js";
+} from "./chunk-XWSOY4J2.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -1105,7 +1106,12 @@ var implementOf = (agent) => {
   const callLimit = toolCalls.limit > 0 ? toolCalls.limit : null;
   return { role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, callLimit, commands, failed };
 };
-var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null });
+var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, stage: agent.stage });
+var useOf = ({ calls, chars, largeOutputs: largeOutputs2 }) => ({ calls, chars, largeOutputs: largeOutputs2 });
+var stepsOf = (main) => {
+  const { calls, explore, implement, verify } = main?.mainSteps ?? newMainSteps();
+  return { calls, explore: useOf(explore), implement: useOf(implement), verify: useOf(verify) };
+};
 var reviewOf = (agent) => {
   const block = agent.report?.block;
   const fixItems = block ? block.followups.filter((item) => item.type === "fix").length : null;
@@ -1169,7 +1175,7 @@ var sessionAggregate = (session) => {
     finishedAt,
     work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
     metrics: { ...metrics, branches, resumes: { count: count2, expired, cacheWriteUsd } },
-    main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit },
+    main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit, steps: stepsOf(main) },
     builds: subagentsOf(session, "implement").map(implementOf),
     reviews: subagentsOf(session, "review").map(reviewOf),
     agents: allSubagents(session).map(agentOf),
@@ -1270,9 +1276,10 @@ var duration = (ms) => {
 var plural = (count2, noun) => `${count2} ${noun}${count2 === 1 ? "" : "s"}`;
 
 // src/insights/insights.ts
-var AREAS = ["delivery", "implementers", "review", "verification", "tokens", "questions"];
+var AREAS = ["delivery", "explore", "implementers", "review", "verification", "tokens", "questions"];
 var AREA_NAMES = {
   delivery: "Delivery",
+  explore: "Explore",
   implementers: "Implementers",
   review: "Review",
   verification: "Verification",
@@ -1295,6 +1302,10 @@ var SIGNAL_NAMES = {
   "main-cost-share": "main-thread cost share",
   "overhead-share": "Nurselog overhead share",
   "main-large-outputs": "main-thread large outputs",
+  "main-steps": "main-thread steps",
+  "main-reads": "main-thread reads",
+  "main-check-output": "main-thread check output",
+  "unchecked-sessions": "sessions without a check",
   "question-open-time": "question open time",
   "questions-per-session": "questions per session",
   "developer-wait": "developer wait"
@@ -1305,6 +1316,8 @@ var QUIET_RUNS = 10;
 var GUIDELINE_SESSIONS = 3;
 var SPREAD_VALUES = 3;
 var MAIN_ROLE = "main";
+var MAIN_STEPS = ["explore", "implement", "verify"];
+var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 var MAX_SESSION_ID2 = 256;
 var MAX_SHOWN_TEXT = 200;
 var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
@@ -1325,6 +1338,7 @@ var NO_PR = "no work session opened a PR (PRs come from the gh poll of github.re
 var NO_PR_AFTER_WORK = "no PR was opened after the session's first work on its branch";
 var NO_PR_SIZE = "no PR size is known (the gh poll of github.repo reads it)";
 var NO_CHANGED_LINE = "the PRs changed no line";
+var NO_EDIT = "no work session edited a file";
 var PR = ["PR", "PRs"];
 var LINE = ["line", "lines"];
 var IMPLEMENT_RUN = ["implement run", "implement runs"];
@@ -1334,6 +1348,9 @@ var RUN = ["run", "runs"];
 var SESSION = ["session", "sessions"];
 var WORK_SESSION = ["work session", "work sessions"];
 var ANSWERED = ["answered question", "answered questions"];
+var EDITED = ["session with a file edit", "sessions with a file edit"];
+var CHARACTER = ["character", "characters"];
+var MAIN_CALL = ["main-thread call", "main-thread calls"];
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var fieldsOf = (value) => isRecord(value) ? value : {};
 var entriesOf = (value) => Array.isArray(value) ? value.filter(isRecord) : void 0;
@@ -1341,6 +1358,7 @@ var numberOf = (value) => typeof value === "number" && Number.isFinite(value) ? 
 var timeOf2 = (value) => typeof value === "string" ? time(value) : Number.NaN;
 var isNumber = (value) => value !== null;
 var lineCountOf = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+var countOf = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 var implementRun = (entry) => ({
   callsAtFirstStop: numberOf(entry.callsAtFirstStop),
   callLimit: numberOf(entry.callLimit),
@@ -1383,6 +1401,44 @@ var openTime = (entry) => {
   const answered = timeOf2(entry.answeredAt);
   return Number.isFinite(asked) && Number.isFinite(answered) ? Math.max(0, answered - asked) : null;
 };
+var stepUse = (value) => {
+  const fields = fieldsOf(value);
+  const calls = countOf(fields.calls);
+  const chars = countOf(fields.chars);
+  const largeOutputs2 = countOf(fields.largeOutputs);
+  return calls === null || chars === null || largeOutputs2 === null ? void 0 : { calls, chars };
+};
+var stepCalls = (value) => {
+  const fields = fieldsOf(value);
+  const calls = countOf(fields.calls);
+  const explore = stepUse(fields.explore);
+  const implement = stepUse(fields.implement);
+  const verify = stepUse(fields.verify);
+  if (calls === null || explore === void 0 || implement === void 0 || verify === void 0) {
+    return void 0;
+  }
+  const inSteps = explore.calls + implement.calls + verify.calls;
+  return inSteps > calls ? void 0 : { calls, explore, implement, verify };
+};
+var ranCheck = (entry) => {
+  const commands = fieldsOf(entry.commands);
+  return (numberOf(commands.typecheck) ?? 0) > 0 || (numberOf(commands.test) ?? 0) > 0;
+};
+var editedWith = (entry) => {
+  const editTool = typeof entry.tool === "string" && EDIT_TOOLS.has(entry.tool);
+  return editTool && (numberOf(entry.calls) ?? 0) > 0;
+};
+var checksOf = (metrics) => {
+  const tools = fieldsOf(metrics.tools);
+  const main = entriesOf(tools.main);
+  const subagents = entriesOf(tools.subagents);
+  const verification = entriesOf(metrics.verification);
+  if (main === void 0 || subagents === void 0 || verification === void 0) {
+    return void 0;
+  }
+  const edited = [...main, ...subagents].some(editedWith);
+  return { edited, checked: verification.some(ranCheck) };
+};
 var shownText = (value) => {
   if (typeof value !== "string") {
     return void 0;
@@ -1409,7 +1465,10 @@ var readSession = (aggregate, finished) => {
     largeOutputs: numberOf(main.largeOutputs),
     contextLimit: numberOf(main.contextLimit),
     questions: entriesOf(aggregate.questions)?.map(openTime),
-    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs)
+    waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs),
+    steps: stepCalls(main.steps),
+    otherAgent: entriesOf(aggregate.agents)?.some((entry) => entry.stage === "other") ?? false,
+    checks: checksOf(metrics)
   };
 };
 var pad = (value) => String(value).padStart(2, "0");
@@ -1418,7 +1477,9 @@ var sum = (values) => values.reduce((total, value) => total + value, 0);
 var median = (values) => percentile(values, 50);
 var count = (value, noun) => `${value} ${value === 1 ? noun[0] : noun[1]}`;
 var groupedCount = (value, noun) => `${value.toLocaleString("en-US")} ${value === 1 ? noun[0] : noun[1]}`;
+var grouped = (value) => Math.round(value).toLocaleString("en-US");
 var percent = (fraction) => Math.round(fraction * 100);
+var stepPercent = (fraction) => fraction > 0 && fraction < 5e-3 ? "<1%" : `${percent(fraction)}%`;
 var percentTenths = (fraction) => (fraction * 100).toFixed(1);
 var listText = (items) => items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 var noRuns = (reason) => ({ lacks: reason, runCheck: true });
@@ -1568,6 +1629,60 @@ var costPer100Lines = (sides) => {
   const comparedTo = before(sides, baseline, PR, (evidence) => evidence.value === void 0 ? "no changed lines" : cost(evidence.value));
   const body = `100 changed lines cost ${cost(window.value ?? 0)}, over ${count(window.n, PR)} of ${groupedCount(sized.lines, LINE)} (${comparedTo})`;
   return { lines: [{ flag: comparison(factorFlag(window, baseline)), window, baseline, body }] };
+};
+var recordedSteps = (sessions) => sessions.flatMap((session) => session.steps ?? []);
+var stepChars = (step) => (sessions) => recordedSteps(sessions).map((steps) => steps[step].chars);
+var stepCharsLine = (sides, step, limit, what) => {
+  const values = stepChars(step);
+  const chars = values(sides.window);
+  if (chars.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const { window, baseline, flag } = spreadSides(sides, values);
+  const guideline = guidelineOf(limit);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_SESSIONS && Math.round(window.value ?? 0) > Math.round(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `at most ${grouped(guideline.limit)} per session`;
+  const returned = `returned ${groupedCount(Math.round(sum(chars)), CHARACTER)} in the last ${count(window.n, SESSION)}`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => grouped(evidence.value ?? 0));
+  const body = `the main thread's own ${what} ${returned}, a median of ${grouped(window.value ?? 0)} per session ${aside(comparedTo, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
+};
+var mainReads = (sides) => stepCharsLine(sides, "explore", sides.guidelines.mainReadChars, "reads and searches");
+var mainCheckOutput = (sides) => stepCharsLine(sides, "verify", sides.guidelines.mainCheckChars, "verification commands");
+var pooledSteps = (sessions) => {
+  const recorded = recordedSteps(sessions);
+  const stepSum = (step) => sum(recorded.map((steps2) => steps2[step].calls));
+  const steps = { explore: stepSum("explore"), implement: stepSum("implement"), verify: stepSum("verify") };
+  return { sessions: recorded.length, calls: sum(recorded.map((entry) => entry.calls)), steps };
+};
+var stepShares = (pooled) => {
+  if (pooled.calls <= 0) {
+    return void 0;
+  }
+  return { explore: pooled.steps.explore / pooled.calls, implement: pooled.steps.implement / pooled.calls, verify: pooled.steps.verify / pooled.calls };
+};
+var mainStepsLine = (sides) => {
+  const pooled = pooledSteps(sides.window);
+  if (pooled.sessions === 0) {
+    return { lines: [] };
+  }
+  const shares = stepShares(pooled);
+  if (shares === void 0) {
+    return { lines: [{ window: { n: pooled.sessions }, body: `no main-thread call ended in the last ${count(pooled.sessions, SESSION)}` }] };
+  }
+  const inSteps = shares.explore + shares.implement + shares.verify;
+  const printed = MAIN_STEPS.map((step) => percent(shares[step]));
+  const other = Math.max(0, 100 - sum(printed));
+  const parts = [...MAIN_STEPS.map((step) => `${step} ${stepPercent(shares[step])}`), `other ${other}%`];
+  const body = `${listText(parts)} of ${groupedCount(pooled.calls, MAIN_CALL)}`;
+  return { lines: [{ window: { n: pooled.sessions, value: inSteps }, steps: shares, body }] };
+};
+var mainStepsOf = (window) => {
+  const shares = stepShares(pooledSteps(window));
+  const built = window.some((session) => (session.builds?.length ?? 0) > 0);
+  const explored = window.some((session) => session.otherAgent);
+  const shareOf = (step, subagents) => ({ share: shares?.[step] ?? null, subagents });
+  return { explore: shareOf("explore", explored), implement: shareOf("implement", built), verify: shareOf("verify", built) };
 };
 var buildsOf = (sessions) => sessions.flatMap((session) => session.builds ?? []);
 var budgetRuns = (sessions) => {
@@ -1719,6 +1834,24 @@ var failedRuns = (sides) => {
     return { lacks: NOT_STORED };
   }
   return { lines: [rateLine(sides, failedUnits, (run) => (run.failed ?? 0) >= 1, IMPLEMENT_RUN, "had a failed full-package command")] };
+};
+var editedSessions = (sessions) => sessions.filter((session) => session.checks?.edited === true);
+var isUnchecked = (session) => session.checks?.checked === false;
+var uncheckedSessions = (sides) => {
+  const units = editedSessions(sides.window);
+  if (units.length === 0) {
+    return { lacks: sides.window.some((session) => session.checks !== void 0) ? NO_EDIT : NOT_STORED };
+  }
+  const window = kOfN(units, isUnchecked);
+  const baseline = onBaseline(sides, (sessions) => kOfN(editedSessions(sessions), isUnchecked));
+  const k = window.k ?? 0;
+  const floored = Math.floor(k * 100 / window.n);
+  const guideline = guidelineOf(sides.guidelines.uncheckedSessions);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_SESSIONS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const share = `${floored}%; ${before(sides, baseline, EDITED, kOfNText)}`;
+  const body = `${k} of the last ${count(window.n, EDITED)} ran no typecheck or test command matched by verification.kinds ${aside(share, phrase)}`;
+  return { lines: [{ flag: flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
 };
 var outputRoles = (sessions, role) => {
   const entries = sessions.flatMap((session) => session.roles ?? []);
@@ -1889,6 +2022,7 @@ var SIGNALS = [
   { id: "cost-per-pr", area: "delivery", of: costPerPr },
   { id: "time-to-pr", area: "delivery", of: timeToPr },
   { id: "cost-per-100-lines", area: "delivery", of: costPer100Lines },
+  { id: "main-reads", area: "explore", of: mainReads },
   { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
   { id: "second-implementer", area: "implementers", of: secondImplementer },
   { id: "second-round", area: "review", of: secondRound },
@@ -1897,11 +2031,15 @@ var SIGNALS = [
   { id: "quiet-reviewer", area: "review", of: quietReviewer, off: (guidelines) => guidelines.quietReviewer === null },
   { id: "verify-commands", area: "verification", of: verifyCommands },
   { id: "failed-runs", area: "verification", of: failedRuns },
+  { id: "main-check-output", area: "verification", of: mainCheckOutput },
+  { id: "unchecked-sessions", area: "verification", of: uncheckedSessions },
   { id: "cache-per-output", area: "tokens", of: cachePerOutput },
   { id: "main-peak-context", area: "tokens", of: mainPeakContext },
   { id: "main-cost-share", area: "tokens", of: mainCostShare },
   { id: "overhead-share", area: "tokens", of: overheadShare },
   { id: "main-large-outputs", area: "tokens", of: mainLargeOutputs },
+  // Informational: no flag, no guideline and no not-measured line.
+  { id: "main-steps", area: "tokens", of: mainStepsLine },
   { id: "question-open-time", area: "questions", of: questionOpenTime },
   { id: "questions-per-session", area: "questions", of: questionsPerSession },
   { id: "developer-wait", area: "questions", of: developerWait }
@@ -1911,12 +2049,15 @@ var outcomesAlone = (signal, read, sides) => {
 };
 var pointOf = (entry, outcome, role) => {
   const session = entry.session.id;
-  const evidence = "lines" in outcome ? outcome.lines.find((line) => line.role === role)?.window : void 0;
+  const line = "lines" in outcome ? outcome.lines.find((found) => found.role === role) : void 0;
+  const evidence = line?.window;
   if (evidence === void 0) {
     return { session, value: null, window: entry.window };
   }
   const share = evidence.k !== void 0 && evidence.n > 0 ? evidence.k / evidence.n : null;
-  return { session, value: evidence.value ?? share, ...evidence.k === void 0 ? {} : { k: evidence.k }, n: evidence.n, window: entry.window };
+  const counted = evidence.k === void 0 ? {} : { k: evidence.k };
+  const steps = line?.steps === void 0 ? {} : { steps: line.steps };
+  return { session, value: evidence.value ?? share, ...counted, n: evidence.n, window: entry.window, ...steps };
 };
 var signalLine = (area, signal, line, series) => ({
   area,
@@ -1941,7 +2082,7 @@ var notMeasuredOf = (area, lacks, every, sessions) => {
     });
     text = `${AREA_NAMES[area]}: ${parts.join("; ")} ${span}.`;
   }
-  const unused = every && lacks.every((lack) => lack.runCheck);
+  const unused = lacks.every((lack) => lack.runCheck);
   const notMeasured = { signals, reason: reasons.join("; "), ...unused ? { unused: true } : {} };
   return { area, signal: signals[0], notMeasured, series: [], text };
 };
@@ -1987,8 +2128,10 @@ var reportSession = (session) => ({
 });
 var guidelinesOf = (guidelines) => {
   const { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cachePerOutput2 } = guidelines;
+  const { mainReadChars, mainCheckChars, uncheckedSessions: uncheckedSessions2 } = guidelines;
   const cache = { main: cachePerOutput2.main, agents: cachePerOutput2.agents };
-  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache };
+  const main = { mainReadChars, mainCheckChars, uncheckedSessions: uncheckedSessions2 };
+  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache, ...main };
 };
 var insightsOf = (aggregates, options, now) => {
   const sessions = selectSessions(aggregates, options, now);
@@ -2009,7 +2152,8 @@ var insightsOf = (aggregates, options, now) => {
   const settings = { window: options.window, baseline: options.baseline, minBaseline: options.minBaseline, keepDays: options.keepDays, guidelines };
   const listed2 = oldest.map((entry) => reportSession(entry.session));
   const insights = window.length === 0 ? [] : reportLines(sides, oldest);
-  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, closing };
+  const mainSteps = mainStepsOf(window);
+  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, mainSteps, closing };
 };
 
 // src/spool/report-keeper.ts

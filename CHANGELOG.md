@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.8 (2026-10-30)
+
+- A reviewer's ring counts every look at a changed file and fills at the stop
+- A Fix starts from its own session's reviewer, and a fixer's items count its edits
+- Start here in the workflow health report
+- Count the output of a failed call
+- The map draws the main thread's own steps
+- The branches and token use bar and collapsed session cards
+
 ## 0.1.7 (2026-10-29)
 
 - A sample workflow health report on the live demo and the replay

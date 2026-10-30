@@ -170,7 +170,15 @@
 .session-graph .node-progress.still .progress-light { stroke-dasharray: none; animation: none; }
 .session-graph .progress-tick { stroke: var(--fg-3); stroke-width: 1.2; }
 @keyframes graph-progress-light { from { stroke-dashoffset: 34; } to { stroke-dashoffset: -100; } }
-/* the done sheen (nodes.ts, scene.ts): a band of light in the foreground colour that crosses a finished subagent's node
+/* the fill at the stop (decision 169, stop-motion.ts): the scene holds a stopping node in its running look while its
+   ring fills in 300 ms (FILL_MS of effects.ts): the parts not done turn solid one after another clockwise (their
+   durations and delays inline), the one arc's end runs to the whole circle on --ease, the light fades out and the ring
+   keeps still (no fade-in when it is put back); then the node is rebuilt done and pops while the ring fades out over
+   180 ms. None under reduced motion */
+.session-graph .node-progress.filling { animation: none; }
+.session-graph .node-progress.filling .progress-part, .session-graph .node-progress.filling .progress-done { transition: stroke-dasharray .3s var(--ease), stroke-opacity .3s var(--ease); }
+.session-graph .node-progress.filling .progress-light { opacity: 0; transition: opacity .2s; }
+/* the done sheen (nodes.ts, stop-motion.ts): a band of light in the foreground colour that crosses a finished subagent's node
    once; the band is an alpha mask, so its stops need only their opacity */
 .session-graph .node-sheen { pointer-events: none; }
 .session-graph .node-sheen-light { fill: var(--fg); }

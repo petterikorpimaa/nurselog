@@ -1026,12 +1026,18 @@ var slimFailureError = (error, sensitive) => {
   return redactString(error).slice(0, FAILURE_ERROR_CHARS);
 };
 var minimizePayload = (payload) => {
-  if (payload.tool_input === void 0 && payload.tool_response === void 0 && payload.error === void 0) {
+  const failure = payload.error !== void 0 || payload.errorChars !== void 0;
+  if (payload.tool_input === void 0 && payload.tool_response === void 0 && !failure) {
     return payload;
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
   const sensitive = touchesSecret(input);
   const slim = { ...payload };
+  if (typeof payload.error === "string") {
+    slim.errorChars = payload.error.length;
+  } else {
+    delete slim.errorChars;
+  }
   if (payload.error !== void 0) {
     const error = slimFailureError(payload.error, sensitive);
     if (error === void 0) {
@@ -2045,7 +2051,7 @@ var DEFAULT_CONFIG = {
     baseline: 20,
     minBaseline: 10,
     keepDays: 365,
-    guidelines: { budgetFirstStop: 0.3, quietReviewer: 0.3, overheadShare: 0.01, mainPeakContext: 0.4, mainLargeOutputs: 2, cachePerOutput: { main: 350, agents: 100 } }
+    guidelines: { budgetFirstStop: 0.3, quietReviewer: 0.3, overheadShare: 0.01, mainPeakContext: 0.4, mainLargeOutputs: 2, cachePerOutput: { main: 350, agents: 100 }, mainReadChars: 1e5, mainCheckChars: 2e4, uncheckedSessions: 0.8 }
   },
   retention: { indexHours: 6 },
   server: { host: "127.0.0.1" },
@@ -2255,7 +2261,10 @@ var DEFAULTED_KEYS = [
   ["insights.guidelines.mainLargeOutputs", LIMIT, isLimit],
   ["insights.guidelines.cachePerOutput", OBJECT, isPlainObject],
   ["insights.guidelines.cachePerOutput.main", POSITIVE_LIMIT, isPositiveLimit],
-  ["insights.guidelines.cachePerOutput.agents", POSITIVE_LIMIT, isPositiveLimit]
+  ["insights.guidelines.cachePerOutput.agents", POSITIVE_LIMIT, isPositiveLimit],
+  ["insights.guidelines.mainReadChars", LIMIT, isLimit],
+  ["insights.guidelines.mainCheckChars", LIMIT, isLimit],
+  ["insights.guidelines.uncheckedSessions", SHARE_LIMIT, isShareLimit]
 ];
 var valueAt = (root, path) => {
   let value = root;
@@ -3121,7 +3130,15 @@ var hookPayloadToEvent = (payload, options) => {
       return { ...envelope, src: "hook", event: "tool.post", data };
     }
     case "PostToolUseFailure": {
-      const data = { ...base, toolUseId: str(payload.tool_use_id) ?? "", tool, durationMs: num(payload.duration_ms), isInterrupt: payload.is_interrupt === true, error: cap(payload.error, FAILURE_ERROR_CHARS) };
+      const data = {
+        ...base,
+        toolUseId: str(payload.tool_use_id) ?? "",
+        tool,
+        durationMs: num(payload.duration_ms),
+        isInterrupt: payload.is_interrupt === true,
+        error: cap(payload.error, FAILURE_ERROR_CHARS),
+        errorChars: num(payload.errorChars)
+      };
       return { ...envelope, src: "hook", event: "tool.fail", data };
     }
     case "PermissionRequest":
@@ -5635,20 +5652,68 @@ var clearItems = (entry) => {
   delete entry.items;
   delete entry.matched;
 };
-var markItems = (entry, path, aliases) => {
+var markWhere = (entry, hit) => {
   const { worktree, items, matched } = entry;
   if (worktree === void 0 || !items || !matched) {
     return false;
   }
   let changed = false;
   items.forEach((item, index) => {
-    if (!matched[index] && itemPath(worktree, item, aliases) === path) {
+    if (!matched[index] && hit(item, worktree)) {
       matched[index] = true;
       changed = true;
     }
   });
   return changed;
 };
+var itemHit = (worktree, item, paths, aliases) => {
+  const own = itemPath(worktree, item, aliases);
+  if (own === void 0) {
+    return false;
+  }
+  const suffix = !isAbsolute2(item) && item.includes("/") ? `/${item}` : void 0;
+  return paths.some((path) => path === own || path === item || suffix !== void 0 && path.endsWith(suffix));
+};
+var markPathItems = (entry, paths, aliases) => markWhere(entry, (item, worktree) => itemHit(worktree, item, paths, aliases));
+var WORD_BREAK = /[\s'"`()[\]{}<>,;|&=:#]+/;
+var wordPath = (word, aliases) => {
+  if (isAbsolute2(word)) {
+    return resolveAlias(normalizePath(word), aliases);
+  }
+  return word.replace(/^(?:\.\/)+/, "");
+};
+var pathWords = (command, aliases) => {
+  const words = command.split(WORD_BREAK).filter((word) => word !== "");
+  return words.map((word) => wordPath(word, aliases));
+};
+var INTERPRETER = /^(?:python[0-9.]*|node|ruby|perl|bash|sh)$/;
+var NO_FILE_REDIRECT = /[0-9&]*>>?\s*\/dev\/\S*|[0-9]*>&[0-9-]+/g;
+var commandWords = (words) => {
+  const at = words.findIndex((word) => !PREFIX_WORD.test(word));
+  return at < 0 ? [] : words.slice(at);
+};
+var writingCommand = (segment) => {
+  const words = shellWords(segment);
+  const [first = "", ...args] = commandWords(words);
+  const name = first.slice(first.lastIndexOf("/") + 1);
+  if (name === "sed") {
+    return args.some((word) => /^-[a-zA-Z]*i|^--in-place/.test(word));
+  }
+  if (name === "perl" && args.some((word) => /^-[a-z0-9]*i/.test(word))) {
+    return true;
+  }
+  if (name === "tee") {
+    return args.some((word) => !word.startsWith("-") && !word.startsWith("/dev/"));
+  }
+  if (name === "patch") {
+    return true;
+  }
+  if (name === "git") {
+    return gitArgs(words)?.[0] === "apply";
+  }
+  return INTERPRETER.test(name) && segment.code.includes("<<");
+};
+var writesFiles = (command) => shellSegments(command).some((segment) => segment.code.replace(NO_FILE_REDIRECT, "").includes(">") || writingCommand(segment));
 var knowsPr = (run, agentId, config) => {
   const holds = Object.hasOwn(run.agents, agentId) && !isTrunkLike(run.branch, config);
   return holds || run.pr?.openedBy?.agentId === agentId;
@@ -5663,18 +5728,19 @@ var fixPackage = (run, fix, config) => {
   const pkg = config.packages.find((item) => item.id === id);
   return pkg && pkg.paths.length > 0 ? pkg.id : void 0;
 };
-var fixItems = (run, fix, config, aliases) => {
-  const reviewers = run.reviewers.filter((reviewer) => reviewer.state === "changes");
+var fixItems = (run, fix, config, aliases, sessions) => {
+  const sessionId = ownValue(sessions, fix.agentId) ?? fix.sessionId;
+  const reviewers = run.reviewers.filter((reviewer) => reviewer.state === "changes" && (sessionId === void 0 || ownValue(sessions, reviewer.agentId) === sessionId));
   const followups = reviewers.flatMap((reviewer) => ownValue(run.agents, reviewer.agentId)?.report?.block?.followups ?? []);
   const files = followups.flatMap((item) => item.type === "fix" && item.file ? [fixItemFile(item.file, run.worktree, aliases)] : []).filter((file) => file !== "");
   const pkg = fixPackage(run, fix, config);
   const inPackage = pkg === void 0 ? [] : files.filter((file) => packageOf(file, config) === pkg);
   return (inPackage.length > 0 ? inPackage : files).slice(0, PROGRESS_ITEMS_CAP);
 };
-var fixTarget = (run, home, agentId, config, aliases) => {
+var fixTarget = (run, home, agentId, config, aliases, sessions) => {
   const fixRun = agentFix(run, agentId) ? run : home;
   const fix = agentFix(fixRun, agentId);
-  const items = fix ? fixItems(fixRun, fix, config, aliases) : [];
+  const items = fix ? fixItems(fixRun, fix, config, aliases, sessions) : [];
   return items.length > 0 ? { worktree: fixRun.worktree, items } : void 0;
 };
 var matchedPaths = (entry, aliases) => {
@@ -5688,7 +5754,7 @@ var matchedPaths = (entry, aliases) => {
   });
   return paths;
 };
-var openedPaths = (entry, aliases) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry, aliases)]);
+var lookedPaths = (entry, aliases) => /* @__PURE__ */ new Set([...entry.seen ?? [], ...matchedPaths(entry, aliases)]);
 var matchesOf = (worktree, items, paths, aliases) => {
   const real = new Set([...paths].map((path) => resolveAlias(path, aliases)));
   return items.map((item) => real.has(itemPath(worktree, item, aliases) ?? ""));
@@ -5726,7 +5792,7 @@ var beginLeg = (state, run, agentId, at, config) => {
   delete agent.progress;
   if (agent.stage === "implement") {
     const aliases = state.index.worktreeAliases;
-    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config, aliases), aliases);
+    setFixItems(entry, agent, fixTarget(run, home.run, agentId, config, aliases, state.index.agentSessions), aliases);
   } else if (agent.stage === "pr") {
     const known = Object.values(state.board.runs).some((item) => item.pr !== void 0 && knowsPr(item, agentId, config));
     agent.progress = phaseProgress("pr", known ? FINISHING : PUSH);
@@ -5738,29 +5804,50 @@ var refreshFixItems = (state, run, agentId, at, config) => {
     return;
   }
   const aliases = state.index.worktreeAliases;
-  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config, aliases), aliases);
+  setFixItems(found.entry, found.agent, fixTarget(run, found.run, agentId, config, aliases, state.index.agentSessions), aliases);
   touch(found.entry, at);
+};
+var lookAt = (found, paths, at, aliases) => {
+  const { entry, agent } = found;
+  touch(entry, at);
+  if (entry.items && entry.matched) {
+    if (markPathItems(entry, paths, aliases)) {
+      agent.progress = itemsProgress("files", entry.matched);
+    }
+    return;
+  }
+  const seen = entry.seen ?? [];
+  for (const path of paths) {
+    if (!seen.includes(path) && seen.length < PROGRESS_SEEN_CAP) {
+      seen.push(path);
+    }
+  }
+  entry.seen = seen;
 };
 var noteRead = (state, agentId, filePath, at) => {
   const found = runningEntry(state, agentId, "review");
   if (!found || !isAbsolute2(filePath)) {
     return;
   }
-  const { entry, agent } = found;
   const aliases = state.index.worktreeAliases;
-  const path = resolveAlias(normalizePath(filePath), aliases);
-  touch(entry, at);
-  if (entry.items && entry.matched) {
-    if (markItems(entry, path, aliases)) {
-      agent.progress = itemsProgress("files", entry.matched);
-    }
+  lookAt(found, [resolveAlias(normalizePath(filePath), aliases)], at, aliases);
+};
+var noteBashRead = (state, agentId, command, at) => {
+  const found = runningEntry(state, agentId, "review");
+  if (!found) {
     return;
   }
-  const seen = entry.seen ?? [];
-  if (!seen.includes(path) && seen.length < PROGRESS_SEEN_CAP) {
-    seen.push(path);
+  const aliases = state.index.worktreeAliases;
+  lookAt(found, pathWords(command, aliases), at, aliases);
+};
+var noteGrepPath = (state, agentId, path, at) => {
+  const found = runningEntry(state, agentId, "review");
+  const word = path.trim();
+  if (!found || word === "") {
+    return;
   }
-  entry.seen = seen;
+  const aliases = state.index.worktreeAliases;
+  lookAt(found, [wordPath(word, aliases)], at, aliases);
 };
 var noteEdit = (state, agentId, filePath, at) => {
   const found = runningEntry(state, agentId, "implement");
@@ -5771,12 +5858,30 @@ var noteEdit = (state, agentId, filePath, at) => {
   const aliases = state.index.worktreeAliases;
   touch(entry, at);
   if (entry.items && entry.matched) {
-    if (markItems(entry, resolveAlias(normalizePath(filePath), aliases), aliases)) {
+    if (markPathItems(entry, [resolveAlias(normalizePath(filePath), aliases)], aliases)) {
       agent.progress = itemsProgress("fixes", entry.matched);
     }
     return;
   }
   if (agent.progress?.kind === "implement" && agent.progress.current !== EDIT) {
+    agent.progress = phaseProgress("implement", EDIT);
+  }
+};
+var noteBashEdit = (state, agentId, command, at) => {
+  const found = runningEntry(state, agentId, "implement");
+  if (!found || !writesFiles(command)) {
+    return;
+  }
+  const { entry, agent } = found;
+  const aliases = state.index.worktreeAliases;
+  touch(entry, at);
+  if (entry.items && entry.matched) {
+    if (markPathItems(entry, pathWords(command, aliases), aliases)) {
+      agent.progress = itemsProgress("fixes", entry.matched);
+    }
+    return;
+  }
+  if (agent.progress?.kind === "implement" && agent.progress.current === READ) {
     agent.progress = phaseProgress("implement", EDIT);
   }
 };
@@ -5818,9 +5923,9 @@ var applyDiff = (state, data, at, truncated) => {
   touch(entry, at);
   const counted = data.total >= 1 && data.total <= PROGRESS_ITEMS_CAP && data.files.length === data.total;
   const aliases = state.index.worktreeAliases;
-  const opened = openedPaths(entry, aliases);
+  const looked = [...lookedPaths(entry, aliases)];
   if (!counted) {
-    entry.seen = [...opened].slice(0, PROGRESS_SEEN_CAP);
+    entry.seen = looked.slice(0, PROGRESS_SEEN_CAP);
     clearItems(entry);
     delete agent.progress;
     return run;
@@ -5829,7 +5934,8 @@ var applyDiff = (state, data, at, truncated) => {
   const items = [...data.files];
   entry.worktree = worktree;
   entry.items = items;
-  entry.matched = matchesOf(worktree, items, opened, aliases);
+  const real = looked.map((path) => isAbsolute2(path) ? resolveAlias(path, aliases) : path);
+  entry.matched = items.map((item) => itemHit(worktree, item, real, aliases));
   delete entry.seen;
   agent.progress = itemsProgress("files", entry.matched);
   return run;
@@ -6554,6 +6660,7 @@ ${spawn2.paths.map((path) => relativePath(run, path, state.index.worktreeAliases
 };
 var reviewerWithChanges = (run) => [...run.reviewers].reverse().find((reviewer) => reviewer.state === "changes");
 var sessionReviewerWithChanges = (run, sessionId, sessions) => [...run.reviewers].reverse().find((reviewer) => reviewer.state === "changes" && ownValue(sessions, reviewer.agentId) === sessionId);
+var fixReviewerFor = (run, agent, sessionId, sessions) => sessionReviewerWithChanges(run, ownValue(sessions, agent.id) ?? sessionId, sessions);
 var openFixOf = (fix, agentId, sessionId) => fix.state === "running" && fix.agentId === agentId && (sessionId === void 0 || fix.sessionId === sessionId);
 var startFix = (run, reviewer, streamId, agentId, line, sessionId) => {
   const base = `fix-${streamId ?? "main"}`;
@@ -6633,7 +6740,7 @@ var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
 };
 var startImplementer = (run, agent, target, line, sessions) => {
   endPlan(run, line);
-  const reviewer = reviewerWithChanges(run);
+  const reviewer = fixReviewerFor(run, agent, line.sessionId, sessions);
   if (reviewer) {
     agent.streamId = fixStreamFor(run, target);
     startFix(run, reviewer, agent.streamId, agent.id, line);
@@ -6671,10 +6778,10 @@ var startReviewer = (run, agent, line, config) => {
   }
   checkReview(run, at);
 };
-var resumeRoleStage = (run, agent, line, config) => {
+var resumeRoleStage = (run, agent, line, config, sessions) => {
   const { at } = line;
   const fix = agentFix(run, agent.id);
-  const changes = reviewerWithChanges(run);
+  const changes = fixReviewerFor(run, agent, line.sessionId, sessions);
   const reviewer = run.reviewers.find((item) => item.id === agent.reviewerId);
   if (fix && (!fix.reReview || !changes)) {
     fix.state = "running";
@@ -6956,7 +7063,7 @@ var resumeCopies = (state, home, agentId, line, config) => {
     copy.state = "running";
     copy.resumedAt = line.at;
     delete copy.endedAt;
-    resumeRoleStage(run, copy, line, config);
+    resumeRoleStage(run, copy, line, config, state.index.agentSessions);
   }
 };
 var changedCopyRuns = (state, event, run) => {
@@ -7287,7 +7394,7 @@ var onAgentStart = (state, event, config) => {
   }
   logRun(run, event, "started", "normal", agentId);
   if (resumed) {
-    resumeRoleStage(run, agent, event, config);
+    resumeRoleStage(run, agent, event, config, state.index.agentSessions);
     resumeCopies(state, run, agentId, event, config);
     beginLeg(state, run, agentId, event.at, config);
   } else if (stoppedAt) {
@@ -7458,6 +7565,8 @@ var sessionMainWords = (session) => {
 
 // src/model/metrics.ts
 var VERIFY_KINDS = ["typecheck", "lint", "test"];
+var noStepUse = () => ({ calls: 0, chars: 0, largeOutputs: 0 });
+var newMainSteps = () => ({ calls: 0, explore: noStepUse(), implement: noStepUse(), verify: noStepUse() });
 var processedTokens = (counts) => counts.input + counts.cacheWrite + counts.cacheWrite1h + counts.cacheRead + counts.output;
 var byStart = (a, b) => time(a.startedAt) - time(b.startedAt) || compareText(a.id, b.id);
 var entryOf = (map, key, create) => {
@@ -7570,7 +7679,7 @@ var tokenStage = (state, run, agent, sessionId, config) => {
   if (run.fixes.some((fix) => fix.agentId === agent.id && agent.id !== "main")) {
     return "fix";
   }
-  if (agent.stage === "implement" && !roleStageStarted(run, agent) && reviewerWithChanges(run)) {
+  if (agent.stage === "implement" && !roleStageStarted(run, agent) && fixReviewerFor(run, agent, sessionId, state.index.agentSessions)) {
     return "fix";
   }
   if (agent.stage === "implement") {
@@ -7809,21 +7918,56 @@ var endCall = (call, event) => {
 };
 var LARGE_OUTPUT_CHARS = 2e4;
 var BINARY_READ = /\.(png|jpe?g|gif|webp|pdf)$/i;
+var isBinaryRead = (tool, call) => tool === "Read" && BINARY_READ.test(call?.summary ?? "");
 var isLargeOutput = (tool, chars, call) => {
   if (chars <= LARGE_OUTPUT_CHARS || EDIT_TOOLS.has(tool)) {
     return false;
   }
-  return tool !== "Read" || !BINARY_READ.test(call?.summary ?? "");
+  return !isBinaryRead(tool, call);
+};
+var outputChars = (event) => {
+  const size = event.event === "tool.post" ? event.data.responseChars : event.data.errorChars;
+  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0;
 };
 var countOutput = (agent, event, call) => {
-  const size = event.event === "tool.post" ? event.data.responseChars : void 0;
-  const chars = typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0;
+  const chars = outputChars(event);
   const output = ownEntry(agent.budget.toolOutput, event.data.tool, () => ({ calls: 0, chars: 0, maxChars: 0 }));
   output.calls += 1;
   output.chars += chars;
   output.maxChars = Math.max(output.maxChars, chars);
   if (isLargeOutput(event.data.tool, chars, call)) {
     agent.budget.largeOutputs += 1;
+  }
+};
+var EXPLORE_TOOLS = /* @__PURE__ */ new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch"]);
+var bashStep = (command, match) => {
+  if (match && match.kinds.length > 0) {
+    return "verify";
+  }
+  return command.trim() !== "" && readsOnly(command) ? "explore" : void 0;
+};
+var callStep = (tool, carried) => {
+  if (tool === "Bash") {
+    return carried;
+  }
+  if (EXPLORE_TOOLS.has(tool)) {
+    return "explore";
+  }
+  return EDIT_TOOLS.has(tool) ? "implement" : void 0;
+};
+var countStep = (own, event, call, carried) => {
+  const steps = own.mainSteps ??= newMainSteps();
+  steps.calls += 1;
+  const step = callStep(event.data.tool, carried);
+  if (!step) {
+    return;
+  }
+  const chars = isBinaryRead(event.data.tool, call) ? 0 : outputChars(event);
+  const use = steps[step];
+  use.calls += 1;
+  use.chars += chars;
+  if (isLargeOutput(event.data.tool, chars, call)) {
+    use.largeOutputs += 1;
   }
 };
 var PROTOTYPE_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -7974,6 +8118,9 @@ var onToolPre2 = (state, event, config, touched) => {
   if (tool === "Read" && input.filePath) {
     noteRead(state, agentKey, input.filePath, event.at);
   }
+  if (tool === "Grep" && input.path) {
+    noteGrepPath(state, agentKey, input.path, event.at);
+  }
   if (tool === "Agent" || tool === "Task") {
     onAgentPre(state, run, agentKey, event, config);
   }
@@ -8038,11 +8185,20 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   }
   if (match && match.kinds.length > 0) {
     noteVerification(state, agent.id, event.at);
+  } else if (agent.id !== "main") {
+    noteBashEdit(state, agent.id, command, event.at);
+  }
+  if (agent.id !== "main") {
+    noteBashRead(state, agent.id, command, event.at);
   }
   const own = agent.id === "main" ? mainOf(state, event.sessionId) : void 0;
   const mainVerify = own ? countMainVerification(own, match, config.budgets.warnAt) : [];
   if (mainVerify.length > 0) {
     callIndex.mainVerify = mainVerify;
+  }
+  const step = own ? bashStep(command, match) : void 0;
+  if (step) {
+    callIndex.mainStep = step;
   }
   updateMeter(state, run, agent, "verification rounds", agent.budget.verifyRounds, config.budgets.warnAt, event);
   const worktreeAdd = worktreeAddOf(ensureSession(state, event), event);
@@ -8157,6 +8313,7 @@ var onToolEnd = (state, event, config, touched) => {
   }
   if (own && !repeated(ownCall)) {
     countOutput(own, event, ownCall ?? call);
+    countStep(own, event, ownCall ?? call, index?.mainStep);
   }
   if (index?.mainVerify && own) {
     settleVerification(own, index.mainVerify, event, config);
@@ -10956,6 +11113,7 @@ export {
   MAIN_AGENT,
   displayState,
   VERIFY_KINDS,
+  newMainSteps,
   processedTokens,
   byStart,
   sessionMetrics,

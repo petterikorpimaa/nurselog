@@ -217,10 +217,11 @@ alias nurselog='node ~/github/nurselog/bin/nurselog'
 | --- | --- |
 | Repository tabs | One per set-up repository with activity in the last 7 days, with running and waiting counts. The page title and the app's Dock badge carry the total waiting count. |
 | Top bar | Connection (`live`, `replay x50`), gh status, warnings, legend. |
-| Branches | Trunk and promote lines, one lane per work branch coloured by stage, merges and promotions, a time axis up to 24 h. |
-| Token use by ticket | Tokens and cost per ticket key (else branch), split by stage. |
+| Branches and token use | One bar holding the Branches and Token use panels, closed by default and kept open or closed per repository. Its header shows a glance at both: a dot per live branch in its stage colour with live, waiting and merged counts, and the token total and cost with a bar of the stage split. Click the header to open it. |
+| Branches | Inside the bar: trunk and promote lines, one lane per work branch coloured by stage, merges and promotions, a time axis up to 24 h. |
+| Token use by ticket | Inside the bar: tokens and cost per ticket key (else branch), split by stage. |
 | Workflow health | The workflow health report as a folded strip with its count of findings to change and to consider; it opens to a map of seven steps from Main thread to Your answers, each with its setup and verdict, and its report opens from a step or "Open report". |
-| Session card | One per session that runs a subagent, edits files or opens a PR. Hovering a lane or ranking row lights its card. |
+| Session card | One per session that runs a subagent, edits files or opens a PR. It starts collapsed to its header, chips, graph, questions and main-thread strip; its collapse button opens the rest. Hovering a lane or ranking row lights its card. |
 | Card header | Ticket key and title, a progress chip (what works or waits), elapsed time, cost, model, session id (click to copy for `claude --resume`), fixture download, Summary. |
 | Graph | Plan, then per branch the Implement streams, Join, Review, Fix, PR, Merge, Promote and Docs, with "You" gates and question bubbles. Each `plan` starts a new pipeline. |
 | Questions | Questions waiting for you, blocking ones marked, with their options. |
@@ -611,6 +612,8 @@ Arrays such as `packages` replace the default list whole.
 | `insights.keepDays` `*` | `365` | Days the session aggregates are kept. |
 | `insights.guidelines.budgetFirstStop` / `quietReviewer` / `overheadShare` | `0.3` / `0.3` / `0.01` | Guideline shares: implement runs at their budget by the first stop (flags at or above), a review role's last 10 runs with a fix (flags below), Nurselog's share of the cost (flags above). `null` turns one off. |
 | `insights.guidelines.mainPeakContext` / `mainLargeOutputs` | `0.4` / `2` | Guidelines of the main thread: the median peak context as a share of the context limit, the median count of outputs over 20,000 characters per session. |
+| `insights.guidelines.mainReadChars` / `mainCheckChars` | `100000` / `20000` | Guidelines of the main thread's own work, per session: the median characters of its reads and searches (about 25,000 tokens), and of its verification command output (one raw test run); flags above. |
+| `insights.guidelines.uncheckedSessions` | `0.8` | Guideline share of the work sessions with a file edit and no typecheck or test command (counted through `verification.kinds`); flags at or above. |
 | `insights.guidelines.cachePerOutput.main` / `agents` | `350` / `100` | Guideline of cache-read tokens per output token, for the main thread and for each subagent role. |
 | `retention.indexHours` | `6` | In-memory index retention of the reducer. |
 | `features.answerFromUi` | `false` | Answering from the board is not built yet. |
@@ -734,21 +737,22 @@ nurselog purge --all --yes             # every repository and orphaned spool dir
 
 ## Workflow health
 
-`nurselog insights` shows where your workflow sticks, per area (Delivery, Implementers, Review, Verification, Token
-economy, Questions and waits): the last 5 work sessions against the up to 20 before them and against a guideline. It
-reads only the session aggregates, so it needs no running board. The board shows the same report as a folded strip
-between the panels and the session cards, which opens to a map of seven workflow steps, each with its setup and
-verdict. A step is a button that opens the workflow health report filtered to that step, and "Open report" in the
-strip's header opens it whole.
+`nurselog insights` shows where your workflow sticks, per area (Delivery, Explore, Implementers, Review, Verification,
+Token economy, Questions and waits): the last 5 work sessions against the up to 20 before them and against a
+guideline. It reads only the session aggregates, so it needs no running board. The board shows the same report as a
+folded strip between the Branches and token use bar and the session cards, which opens to a map of seven workflow
+steps, each with its setup and verdict. A step is a button that opens the workflow health report filtered to that
+step, and "Open report" in the strip's header opens it whole.
 
-The report groups its findings as Worth changing, Worth considering, Working well, For reference and Not measured, and
-a Step filter and an Impact filter (cost, time, quality) narrow them. A finding opens its evidence: the step's setup
-line, the last sessions against the ones before and the guideline, a sparkline of the recorded sessions and the
-sessions themselves, each with "Show card" to open it on the board. A finding to change or to consider also
-suggests one fix with its effect, a measured target such as "back within the guideline", and "Show the change"
-shows the lines to add to `CLAUDE.md`, with "Copy added lines"; the board never changes a file. The token ranking
-links to the report with "N workflow changes would cut token use", and a finished session's Summary panel ends with
-"In workflow health", the findings its numbers fed.
+The report groups its findings as Worth changing, Worth considering, Working well, For reference and Not measured, and a
+Step filter and an Impact filter (cost, time, quality) narrow them. Of the findings to change that have a suggested fix,
+the one furthest from its guideline stands first with a "Start here" chip: the one to change first. A finding opens its
+evidence: the step's setup line, the last sessions against the ones before and the guideline, a sparkline of the
+recorded sessions and the sessions themselves, each with "Show card" to open it on the board. A finding to change or to
+consider also suggests one fix with its effect, a measured target such as "back within the guideline", and "Show the
+change" shows the lines to add to `CLAUDE.md`, with "Copy added lines"; the board never changes a file. The token
+ranking, inside the Branches and token use bar, links to the report with "N workflow changes would cut token use", and a
+finished session's Summary panel ends with "In workflow health", the findings its numbers fed.
 
 ```markdown
 - ! Implementers: 6 of the last 9 implement runs reached their tool-call budget by their first stop (67%; before: 9 of 31; guideline: under 30%).
@@ -774,6 +778,13 @@ links to the report with "N workflow changes would cut token use", and a finishe
   a branch; the main thread's own verification commands are not one.
 - A signal whose input your workflow lacks (no budget for the implement runs, no review roles or report blocks, no
   command matching `verification.kinds`) reads "not measured" with the reason and never flags.
+- Without subagents the main thread does the steps itself. Its calls are counted as explore (reads, searches and Bash
+  commands that only read), implement (file edits) or verify (commands matching `verification.kinds`); a step no
+  subagent did in the last sessions reads "main thread" with its share of the calls on the map, and three findings
+  propose the first step to split off: reads that fill the context, raw check output, and sessions that edit files
+  without a typecheck or test. A stack whose commands `verification.kinds` does not match reads as unchecked, and so
+  does a session that edited only docs. The output of a failing command is not counted, nor is a background command's
+  output read back later, so the check output of a failing or backgrounded run reads low.
 - Failed runs are a non-zero exit or a fail pattern matching the stdout tail; with other runners than the defaults
   only exit codes count.
 - `--json` prints the same lines with their numbers.
