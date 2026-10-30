@@ -1928,6 +1928,56 @@ var shellWords = (segment) => {
   return words.map((match) => segment.text.slice(match.index, match.index + match[0].length));
 };
 var PREFIX_WORD = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*|command)$/;
+var HOME_VARIABLE = /^\$(?:HOME|\{HOME\})(?=\/|$)/;
+var homeWord = (word) => word.replace(HOME_VARIABLE, "~");
+var cdDirectory = (word, from) => {
+  const target = cdTarget(homeWord(word.replace(/^"([^"]*)"$/, "$1")));
+  if (target === void 0 || /[<>&]/.test(target)) {
+    return void 0;
+  }
+  if (target === "~" || isAbsolute2(target)) {
+    return normalizePath(target);
+  }
+  return from === void 0 ? void 0 : resolvePath(from, target);
+};
+var DIRECTORY_COMMANDS = /* @__PURE__ */ new Set(["cd", "pushd", "popd"]);
+var BLOCK_WORDS = /* @__PURE__ */ new Set(["{", "do", "then", "else", "elif", "if", "while", "until", "!"]);
+var BACKTICK = /(?<!\\)`/g;
+var segmentBreaks = (command, segments) => {
+  const breaks = [];
+  let offset = 0;
+  for (const segment of segments) {
+    const end = offset + segment.text.length;
+    const width = ["&&", "||", "$("].some((pair) => command.startsWith(pair, end)) ? 2 : 1;
+    breaks.push(command.slice(end, end + width));
+    offset = end + width;
+  }
+  return breaks;
+};
+var segmentDirectories = (command, cwd) => {
+  const dirs = [cwd !== void 0 && isAbsolute2(cwd) ? normalizePath(cwd) : void 0];
+  const segments = shellSegments(command);
+  const breaks = segmentBreaks(command, segments);
+  let backticks = 0;
+  return segments.map((segment, index) => {
+    dirs.length = Math.min(dirs.length, segment.depth + 1);
+    while (dirs.length <= segment.depth) {
+      dirs.push(dirs[dirs.length - 1]);
+    }
+    const dir = dirs[segment.depth];
+    const words = shellWords(segment);
+    const at = words.findIndex((word) => !PREFIX_WORD.test(word));
+    const first = at < 0 ? "" : words[at];
+    const blocked = BLOCK_WORDS.has(first) && DIRECTORY_COMMANDS.has(words[at + 1] ?? "");
+    if (DIRECTORY_COMMANDS.has(first) || blocked) {
+      const isolated = backticks % 2 === 1 || segment.code.includes("`") || breaks[index] === "|" || breaks[index - 1] === "|";
+      const plain2 = first === "cd" && words.length === at + 2 && !isolated;
+      dirs[segment.depth] = plain2 ? cdDirectory(words[at + 1], dir) : void 0;
+    }
+    backticks += segment.code.match(BACKTICK)?.length ?? 0;
+    return { segment, dir };
+  });
+};
 var gitArgs = (words) => {
   const start = words.findIndex((word) => !PREFIX_WORD.test(word));
   if (start < 0 || !/(?:^|\/)git$/.test(words[start])) {
@@ -5575,6 +5625,14 @@ var phaseProgress = (kind, current) => {
   const parts = [0, 1, 2].map((part) => part < current);
   return { kind, total: 3, done: current, parts, current };
 };
+var fixesProgress = (entry, matched) => ({ ...itemsProgress("fixes", matched), phase: entry.phase ?? READ });
+var reachPhase = (entry, phase) => {
+  if ((entry.phase ?? READ) >= phase) {
+    return false;
+  }
+  entry.phase = phase;
+  return true;
+};
 var LINE_SUFFIX = /(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L\d+)?)$/;
 var fixItemFile = (file, worktree, aliases) => {
   const bare = file.trim().replace(LINE_SUFFIX, "").replace(/^(?:\.\/)+/, "");
@@ -5676,16 +5734,20 @@ var itemHit = (worktree, item, paths, aliases) => {
 };
 var markPathItems = (entry, paths, aliases) => markWhere(entry, (item, worktree) => itemHit(worktree, item, paths, aliases));
 var WORD_BREAK = /[\s'"`()[\]{}<>,;|&=:#]+/;
-var wordPath = (word, aliases) => {
-  if (isAbsolute2(word)) {
-    return resolveAlias(normalizePath(word), aliases);
+var wordPath = (word, aliases, dir) => {
+  const path = homeWord(word);
+  if (isAbsolute2(path)) {
+    return resolveAlias(normalizePath(path), aliases);
   }
-  return word.replace(/^(?:\.\/)+/, "");
+  if (dir !== void 0) {
+    return resolveAlias(resolvePath(dir, path), aliases);
+  }
+  return path.replace(/^(?:\.\/)+/, "");
 };
-var pathWords = (command, aliases) => {
-  const words = command.split(WORD_BREAK).filter((word) => word !== "");
-  return words.map((word) => wordPath(word, aliases));
-};
+var pathWords = (command, cwd, aliases) => segmentDirectories(command, cwd).flatMap(({ segment, dir }) => {
+  const words = segment.text.split(WORD_BREAK).filter((word) => word !== "");
+  return words.map((word) => wordPath(word, aliases, dir));
+});
 var INTERPRETER = /^(?:python[0-9.]*|node|ruby|perl|bash|sh)$/;
 var NO_FILE_REDIRECT = /[0-9&]*>>?\s*\/dev\/\S*|[0-9]*>&[0-9-]+/g;
 var commandWords = (words) => {
@@ -5763,7 +5825,7 @@ var setFixItems = (entry, agent, target, aliases) => {
   if (!target) {
     clearItems(entry);
     if (agent.progress?.kind !== "implement") {
-      agent.progress = phaseProgress("implement", READ);
+      agent.progress = phaseProgress("implement", entry.phase ?? READ);
     }
     return;
   }
@@ -5771,7 +5833,7 @@ var setFixItems = (entry, agent, target, aliases) => {
   entry.worktree = target.worktree;
   entry.items = target.items;
   entry.matched = matchesOf(target.worktree, target.items, before, aliases);
-  agent.progress = itemsProgress("fixes", entry.matched);
+  agent.progress = fixesProgress(entry, entry.matched);
 };
 var beginLeg = (state, run, agentId, at, config) => {
   const home = agentId === "main" ? void 0 : homeOf(state, agentId);
@@ -5832,13 +5894,13 @@ var noteRead = (state, agentId, filePath, at) => {
   const aliases = state.index.worktreeAliases;
   lookAt(found, [resolveAlias(normalizePath(filePath), aliases)], at, aliases);
 };
-var noteBashRead = (state, agentId, command, at) => {
+var noteBashRead = (state, agentId, command, cwd, at) => {
   const found = runningEntry(state, agentId, "review");
   if (!found) {
     return;
   }
   const aliases = state.index.worktreeAliases;
-  lookAt(found, pathWords(command, aliases), at, aliases);
+  lookAt(found, pathWords(command, cwd, aliases), at, aliases);
 };
 var noteGrepPath = (state, agentId, path, at) => {
   const found = runningEntry(state, agentId, "review");
@@ -5857,9 +5919,11 @@ var noteEdit = (state, agentId, filePath, at) => {
   const { entry, agent } = found;
   const aliases = state.index.worktreeAliases;
   touch(entry, at);
+  const moved = reachPhase(entry, EDIT);
   if (entry.items && entry.matched) {
-    if (markPathItems(entry, [resolveAlias(normalizePath(filePath), aliases)], aliases)) {
-      agent.progress = itemsProgress("fixes", entry.matched);
+    const marked = markPathItems(entry, [resolveAlias(normalizePath(filePath), aliases)], aliases);
+    if (marked || moved) {
+      agent.progress = fixesProgress(entry, entry.matched);
     }
     return;
   }
@@ -5867,7 +5931,7 @@ var noteEdit = (state, agentId, filePath, at) => {
     agent.progress = phaseProgress("implement", EDIT);
   }
 };
-var noteBashEdit = (state, agentId, command, at) => {
+var noteBashEdit = (state, agentId, command, cwd, at) => {
   const found = runningEntry(state, agentId, "implement");
   if (!found || !writesFiles(command)) {
     return;
@@ -5875,9 +5939,11 @@ var noteBashEdit = (state, agentId, command, at) => {
   const { entry, agent } = found;
   const aliases = state.index.worktreeAliases;
   touch(entry, at);
+  const moved = reachPhase(entry, EDIT);
   if (entry.items && entry.matched) {
-    if (markPathItems(entry, pathWords(command, aliases), aliases)) {
-      agent.progress = itemsProgress("fixes", entry.matched);
+    const marked = markPathItems(entry, pathWords(command, cwd, aliases), aliases);
+    if (marked || moved) {
+      agent.progress = fixesProgress(entry, entry.matched);
     }
     return;
   }
@@ -5890,9 +5956,17 @@ var noteVerification = (state, agentId, at) => {
   if (!found) {
     return;
   }
-  touch(found.entry, at);
-  if (found.agent.progress?.kind === "implement" && found.agent.progress.current === EDIT) {
-    found.agent.progress = phaseProgress("implement", VERIFY);
+  const { entry, agent } = found;
+  touch(entry, at);
+  const moved = (entry.phase ?? READ) >= EDIT && reachPhase(entry, VERIFY);
+  if (entry.items && entry.matched) {
+    if (moved) {
+      agent.progress = fixesProgress(entry, entry.matched);
+    }
+    return;
+  }
+  if (agent.progress?.kind === "implement" && agent.progress.current === EDIT) {
+    agent.progress = phaseProgress("implement", VERIFY);
   }
 };
 var movePrPhase = (state, agentId, phase, at) => {
@@ -8186,10 +8260,10 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   if (match && match.kinds.length > 0) {
     noteVerification(state, agent.id, event.at);
   } else if (agent.id !== "main") {
-    noteBashEdit(state, agent.id, command, event.at);
+    noteBashEdit(state, agent.id, command, event.cwd, event.at);
   }
   if (agent.id !== "main") {
-    noteBashRead(state, agent.id, command, event.at);
+    noteBashRead(state, agent.id, command, event.cwd, event.at);
   }
   const own = agent.id === "main" ? mainOf(state, event.sessionId) : void 0;
   const mainVerify = own ? countMainVerification(own, match, config.budgets.warnAt) : [];
