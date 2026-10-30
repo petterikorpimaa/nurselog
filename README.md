@@ -503,7 +503,7 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | `nurselog link [--session <id>] [--osc8]` | This repository's board URL, for a status line. |
 | `nurselog init [--write] [--repo-file] [--from -]` | Proposes a config, or writes it. Never overwrites a file. |
 | `nurselog emit plan\|gate\|question ...` | Adds a marker. |
-| `nurselog insights [--json]` | Workflow health report. |
+| `nurselog insights [--json \| --prompt]` | Workflow health report; `--prompt` prints it as a prompt for an AI assistant. |
 | `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, answers, commands and reports included, so check it before you share it). |
 | `nurselog purge [--before <day>] [--all] [--yes]` | Deletes recorded data. |
 | `nurselog install-cli [--remove]` | Writes the [terminal command](#terminal-command) `~/.local/bin/nurselog`, or deletes it. |
@@ -750,9 +750,11 @@ the one furthest from its guideline stands first with a "Start here" chip: the o
 evidence: the step's setup line, the last sessions against the ones before and the guideline, a sparkline of the
 recorded sessions and the sessions themselves, each with "Show card" to open it on the board. A finding to change or to
 consider also suggests one fix with its effect, a measured target such as "back within the guideline", and "Show the
-change" shows the lines to add to `CLAUDE.md`, with "Copy added lines"; the board never changes a file. The token
-ranking, inside the Branches and token use bar, links to the report with "N workflow changes would cut token use", and a
-finished session's Summary panel ends with "In workflow health", the findings its numbers fed.
+change" shows the lines to add to `CLAUDE.md`, with "Copy added lines"; the board never changes a file. "Copy as
+prompt" copies the whole report with instructions for an AI assistant to read it and suggest changes, and "Show the prompt"
+shows what is copied. The token ranking, inside the Branches and token use bar, links to the report with "N workflow
+changes would cut token use", and a finished session's Summary panel ends with "In workflow health", the findings its
+numbers fed.
 
 ```markdown
 - ! Implementers: 6 of the last 9 implement runs reached their tool-call budget by their first stop (67%; before: 9 of 31; guideline: under 30%).

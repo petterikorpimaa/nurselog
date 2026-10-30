@@ -225,6 +225,8 @@
   white-space: nowrap;
 }
 .hcp:hover { color: var(--fg); }
+/* in an actions row (the report prompt's) it has the toggles' size and radius, and keeps its fill */
+.fda .hcp { padding: 2px 9px; font-size: 12px; border-radius: 7px; }
 .diff pre { margin: 0; padding: 6px 0; font: 400 11.5px/1.55 var(--f-mono); white-space: pre-wrap; word-break: break-word; }
 /* a line: the mark in its own column, so a wrapped line hangs beside it; the mark stays out of a selection */
 .dl { display: grid; grid-template-columns: 14px minmax(0, 1fr); padding: 0 10px; }
@@ -291,6 +293,12 @@ button.okr:focus-visible { outline-offset: -2px; }
 .hf.hflash { animation: health-flash 1.4s ease; }
 @keyframes health-flash { 0%, 30% { background-color: rgba(255, 255, 255, .12); } }
 .hfoot { margin: 0; font-size: 11.5px; color: var(--fg-3); line-height: 1.5; }
+/* the footer: the line, then the report prompt's actions row (a finding's .fda) and its panel; a closed panel takes the gap above it back */
+.hfooter { display: flex; flex-direction: column; gap: 8px; }
+.hfooter .xp:not(.open) { margin-top: -8px; }
+/* the prompt: the .diff box, its text wrapped and scrolling within 320 px, reachable by the keyboard */
+.hpr pre { padding: 6px 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; }
+.hpr pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* the token ranking's link to the report: an amber dot, the text and a chevron turned right */
 .hlink {
   display: flex; align-items: center; gap: 7px; width: 100%; margin: 8px 0 0; padding: 6px; border: 0;

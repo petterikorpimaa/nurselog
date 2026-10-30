@@ -3,12 +3,16 @@ import {
   DEFAULT_PORT,
   OrphanedCopyError,
   USAGE,
+  WORK_SESSION_CALLS,
   alreadyRunningMessage,
   boardTab,
+  cost,
+  duration,
   insightsOf,
   listOrphanedSpools,
   listRepositories,
   plainText,
+  plural,
   purgeAggregates,
   purgeableAggregates,
   readAggregates,
@@ -16,8 +20,9 @@ import {
   runEmit,
   runLink,
   runStatus,
-  startNurselog
-} from "./chunk-WXR6Q3XI.js";
+  startNurselog,
+  tokens
+} from "./chunk-HMQ4WXQA.js";
 import {
   sessionFixture,
   spoolSessionIds
@@ -84,8 +89,10 @@ import {
   terminalCommandLine,
   terminalCommandPath,
   tildeHome,
+  uiConfig,
   userConfigPath,
   waitForBoard,
+  workflowSetupOf,
   writeSignInFile
 } from "./chunk-255XBBTU.js";
 
@@ -594,8 +601,1028 @@ var insightsMarkdown = (report) => {
   return lines.join("\n");
 };
 
+// src/ui/health-prompt.ts
+var INTRO = "Below is a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the next changes to the workflow setup that its numbers support.";
+var READING = [
+  "## How to read the report",
+  "",
+  `- A work session is a finished Claude Code session with at least ${WORK_SESSION_CALLS} main-thread tool calls. "Now" counts the latest work sessions (the window), "before" the work sessions recorded before them (the baseline).`,
+  "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
+  '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before. Working well: neither. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
+  "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
+  "- Each finding names its workflow step (Main thread, Explore, Implement, Review, Verify, PR and merge, Your answers), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.",
+  "- A suggested change adds lines to a file. Its effect is a measured target or a direction, never an estimated saving.",
+  "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
+];
+var TASK = [
+  "## What to do",
+  "",
+  "1. If you can read the repository, first read CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so a change fits what is there. `nurselog insights --json` prints the whole report with the value of each work session.",
+  "2. Suggest at most three changes, the Start here finding first unless the evidence argues against it. For each: the finding it answers with its numbers, why the change helps, the change as a diff of the file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json), and the signal that should move over the next five work sessions, with its direction.",
+  "3. Prefer small changes over a rewrite, so the effect of each can be measured. Say so when a finding rests on few work sessions, and never state a number the report does not give.",
+  "4. Name what works well and should stay as it is.",
+  "5. If nothing is worth changing, say so rather than invent a change."
+];
+var unmeasuredState = (finding) => {
+  if (finding.byMain) {
+    return "by the main thread";
+  }
+  return finding.absent ? "not in this workflow" : "not measured";
+};
+var sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+var flaggedLines = (finding, startHere) => {
+  const start2 = finding.id === startHere ? " (Start here)" : "";
+  const facts = [`Step: ${plainText(finding.stepName)}.`, `Impact: ${finding.impact}.`];
+  if (finding.basis !== void 0) {
+    facts.push(`${sentence(plainText(finding.basis))}.`);
+  }
+  const lines = ["", `### ${plainText(finding.headline)}${start2}`, facts.join(" "), plainText(finding.line)];
+  const evidence = finding.evidence;
+  if (evidence !== void 0) {
+    const numbers = [evidence.now, evidence.before, evidence.guideline].flatMap((number) => number === void 0 ? [] : [number]);
+    lines.push(...numbers.map((number) => `- ${sentence(plainText(number.label))}: ${plainText(number.text)}`));
+    if (evidence.setup !== "") {
+      lines.push(`- Setup: ${plainText(evidence.setup)}`);
+    }
+  }
+  const change = finding.change;
+  if (change !== void 0) {
+    lines.push(`Fix: ${plainText(change.fix)}`, `Effect: ${plainText(change.effect)}`, `Lines to add to ${plainText(change.file)}:`);
+    lines.push(...change.lines.map((line) => `+ ${plainText(line)}`));
+  }
+  return lines;
+};
+var quietLine = (finding) => {
+  const head = `- ${plainText(finding.headline)} (${plainText(finding.stepName)})`;
+  if (finding.group === "unmeasured") {
+    return `${head}: ${unmeasuredState(finding)}. ${plainText(finding.line)}`;
+  }
+  return `${head}: ${plainText(finding.line)}`;
+};
+var groupLines = (group, startHere) => {
+  const flagged = group.group === "change" || group.group === "consider";
+  const heading = `## ${plainText(group.label)}`;
+  if (flagged) {
+    return ["", heading, ...group.findings.flatMap((finding) => flaggedLines(finding, startHere))];
+  }
+  return ["", heading, "", ...group.findings.map(quietLine)];
+};
+var healthPrompt = (report) => {
+  const lines = [INTRO, "", ...READING, "", ...TASK, "", "---", "", `# ${plainText(report.title)}`, "", `${sentence(plainText(report.count))}.`];
+  if (report.note !== void 0) {
+    lines.push("", `Note: ${plainText(report.note)}`);
+  }
+  lines.push(...report.groups.flatMap((group) => groupLines(group, report.startHere)));
+  const closing = plainText(report.closing);
+  if (closing !== "") {
+    lines.push("", closing);
+  }
+  return lines.join("\n");
+};
+
+// src/ui/suggested-changes.ts
+var CHANGE_FILE = "CLAUDE.md";
+var LARGE_OUTPUTS = {
+  fix: "Cut long command output with tail.",
+  lines: ["Pipe a command that can print more than 200 lines through `tail -n 80`."]
+};
+var EXPLORE_LINES = [
+  "Send a search or a read across more than a few files to the Explore agent, and ask for file paths, line ranges and a short summary, not file contents.",
+  "Read a file by line range when you know where to look."
+];
+var MAIN_READS = {
+  fix: "Hand wide reads and searches to the Explore agent, which runs on a cheaper model.",
+  lines: [...EXPLORE_LINES]
+};
+var PEAK_CONTEXT = {
+  fix: "Start a new session for each task.",
+  lines: ["When a task is done and the next one is a different task, stop and tell me to start a new session."]
+};
+var COST_SHARE = {
+  fix: "Hand the writing to subagents once the decisions are made.",
+  lines: ["When the decisions are made and the work spans several files, hand the writing to a subagent."]
+};
+var MAIN_CACHE = {
+  fix: "Hand wide searches to the Explore agent and read files by line range.",
+  lines: [...EXPLORE_LINES]
+};
+var SECOND_IMPLEMENTER = {
+  fix: "Give each brief what one run needs to finish.",
+  lines: ["An implementer brief lists the files, the acceptance criteria and the checks to run before handing back."]
+};
+var QUICK_ANSWERS = {
+  fix: "Make questions quick to answer.",
+  lines: ["Ask each question with its options and a recommended answer first."]
+};
+var kindsText = (kinds) => {
+  if (kinds.length < 2) {
+    return kinds.join("");
+  }
+  return `${kinds.slice(0, -1).join(", ")} and ${kinds[kinds.length - 1]}`;
+};
+var cacheChange = (step, role) => {
+  if (step === "main") {
+    return MAIN_CACHE;
+  }
+  if (role === void 0) {
+    return void 0;
+  }
+  if (step === "explore") {
+    const line = `When you start ${role}, name the folders to search and ask for file paths and line ranges, not file contents.`;
+    return { fix: "Name the folders to search, and ask for paths and line ranges.", lines: [line] };
+  }
+  if (step === "review") {
+    const line = `Write the diff to a file once and give ${role} its path and the changed files; it reads those, not the whole repository.`;
+    return { fix: `Pass the diff to ${role} as a file.`, lines: [line] };
+  }
+  return { fix: `Name the files ${role} needs in its brief.`, lines: [`A brief for ${role} names the files it needs by path and line range.`] };
+};
+var budgetLine = (budget) => {
+  if (budget === void 0) {
+    return "A brief that needs more tool calls than its role's budget is two briefs.";
+  }
+  return `A brief that needs more than about ${plural(budget, "tool call")} is two briefs.`;
+};
+var quietChange = (role) => {
+  const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
+  return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
+};
+var checksText = (setup) => {
+  const kinds = setup?.verification ?? [];
+  return kinds.length === 0 ? "the project's checks" : `the ${kindsText(kinds)} commands`;
+};
+var checksLine = (setup) => `Before a subagent hands back a change, it runs ${checksText(setup)} and fixes what fails.`;
+var checkOutputChange = (setup) => {
+  const line = `Run ${checksText(setup)} in a subagent, and have it report the failures and a one-line summary.`;
+  return { fix: "Run the full checks in a subagent that returns only the result.", lines: [line] };
+};
+var uncheckedChange = (setup) => {
+  const line = `Before you report a change as done, run ${checksText(setup)} and fix what fails.`;
+  return { fix: "Name the checks to run before a change is done.", lines: [line] };
+};
+var changeOf = (source, role) => {
+  switch (source.line.insight.signal) {
+    case "main-large-outputs":
+      return LARGE_OUTPUTS;
+    case "main-reads":
+      return MAIN_READS;
+    case "main-check-output":
+      return checkOutputChange(source.setup);
+    case "unchecked-sessions":
+      return uncheckedChange(source.setup);
+    case "main-peak-context":
+      return PEAK_CONTEXT;
+    case "main-cost-share":
+      return COST_SHARE;
+    case "cache-per-output":
+      return cacheChange(source.step, role);
+    case "budget-first-stop":
+      return { fix: "Split tasks into briefs that fit the budget.", lines: [budgetLine(source.budget)] };
+    case "second-implementer":
+      return SECOND_IMPLEMENTER;
+    case "second-round":
+      return { fix: "Run the checks before the hand-back.", lines: [checksLine(source.setup)] };
+    case "quiet-reviewer":
+      return role === void 0 ? void 0 : quietChange(role);
+    case "question-open-time":
+      return QUICK_ANSWERS;
+    default:
+      return void 0;
+  }
+};
+var effectOf = (source, verdict) => {
+  const window = source.window;
+  if (source.line.insight.signal === "quiet-reviewer" && window?.value !== void 0 && window.n > 0) {
+    const saving = cost(window.value);
+    if (saving !== cost(0)) {
+      return `up to ${saving} less per ${plural(window.n, "run")}`;
+    }
+  }
+  if (verdict === "change") {
+    return source.guideline === void 0 ? "back within the guideline" : `back within the guideline (${source.guideline})`;
+  }
+  return source.before === void 0 ? "back to the level before" : `back to the level before (${source.before})`;
+};
+var suggestedChange = (source) => {
+  const verdict = source.line.verdict;
+  if (verdict !== "change" && verdict !== "consider") {
+    return void 0;
+  }
+  const role = source.line.role === "" ? void 0 : source.line.role;
+  const change = changeOf(source, role);
+  if (change === void 0) {
+    return void 0;
+  }
+  return { fix: change.fix, effect: effectOf(source, verdict), file: CHANGE_FILE, lines: [...change.lines] };
+};
+
+// src/ui/workflow-map.ts
+var ABSENT_TEXT = "not in this workflow";
+var UNMEASURED_TEXT = "not measured";
+var EMPTY_TITLE = `A work session has at least ${WORK_SESSION_CALLS} main-thread tool calls.`;
+var STEPS = [
+  { id: "main", name: "Main thread" },
+  { id: "explore", name: "Explore" },
+  { id: "implement", name: "Implement" },
+  { id: "review", name: "Review" },
+  { id: "verify", name: "Verify" },
+  { id: "merge", name: "PR and merge" },
+  { id: "you", name: "Your answers" }
+];
+var AREA_STEPS = {
+  delivery: "merge",
+  explore: "explore",
+  implementers: "implement",
+  review: "review",
+  verification: "verify",
+  tokens: "main",
+  questions: "you"
+};
+var STAGE_STEPS = { implement: "implement", review: "review", pr: "merge", other: "explore" };
+var STEP_STAGES = { explore: "other", implement: "implement", review: "review", merge: "pr" };
+var NEUTRAL = {
+  "fix-followups": "fix follow-ups recorded",
+  "verify-commands": "verification recorded",
+  "questions-per-session": "questions recorded",
+  "main-steps": "calls recorded"
+};
+var PHRASES = {
+  "cost-per-pr": ["PRs cost more", "cost per PR in range"],
+  "time-to-pr": ["PRs take longer", "PRs open quickly"],
+  "cost-per-100-lines": ["changes cost more per line", "cost per line in range"],
+  "budget-first-stop": ["implementers stop at budget", "within budget"],
+  "second-implementer": ["streams need a second implementer", "one implementer per stream"],
+  "second-round": ["branches reviewed twice", "reviews pass first time"],
+  "quiet-reviewer": ["<role> finds nothing", "reviewers find issues"],
+  "failed-runs": ["verification fails often", "verification passes"],
+  "cache-per-output": ["<role> reads whole files", "reads selectively"],
+  "main-peak-context": ["context runs too full", "context in range"],
+  "main-cost-share": ["carries most of the cost", "cost share in range"],
+  "overhead-share": ["Nurselog overhead high", "overhead small"],
+  "main-large-outputs": ["reads raw output", "keeps output short"],
+  // These two name the main thread, as on a step a subagent covers they would read as the agent's.
+  "main-reads": ["main thread reads a lot", "main thread reads little"],
+  "main-check-output": ["main thread reads raw checks", "main thread keeps checks short"],
+  "unchecked-sessions": ["sessions end unchecked", "checks run"],
+  "question-open-time": ["questions wait long", "quick answers"],
+  "developer-wait": ["work waits for you", "little waiting"]
+};
+var MAIN_PHRASES = { explore: "searches itself", implement: "edits itself", verify: "runs its own checks" };
+var MAIN_CACHE_PROBLEM = "re-reads a long context";
+var NO_ROLE = "a role";
+var MERGE_TEXT = { developer: "you merge", agent: "agent merges" };
+var MAX_ROLES = 3;
+var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isArea = (value) => typeof value === "string" && Object.hasOwn(AREA_STEPS, value);
+var isInformational = (signal) => Object.hasOwn(NEUTRAL, signal);
+var isSignal = (value) => typeof value === "string" && (Object.hasOwn(NEUTRAL, value) || Object.hasOwn(PHRASES, value));
+var isMainStep = (id) => Object.hasOwn(MAIN_PHRASES, id);
+var stepPercent = (fraction) => fraction > 0 && fraction < 5e-3 ? "<1%" : `${Math.round(fraction * 100)}%`;
+var mainEntry = (mainSteps, id) => {
+  const entry = isPlainObject(mainSteps) && Object.hasOwn(mainSteps, id) ? mainSteps[id] : void 0;
+  return isPlainObject(entry) ? entry : void 0;
+};
+var mainShare = (mainSteps, id) => {
+  const share = mainEntry(mainSteps, id)?.share;
+  return typeof share === "number" && Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : void 0;
+};
+var ownShare = (mainSteps, id) => {
+  if (!isMainStep(id) || mainEntry(mainSteps, id)?.subagents !== false) {
+    return void 0;
+  }
+  const share = mainShare(mainSteps, id);
+  return share !== void 0 && share > 0 ? share : void 0;
+};
+var lineVerdict = (line, signal) => {
+  if (isPlainObject(line.notMeasured)) {
+    return line.notMeasured.unused === true ? "unused" : "unmeasured";
+  }
+  if (isInformational(signal)) {
+    return "info";
+  }
+  if (line.flag === "guideline") {
+    return "change";
+  }
+  return line.flag === "comparison" ? "consider" : "ok";
+};
+var readLine = (value) => {
+  if (!isPlainObject(value) || !isArea(value.area) || !isSignal(value.signal)) {
+    return void 0;
+  }
+  const insight = value;
+  const verdict = lineVerdict(value, value.signal);
+  return typeof value.role === "string" ? { insight, role: value.role, verdict } : { insight, verdict };
+};
+var stageOf = (role, setup) => {
+  const roles = setup?.roles ?? [];
+  const entry = roles.find((item) => item.role === role) ?? roles.find((item) => item.role === "*");
+  return entry?.stage ?? "other";
+};
+var isMainLine = (line) => line.role === void 0 || line.role === "main";
+var stepOf = (line, setup) => {
+  if (line.insight.signal === "cache-per-output" && !isMainLine(line)) {
+    return STAGE_STEPS[stageOf(line.role ?? "", setup)];
+  }
+  return AREA_STEPS[line.insight.area];
+};
+var linePhrase = (line, verdict, shortName) => {
+  const signal = line.insight.signal;
+  if (isInformational(signal)) {
+    return NEUTRAL[signal];
+  }
+  const [problem, good] = PHRASES[signal];
+  if (verdict === "ok") {
+    return good;
+  }
+  if (signal === "cache-per-output" && isMainLine(line)) {
+    return MAIN_CACHE_PROBLEM;
+  }
+  const role = line.role === void 0 ? NO_ROLE : shortName(line.role);
+  return problem.replace("<role>", role);
+};
+var stepVerdict = (lines) => {
+  const counted = lines.filter((line) => line.verdict !== "unused");
+  if (counted.length === 0) {
+    return "absent";
+  }
+  const order = ["change", "consider", "ok", "unmeasured"];
+  return order.find((verdict) => counted.some((line) => line.verdict === verdict)) ?? "ok";
+};
+var stepPhrase = (id, lines, verdict, shortName) => {
+  if (verdict === "main") {
+    return isMainStep(id) ? MAIN_PHRASES[id] : "";
+  }
+  if (verdict === "absent") {
+    return "";
+  }
+  if (verdict === "unmeasured") {
+    return UNMEASURED_TEXT;
+  }
+  const first = lines.find((line) => line.verdict === verdict) ?? lines.find((line) => line.verdict === "info");
+  return first ? linePhrase(first, verdict, shortName) : "";
+};
+var roleList = (names) => {
+  const shown2 = names.slice(0, MAX_ROLES).join(", ");
+  const rest = names.length - MAX_ROLES;
+  return rest > 0 ? `${shown2} +${rest}` : shown2;
+};
+var sharedBudget = (roles, setup) => {
+  const entryOf = (role) => setup.roles.find((item) => item.role === role) ?? setup.roles.find((item) => item.role === "*");
+  const budgets = roles.map((role) => entryOf(role)?.toolCalls);
+  if (budgets.length === 0 || budgets.some((budget) => budget === void 0)) {
+    return void 0;
+  }
+  if (budgets.every((budget) => budget === null)) {
+    return null;
+  }
+  const first = budgets[0];
+  return typeof first === "number" && budgets.every((budget) => budget === first) ? first : void 0;
+};
+var budgetText = (roles, setup) => {
+  const budget = sharedBudget(roles, setup);
+  if (budget === null) {
+    return " \xB7 no budget";
+  }
+  return budget === void 0 ? "" : ` \xB7 ${plural(budget, "call")}`;
+};
+var listedRoles = (stage, lines, setup) => {
+  const lineRoles = [...new Set(lines.flatMap((line) => line.role ?? []))];
+  if (lineRoles.length > 0 || !setup) {
+    return lineRoles;
+  }
+  return setup.roles.filter((item) => item.stage === stage && item.role !== "*").map((item) => item.role);
+};
+var setupLine = (id, lines, setup, shortName) => {
+  if (id === "verify") {
+    return setup ? setup.verification.join(", ") : "";
+  }
+  const stage = STEP_STAGES[id];
+  if (stage === void 0) {
+    return "";
+  }
+  if (id === "merge" && lines.every((line) => line.role === void 0)) {
+    return setup ? MERGE_TEXT[setup.mergeBy] : "";
+  }
+  const roles = listedRoles(stage, lines, setup);
+  const listed = roleList(roles.map(shortName));
+  return id === "implement" && setup ? `${listed}${budgetText(roles, setup)}` : listed;
+};
+var implementBudget = (lines, setup) => {
+  const budget = setup ? sharedBudget(listedRoles("implement", lines, setup), setup) : void 0;
+  return typeof budget === "number" ? budget : void 0;
+};
+var countText = (change, consider, measured) => {
+  const parts = [];
+  if (change > 0) {
+    parts.push(`${change} to change`);
+  }
+  if (consider > 0) {
+    parts.push(`${consider} to consider`);
+  }
+  if (parts.length > 0) {
+    return parts.join(" \xB7 ");
+  }
+  return measured ? "nothing to change" : "nothing measured yet";
+};
+var basisText = (sessions) => `checked against guidelines, the setup and the last ${plural(sessions, "work session")}`;
+var workflowMap = (insights, roleShorts) => {
+  const { report, setup } = insights;
+  const shortName = (role) => {
+    const short = ownValue(roleShorts, role);
+    return typeof short === "string" && short !== "" ? short : role;
+  };
+  const listed = Array.isArray(report.insights) ? report.insights : [];
+  const lines = listed.flatMap((value) => readLine(value) ?? []);
+  const byStep = new Map(STEPS.map((step) => [step.id, []]));
+  for (const line of lines) {
+    byStep.get(stepOf(line, setup))?.push(line);
+  }
+  const steps = STEPS.map(({ id, name }) => {
+    const own = byStep.get(id) ?? [];
+    const share = ownShare(report.mainSteps, id);
+    const counted = stepVerdict(own);
+    const verdict = counted === "absent" && share !== void 0 ? "main" : counted;
+    const flagged = own.filter((line) => line.verdict === "change" || line.verdict === "consider").length;
+    const setupText = verdict === "absent" ? ABSENT_TEXT : setupLine(id, own, setup, shortName);
+    const phrase2 = stepPhrase(id, own, verdict, shortName);
+    const more = Math.max(0, flagged - 1);
+    if (share === void 0) {
+      return { id, name, lines: own, verdict, setup: setupText, setupTitle: setupText, phrase: phrase2, more };
+    }
+    const shareText = stepPercent(share);
+    const title = `${shareText} of the main thread's tool calls`;
+    return { id, name, lines: own, verdict, setup: `main thread \xB7 ${shareText}`, setupTitle: title, phrase: phrase2, more };
+  });
+  const change = lines.filter((line) => line.verdict === "change").length;
+  const consider = lines.filter((line) => line.verdict === "consider").length;
+  const measured = steps.some((step) => step.verdict === "change" || step.verdict === "consider" || step.verdict === "ok");
+  const sessions = Array.isArray(report.sessions) ? report.sessions.length : 0;
+  return { steps, change, consider, empty: sessions === 0, count: countText(change, consider, measured), basis: basisText(sessions) };
+};
+
+// src/ui/health-report.ts
+var PR = ["PR", "PRs"];
+var RUN = ["run", "runs"];
+var STREAM = ["stream", "streams"];
+var BRANCH = ["branch", "branches"];
+var SESSION = ["session", "sessions"];
+var ANSWERED = ["answered question", "answered questions"];
+var QUIET_RUNS = 10;
+var HEADROOM = 1.08;
+var RATIO_CAP = 10;
+var noun = (count, unit) => count === 1 ? unit[0] : unit[1];
+var wholePercent = (fraction) => `${Math.round(fraction * 100)}%`;
+var characters = (count) => `${Math.round(count).toLocaleString("en-US")} characters`;
+var MAIN_STEP_IDS = ["explore", "implement", "verify"];
+var NO_BREAK = "\xA0";
+var stepsText = (shares) => {
+  const printed = MAIN_STEP_IDS.map((id) => Math.round(shares[id] * 100));
+  const other = Math.max(0, 100 - printed.reduce((total, part) => total + part, 0));
+  const parts = MAIN_STEP_IDS.map((id) => `${id}${NO_BREAK}${stepPercent(shares[id])}`);
+  return [...parts, `other${NO_BREAK}${other}%`].join(" \xB7 ");
+};
+var ownStepsShare = (fraction) => `${stepPercent(fraction)} in explore, implement and verify`;
+var tenthPercent = (fraction) => `${(fraction * 100).toFixed(1)}%`;
+var rateText = (k, n, unit, hit) => `${k} of ${n} ${noun(n, unit)} ${hit}`;
+var rate = (hit) => ({
+  text: (evidence, unit) => evidence.k === void 0 ? void 0 : rateText(evidence.k, evidence.n, unit, hit),
+  row: (number, point, unit) => point.k !== void 0 && point.n !== void 0 ? rateText(point.k, point.n, unit, hit) : `${wholePercent(number)} of ${unit[1]} ${hit}`
+});
+var valued = (text, row = text) => ({
+  text: (evidence) => evidence.value === void 0 ? void 0 : text(evidence.value),
+  row
+});
+var quietLeast = (limit) => {
+  let least = 0;
+  while (least < QUIET_RUNS && least / QUIET_RUNS < limit) {
+    least += 1;
+  }
+  return least;
+};
+var SIGNALS = {
+  "cost-per-pr": {
+    impact: "cost",
+    unit: PR,
+    headline: ["PRs cost more than before", "Cost per PR stays in range"],
+    ...valued((value) => `${cost(value)} per PR`)
+  },
+  "time-to-pr": {
+    impact: "time",
+    unit: PR,
+    headline: ["PRs take longer to open", "PRs open quickly"],
+    ...valued(duration)
+  },
+  "cost-per-100-lines": {
+    impact: "cost",
+    unit: PR,
+    headline: ["Changes cost more per line", "Cost per changed line stays in range"],
+    text: (evidence) => evidence.value === void 0 ? "no changed lines" : `${cost(evidence.value)} per 100 lines`,
+    row: (number) => `${cost(number)} per 100 lines`
+  },
+  "budget-first-stop": {
+    impact: "time",
+    unit: RUN,
+    headline: ["Implementers stop at their tool-call budget", "Implementers finish within their budget"],
+    ...rate("reached the budget"),
+    limit: (limit) => `under ${Math.round(limit * 100)}%`,
+    scale: true,
+    against: "share"
+  },
+  "second-implementer": {
+    impact: "time",
+    unit: STREAM,
+    headline: ["Streams need a second implement run", "One implement run per stream"],
+    ...rate("had a second run")
+  },
+  "second-round": {
+    impact: "time",
+    unit: BRANCH,
+    headline: ["Branches need a second review round", "Reviews pass in one round"],
+    ...rate("had a second round")
+  },
+  "quiet-reviewer": {
+    impact: "cost",
+    unit: RUN,
+    headline: ["<role> rarely finds anything to fix", "<role> finds things to fix"],
+    // A quiet-reviewer point is one run; a session's points merge into one row, "2 of 3 runs had a fix follow-up".
+    ...rate("had a fix follow-up"),
+    limit: (limit) => `at least ${quietLeast(limit)} of ${QUIET_RUNS}`,
+    perRun: true,
+    against: "share"
+  },
+  "failed-runs": {
+    impact: "quality",
+    unit: RUN,
+    headline: ["Verification fails often", "Verification passes"],
+    ...rate("failed")
+  },
+  "cache-per-output": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["<role> reads whole files", "<role> reads selectively"],
+    ...valued((value) => `${Math.round(value)} per output token`),
+    limit: (limit) => `at most ${Math.round(limit)}`,
+    scale: true,
+    against: "value"
+  },
+  "main-peak-context": {
+    impact: "quality",
+    unit: SESSION,
+    headline: ["The main thread's context runs too full", "The main thread's context stays in range"],
+    ...valued((value) => `${tokens(value)} tokens`),
+    // The points are peak tokens and the limit a share of the context limit: no common scale.
+    limit: (limit) => `at most ${Math.round(limit * 100)}% of the context limit`
+  },
+  "main-cost-share": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The main thread carries most of the cost", "The main thread's cost share stays in range"],
+    ...valued(wholePercent)
+  },
+  "overhead-share": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The Nurselog overhead is high", "The Nurselog overhead stays small"],
+    ...valued(tenthPercent),
+    limit: (limit) => `at most ${tenthPercent(limit)}`,
+    scale: true,
+    against: "value"
+  },
+  "main-large-outputs": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The main thread reads raw command output", "The main thread keeps long output out of its context"],
+    ...valued((value) => `a median of ${value} per session`, (value) => plural(value, "large output")),
+    limit: (limit) => `at most ${limit} per session`,
+    scale: true,
+    against: "value"
+  },
+  "main-steps": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["How the main thread spends its calls", "How the main thread spends its calls"],
+    // The window's number reads `report.mainSteps` (`measuredFinding`), a session's row its shares per step.
+    ...valued(ownStepsShare, (value, point) => point.steps === void 0 ? ownStepsShare(value) : stepsText(point.steps)),
+    plots: "Share of calls in explore, implement and verify"
+  },
+  "main-reads": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The main thread's own reads fill its context", "The main thread's own reads stay small"],
+    ...valued((value) => `a median of ${characters(value)} per session`, characters),
+    limit: (limit) => `at most ${characters(limit)} per session`,
+    scale: true,
+    against: "value"
+  },
+  "main-check-output": {
+    impact: "cost",
+    unit: SESSION,
+    headline: ["The main thread reads raw check output", "The main thread keeps check output short"],
+    ...valued((value) => `a median of ${characters(value)} per session`, characters),
+    limit: (limit) => `at most ${characters(limit)} per session`,
+    scale: true,
+    against: "value"
+  },
+  "unchecked-sessions": {
+    impact: "quality",
+    unit: SESSION,
+    headline: ["Sessions edit files without a check", "Sessions with edits run their checks"],
+    ...rate("edited without a typecheck or test"),
+    limit: (limit) => `under ${Math.round(limit * 100)}%`,
+    against: "share"
+  },
+  "question-open-time": {
+    impact: "time",
+    unit: ANSWERED,
+    headline: ["Questions wait long for an answer", "Questions get quick answers"],
+    ...valued(duration)
+  },
+  "developer-wait": {
+    impact: "time",
+    unit: SESSION,
+    headline: ["Work waits for you", "Little waiting for you"],
+    ...valued((value) => `${duration(value)} per session`, duration)
+  },
+  "fix-followups": {
+    impact: "quality",
+    unit: RUN,
+    headline: ["Fix follow-ups per review run", "Fix follow-ups per review run"],
+    ...valued((value) => `${value.toFixed(1)} per run`)
+  },
+  "verify-commands": {
+    impact: "quality",
+    unit: RUN,
+    headline: ["Verification commands per implement run", "Verification commands per implement run"],
+    ...valued((value) => `a median of ${value} per run`, (value) => `${value} per run`)
+  },
+  "questions-per-session": {
+    impact: "time",
+    unit: SESSION,
+    headline: ["Questions per session", "Questions per session"],
+    ...valued((value) => `a median of ${value} per session`, (value) => plural(value, "question"))
+  }
+};
+var MAIN_CACHE2 = ["The main thread re-reads a long context", "The main thread's cache reads stay in range"];
+var NO_ROLE2 = "A role";
+var NO_TITLE = "recorded session";
+var AREA_NAMES = {
+  delivery: "Delivery",
+  explore: "Explore",
+  implementers: "Implementers",
+  review: "Review",
+  verification: "Verification",
+  tokens: "Token economy",
+  questions: "Questions and waits"
+};
+var GROUPS = [
+  { group: "change", label: "Worth changing" },
+  { group: "consider", label: "Worth considering" },
+  { group: "ok", label: "Working well" },
+  { group: "info", label: "For reference" },
+  { group: "unmeasured", label: "Not measured" }
+];
+var FOOTER = "Checked against the guidelines and the workflow setup of nurselog.config.json. These are suggestions; nothing on this board changes your files.";
+var isPlainObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var finite = (value) => typeof value === "number" && Number.isFinite(value);
+var nonEmpty = (value) => typeof value === "string" && value !== "" ? value : void 0;
+var readEvidence = (value) => {
+  if (!isPlainObject2(value) || !finite(value.n) || value.n < 0) {
+    return void 0;
+  }
+  const evidence = { n: value.n };
+  if (finite(value.k)) {
+    evidence.k = value.k;
+  }
+  if (finite(value.value)) {
+    evidence.value = value.value;
+  }
+  return evidence;
+};
+var readLimit = (value) => {
+  if (!isPlainObject2(value) || !finite(value.limit)) {
+    return void 0;
+  }
+  return { limit: value.limit, worse: value.worse === "below" ? "below" : "above" };
+};
+var pointNumber = (value, k, n) => {
+  if (finite(value)) {
+    return value;
+  }
+  return k !== void 0 && n !== void 0 && n > 0 ? k / n : null;
+};
+var readSteps = (value) => {
+  if (!isPlainObject2(value) || !finite(value.explore) || !finite(value.implement) || !finite(value.verify)) {
+    return void 0;
+  }
+  return { explore: value.explore, implement: value.implement, verify: value.verify };
+};
+var readPoints = (series) => {
+  if (!Array.isArray(series)) {
+    return [];
+  }
+  return series.flatMap((item) => {
+    if (!isPlainObject2(item) || typeof item.session !== "string") {
+      return [];
+    }
+    const k = finite(item.k) ? item.k : void 0;
+    const n = finite(item.n) ? item.n : void 0;
+    return [{ session: item.session, number: pointNumber(item.value, k, n), window: item.window === true, k, n, steps: readSteps(item.steps) }];
+  });
+};
+var readMainSteps = (mainSteps) => {
+  const [explore, implement, verify] = MAIN_STEP_IDS.map((id) => mainShare(mainSteps, id));
+  if (explore === void 0 || implement === void 0 || verify === void 0) {
+    return void 0;
+  }
+  return { explore, implement, verify };
+};
+var readFacts = (report) => {
+  const basis = report.basis;
+  const options = report.options;
+  const listed = report.sessions;
+  const entries = Array.isArray(listed) ? listed : [];
+  const sessions = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (isPlainObject2(entry) && typeof entry.id === "string") {
+      sessions.set(entry.id, { key: nonEmpty(entry.key), title: nonEmpty(entry.title) });
+    }
+  }
+  const last = entries[entries.length - 1];
+  const facts = { sessions, newest: isPlainObject2(last) ? last : void 0 };
+  if (isPlainObject2(basis)) {
+    facts.window = finite(basis.window) ? basis.window : void 0;
+    facts.baseline = finite(basis.baseline) ? basis.baseline : void 0;
+  }
+  if (isPlainObject2(options)) {
+    facts.minBaseline = finite(options.minBaseline) ? options.minBaseline : void 0;
+  }
+  facts.mainSteps = readMainSteps(report.mainSteps);
+  return facts;
+};
+var sideText = (format, evidence) => {
+  if (evidence === void 0) {
+    return void 0;
+  }
+  return evidence.n === 0 ? `no ${format.unit[1]}` : format.text(evidence, format.unit);
+};
+var numberOf = (label, text) => text === void 0 ? void 0 : { label, text };
+var nowLabel = (signal, window, facts) => {
+  if (signal === "quiet-reviewer" && window !== void 0) {
+    return `last ${plural(window.n, "run")}`;
+  }
+  return facts.window === void 0 ? "recent sessions" : `last ${plural(facts.window, "session")}`;
+};
+var sparkline = (points, limit, unit, plots) => {
+  if (points.length === 0) {
+    return void 0;
+  }
+  const numbers = points.flatMap((point) => point.number ?? []);
+  const max = Math.max(0, ...numbers, limit?.limit ?? 0) * HEADROOM;
+  const guide = limit !== void 0 && max > 0 ? limit : void 0;
+  const bars = points.map((point) => {
+    const number = point.number;
+    if (number === null) {
+      return { height: null, window: point.window, worse: false };
+    }
+    const height = max > 0 ? Math.max(0, number / max) : 0;
+    const beyond = guide !== void 0 && (guide.worse === "above" ? number > guide.limit : number < guide.limit);
+    return { height, window: point.window, worse: beyond };
+  });
+  const first = points.findIndex((point) => point.window);
+  const highlighted = points.filter((point) => point.window).length;
+  const across = `${plural(points.length, unit)}, the latest ${highlighted} highlighted${guide ? ", dashed line is the guideline" : ""}`;
+  const label = plots === void 0 ? across : `${plots}: ${across}`;
+  const spark = { bars, windowStart: first === -1 ? points.length : first, label };
+  if (guide) {
+    spark.guide = guide.limit / max;
+  }
+  return spark;
+};
+var mergeRuns = (session, runs) => {
+  const k = runs.reduce((total, run) => total + (run.k ?? ((run.number ?? 0) >= 1 ? 1 : 0)), 0);
+  const n = runs.reduce((total, run) => total + (run.n ?? 1), 0);
+  return { session, number: n > 0 ? k / n : null, window: true, k, n, steps: void 0 };
+};
+var rowPoints = (points, perRun) => {
+  const newestFirst = [...points].reverse().filter((point) => point.window && point.number !== null);
+  if (!perRun) {
+    return newestFirst;
+  }
+  const bySession = /* @__PURE__ */ new Map();
+  for (const point of newestFirst) {
+    const runs = bySession.get(point.session);
+    if (runs === void 0) {
+      bySession.set(point.session, [point]);
+    } else {
+      runs.push(point);
+    }
+  }
+  return [...bySession].map(([session, runs]) => mergeRuns(session, runs));
+};
+var pointRows = (points, format, facts) => {
+  const rows = [];
+  const sessionValues = /* @__PURE__ */ new Map();
+  for (const point of rowPoints(points, format.perRun === true)) {
+    if (point.number === null) {
+      continue;
+    }
+    const value = format.row(point.number, point, format.unit);
+    const session = facts.sessions.get(point.session);
+    rows.push({ session: point.session, key: session?.key ?? "", title: session?.title ?? NO_TITLE, value });
+    if (!sessionValues.has(point.session)) {
+      sessionValues.set(point.session, value);
+    }
+  }
+  return { rows, sessionValues };
+};
+var groupOf = (verdict) => verdict === "unused" ? "unmeasured" : verdict;
+var lineText = (insight, role) => {
+  const text = typeof insight.text === "string" ? insight.text : "";
+  const prefix = `${AREA_NAMES[insight.area]}: `;
+  const bare = text.startsWith(prefix) ? text.slice(prefix.length) : text;
+  if (role !== void 0 && role !== "" && bare.startsWith(role)) {
+    return bare;
+  }
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+};
+var headlineOf = (line) => {
+  const signal = line.insight.signal;
+  if (signal === "fix-followups") {
+    return line.role === void 0 ? SIGNALS[signal].headline[0] : `${line.role}: fix follow-ups per run`;
+  }
+  const mainThread = signal === "cache-per-output" && (line.role === void 0 || line.role === "main");
+  const [problem, good] = mainThread ? MAIN_CACHE2 : SIGNALS[signal].headline;
+  const role = line.role ?? NO_ROLE2;
+  return (line.verdict === "ok" ? good : problem).replace("<role>", () => role);
+};
+var idOf = (line) => line.role === void 0 ? line.insight.signal : `${line.insight.signal}:${line.role}`;
+var unmeasuredImpact = (insight) => {
+  const covered = isPlainObject2(insight.notMeasured) ? insight.notMeasured.signals : void 0;
+  const signals = Array.isArray(covered) ? covered : [];
+  const known = signals.find((signal) => typeof signal === "string" && Object.hasOwn(SIGNALS, signal));
+  return known === void 0 ? "quality" : SIGNALS[known].impact;
+};
+var unmeasuredFinding = (line, step) => ({
+  id: `unmeasured:${line.insight.area}`,
+  step: step.id,
+  stepName: step.name,
+  group: "unmeasured",
+  absent: line.verdict === "unused",
+  byMain: line.verdict === "unused" && step.verdict === "main",
+  impact: unmeasuredImpact(line.insight),
+  headline: AREA_NAMES[line.insight.area],
+  line: lineText(line.insight),
+  sessionValues: /* @__PURE__ */ new Map()
+});
+var guidelineRatio = (number, limit, worse) => {
+  const over = worse === "above" ? number : limit;
+  const under = worse === "above" ? limit : number;
+  if (under <= 0) {
+    return over > 0 ? RATIO_CAP : 1;
+  }
+  return Math.min(RATIO_CAP, over / under);
+};
+var ratioOf = (format, window, limit) => {
+  if (window === void 0 || limit === void 0 || format.against === void 0) {
+    return 1;
+  }
+  let number = window.value;
+  if (format.against === "share") {
+    number = window.k === void 0 || window.n <= 0 ? void 0 : window.k / window.n;
+  }
+  return number === void 0 ? 1 : Math.max(1, guidelineRatio(number, limit.limit, limit.worse));
+};
+var measuredFinding = (line, step, facts, changes) => {
+  const insight = line.insight;
+  const format = SIGNALS[insight.signal];
+  const window = readEvidence(insight.window);
+  const baseline = readEvidence(insight.baseline);
+  const limit = readLimit(insight.guideline);
+  const points = readPoints(insight.series);
+  const shares = insight.signal === "main-steps" ? facts.mainSteps : void 0;
+  const now = numberOf(nowLabel(insight.signal, window, facts), shares === void 0 ? sideText(format, window) : stepsText(shares));
+  const before = numberOf(facts.baseline === void 0 ? "before" : `${facts.baseline} before`, sideText(format, baseline));
+  const guideline = limit === void 0 || format.limit === void 0 ? void 0 : numberOf("guideline", format.limit(limit.limit));
+  const spark = sparkline(points, format.scale === true ? limit : void 0, insight.signal === "quiet-reviewer" ? "run" : "session", format.plots);
+  const { rows, sessionValues } = pointRows(points, format, facts);
+  const evidence = { setup: step.verdict === "absent" ? "" : step.setup, rows };
+  if (now) {
+    evidence.now = now;
+  }
+  if (before) {
+    evidence.before = before;
+  }
+  if (guideline) {
+    evidence.guideline = guideline;
+  }
+  if (spark) {
+    evidence.spark = spark;
+  }
+  const finding = {
+    id: idOf(line),
+    step: step.id,
+    stepName: step.name,
+    group: groupOf(line.verdict),
+    absent: false,
+    byMain: false,
+    impact: format.impact,
+    headline: headlineOf(line),
+    line: lineText(insight, line.role),
+    evidence,
+    sessionValues
+  };
+  if (line.verdict === "change") {
+    finding.basis = "worse than the guideline";
+    finding.ratio = ratioOf(format, window, limit);
+  }
+  if (line.verdict === "consider") {
+    finding.basis = "worse than before";
+  }
+  if ((line.verdict === "ok" || line.verdict === "info") && now) {
+    finding.value = now.text;
+  }
+  const change = suggestedChange({ line, step: step.id, ...changes, guideline: guideline?.text, before: before?.text, window });
+  if (change) {
+    finding.change = change;
+  }
+  return finding;
+};
+var startOf = (findings) => {
+  let start2;
+  for (const finding of findings) {
+    if (finding.group === "change" && finding.change !== void 0 && (start2 === void 0 || (finding.ratio ?? 1) > (start2.ratio ?? 1))) {
+      start2 = finding;
+    }
+  }
+  return start2;
+};
+var noteOf = (facts) => {
+  const { window, baseline, minBaseline } = facts;
+  if (window === void 0 || baseline === void 0 || minBaseline === void 0 || baseline >= minBaseline) {
+    return void 0;
+  }
+  const recorded = `Only ${plural(baseline, "work session")} ${baseline === 1 ? "is" : "are"} recorded before the latest ${window}.`;
+  return `${recorded} Guidelines still apply; the comparison with before settles as more sessions finish.`;
+};
+var updatedOf = (newest) => {
+  if (newest === void 0 || typeof newest.finishedAt !== "string") {
+    return void 0;
+  }
+  return { name: nonEmpty(newest.key) ?? "a session", finishedAt: newest.finishedAt };
+};
+var healthReport = (insights, roleShorts, repositoryName) => {
+  const map = workflowMap(insights, roleShorts);
+  const facts = readFacts(insights.report);
+  const implement = map.steps.find((step) => step.id === "implement");
+  const changes = { setup: insights.setup, budget: implementBudget(implement?.lines ?? [], insights.setup) };
+  const owners = /* @__PURE__ */ new Map();
+  for (const step of map.steps) {
+    for (const line of step.lines) {
+      owners.set(line.insight, { line, step });
+    }
+  }
+  const listed = Array.isArray(insights.report.insights) ? insights.report.insights : [];
+  const findings = listed.flatMap((value) => {
+    const owner = owners.get(value);
+    if (owner === void 0) {
+      return [];
+    }
+    const unmeasured = owner.line.verdict === "unmeasured" || owner.line.verdict === "unused";
+    return [unmeasured ? unmeasuredFinding(owner.line, owner.step) : measuredFinding(owner.line, owner.step, facts, changes)];
+  });
+  const start2 = startOf(findings);
+  const ordered = start2 === void 0 ? findings : [start2, ...findings.filter((finding) => finding !== start2)];
+  const groups = GROUPS.map(({ group, label }) => ({ group, label, findings: ordered.filter((finding) => finding.group === group) }));
+  const stages = map.steps.filter((step) => findings.some((finding) => finding.step === step.id)).map(({ id, name }) => ({ id, name }));
+  const report = {
+    title: `Workflow health \xB7 ${repositoryName}`,
+    count: map.count,
+    keyless: [...facts.sessions.values()].every((session) => session.key === void 0),
+    stages,
+    groups: groups.filter((group) => group.findings.length > 0),
+    closing: typeof insights.report.closing === "string" ? insights.report.closing : "",
+    footer: FOOTER
+  };
+  if (start2 !== void 0) {
+    report.startHere = start2.id;
+  }
+  const updated = updatedOf(facts.newest);
+  if (updated) {
+    report.updated = updated;
+  }
+  const newest = nonEmpty(facts.newest?.id);
+  if (newest !== void 0) {
+    report.newest = newest;
+  }
+  const note = noteOf(facts);
+  if (note !== void 0) {
+    report.note = note;
+  }
+  return report;
+};
+
 // src/cli/insights.ts
-var SYNOPSIS2 = "nurselog insights [--repo <path>] [--json]";
+var SYNOPSIS2 = "nurselog insights [--repo <path>] [--json | --prompt]";
 var PREFIX = "nurselog insights: ";
 var UNESCAPED = /[\u007f-\u009f]/g;
 var unicodeEscape = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
@@ -604,7 +1631,7 @@ var safeJson = (value) => {
   return json.replace(UNESCAPED, unicodeEscape);
 };
 var runInsights = async (args, io, deps = {}) => {
-  const options = { repo: { type: "string" }, json: { type: "boolean" } };
+  const options = { repo: { type: "string" }, json: { type: "boolean" }, prompt: { type: "boolean" } };
   let parsed;
   try {
     parsed = parseArgs3({ args, options, allowPositionals: false });
@@ -614,6 +1641,11 @@ Usage: ${SYNOPSIS2}`);
     return 2;
   }
   const { values } = parsed;
+  if (values.json === true && values.prompt === true) {
+    io.err(`${PREFIX}--json and --prompt cannot be combined
+Usage: ${SYNOPSIS2}`);
+    return 2;
+  }
   let root;
   try {
     root = resolveRepository(values.repo, io.cwd);
@@ -634,6 +1666,11 @@ Usage: ${SYNOPSIS2}`);
   const report = insightsOf(aggregates2, config.insights, (deps.now ?? (() => /* @__PURE__ */ new Date()))().toISOString());
   if (values.json === true) {
     io.out(safeJson(report));
+    return 0;
+  }
+  if (values.prompt === true && report.basis.window > 0) {
+    const ui = uiConfig(config, root);
+    io.out(healthPrompt(healthReport({ report, setup: workflowSetupOf(config) }, ui.roleShorts, ui.repo)));
     return 0;
   }
   io.out(insightsMarkdown(report));

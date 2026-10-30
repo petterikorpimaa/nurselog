@@ -21,7 +21,7 @@ export const USAGE = `Usage: nurselog <command> [--repo <path>]
   init [--repo-file] [--write] [--from -]                propose a config from what the repository shows; --write saves it (never replaces a file)
   purge [--all] [--before <YYYY-MM-DD>] [--yes]          delete the repository's spool day files (of every repository and orphaned spool directory with --all, only the days before a date with --before); asks first unless --yes
   fixture <session id or prefix> [--out <file>]          print one session's spool lines as a replay fixture (a prefix of 8+ characters names it), or write them to a new file with --out
-  insights [--json]                                      workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data
+  insights [--json | --prompt]                           workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data, --prompt the report as a prompt for an AI assistant
   install-cli [--remove]                                 write the terminal command ~/.local/bin/nurselog, which runs the newest installed plugin copy (from a clone, the clone); --remove deletes it; a file Nurselog did not write is never touched
   uninstall [--yes] [--keep-data]                        remove Nurselog from this machine: stop the board, delete the terminal command and every repository's recorded data (kept with --keep-data), remove the plugin from Claude Code; lists what you added by hand; asks first unless --yes
 --repo <path> names the repository; the default is the git worktree of the current directory.

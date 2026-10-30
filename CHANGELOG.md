@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.11 (2026-10-30)
+
+- Copy the workflow health report as a prompt for an AI assistant
+
 ## 0.1.10 (2026-10-30)
 
 - A fixer's ring shows its build phases until its fixes lead, and Bash paths resolve against their cd
