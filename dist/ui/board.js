@@ -4568,10 +4568,10 @@ var createStopMotion = (entries, hooks) => {
     held(entry, signature) {
       const { item: item2 } = entry;
       const state = item2.kind === "node" ? item2.state : void 0;
-      if (entry.hold?.state === state) {
-        return true;
-      }
       if (entry.hold) {
+        if (entry.hold.state === state) {
+          return true;
+        }
         end(entry, false);
         return false;
       }

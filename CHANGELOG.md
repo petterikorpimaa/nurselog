@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9 (2026-10-30)
+
+- Every session graph item renders again, not only the nodes
+
 ## 0.1.8 (2026-10-30)
 
 - A reviewer's ring counts every look at a changed file and fills at the stop
