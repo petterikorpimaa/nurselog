@@ -17516,6 +17516,85 @@ var modalSubtitle = (repository, replies, developer) => {
   return parts.filter((part) => part !== "").join(" \xB7 ");
 };
 
+// src/ui/health-prompt.ts
+var INTRO = "Below is a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the next changes to the workflow setup that its numbers support.";
+var READING = [
+  "## How to read the report",
+  "",
+  `- A work session is a finished Claude Code session with at least ${WORK_SESSION_CALLS} main-thread tool calls. "Now" counts the latest work sessions (the window), "before" the work sessions recorded before them (the baseline).`,
+  "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
+  '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before. Working well: neither. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
+  "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
+  "- Each finding names its workflow step (Main thread, Explore, Implement, Review, Verify, PR and merge, Your answers), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.",
+  "- A suggested change adds lines to a file. Its effect is a measured target or a direction, never an estimated saving.",
+  "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
+];
+var TASK = [
+  "## What to do",
+  "",
+  "1. If you can read the repository, first read CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so a change fits what is there. `nurselog insights --json` prints the whole report with the value of each work session.",
+  "2. Suggest at most three changes, the Start here finding first unless the evidence argues against it. For each: the finding it answers with its numbers, why the change helps, the change as a diff of the file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json), and the signal that should move over the next five work sessions, with its direction.",
+  "3. Prefer small changes over a rewrite, so the effect of each can be measured. Say so when a finding rests on few work sessions, and never state a number the report does not give.",
+  "4. Name what works well and should stay as it is.",
+  "5. If nothing is worth changing, say so rather than invent a change."
+];
+var unmeasuredState = (finding) => {
+  if (finding.byMain) {
+    return "by the main thread";
+  }
+  return finding.absent ? "not in this workflow" : "not measured";
+};
+var sentence = (text2) => text2.charAt(0).toUpperCase() + text2.slice(1);
+var flaggedLines = (finding, startHere) => {
+  const start = finding.id === startHere ? " (Start here)" : "";
+  const facts = [`Step: ${plainText(finding.stepName)}.`, `Impact: ${finding.impact}.`];
+  if (finding.basis !== void 0) {
+    facts.push(`${sentence(plainText(finding.basis))}.`);
+  }
+  const lines = ["", `### ${plainText(finding.headline)}${start}`, facts.join(" "), plainText(finding.line)];
+  const evidence = finding.evidence;
+  if (evidence !== void 0) {
+    const numbers = [evidence.now, evidence.before, evidence.guideline].flatMap((number) => number === void 0 ? [] : [number]);
+    lines.push(...numbers.map((number) => `- ${sentence(plainText(number.label))}: ${plainText(number.text)}`));
+    if (evidence.setup !== "") {
+      lines.push(`- Setup: ${plainText(evidence.setup)}`);
+    }
+  }
+  const change = finding.change;
+  if (change !== void 0) {
+    lines.push(`Fix: ${plainText(change.fix)}`, `Effect: ${plainText(change.effect)}`, `Lines to add to ${plainText(change.file)}:`);
+    lines.push(...change.lines.map((line) => `+ ${plainText(line)}`));
+  }
+  return lines;
+};
+var quietLine = (finding) => {
+  const head = `- ${plainText(finding.headline)} (${plainText(finding.stepName)})`;
+  if (finding.group === "unmeasured") {
+    return `${head}: ${unmeasuredState(finding)}. ${plainText(finding.line)}`;
+  }
+  return `${head}: ${plainText(finding.line)}`;
+};
+var groupLines = (group, startHere) => {
+  const flagged = group.group === "change" || group.group === "consider";
+  const heading2 = `## ${plainText(group.label)}`;
+  if (flagged) {
+    return ["", heading2, ...group.findings.flatMap((finding) => flaggedLines(finding, startHere))];
+  }
+  return ["", heading2, "", ...group.findings.map(quietLine)];
+};
+var healthPrompt = (report) => {
+  const lines = [INTRO, "", ...READING, "", ...TASK, "", "---", "", `# ${plainText(report.title)}`, "", `${sentence(plainText(report.count))}.`];
+  if (report.note !== void 0) {
+    lines.push("", `Note: ${plainText(report.note)}`);
+  }
+  lines.push(...report.groups.flatMap((group) => groupLines(group, report.startHere)));
+  const closing = plainText(report.closing);
+  if (closing !== "") {
+    lines.push("", closing);
+  }
+  return lines.join("\n");
+};
+
 // src/ui/health-report-view.ts
 var SLOT_PX = 8;
 var SPARK_HEIGHT_PX = 34;
@@ -17528,15 +17607,18 @@ var FADE_UP_STAGGER_MS = 25;
 var FADE_UP_MAX_DELAYED = 8;
 var FADE_UP = [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }];
 var SLIDE = [{ transform: `translateX(${SLOT_PX}px)` }, { transform: "none" }];
-var COPY_TEXT = "Copy added lines";
 var COPIED_TEXT = "Copied";
 var COPY_FAILED_TEXT = "Select and copy";
 var COPY_RESET_MS = 1600;
+var PANEL_OPEN_MS = 450;
 var START_TEXT = "Start here";
 var START_TITLE = "Furthest from its guideline of the findings with a fix; another takes its place once this one is no longer the furthest";
 var START_REASON = ", furthest from its guideline of the findings with a fix";
-var COPIED_STATUS = "Added lines copied.";
-var COPY_FAILED_STATUS = "Copy failed. Select and copy selects the lines.";
+var LINES_WORDS = { text: "Copy added lines", copied: "Added lines copied.", failed: "Copy failed. Select and copy selects the lines." };
+var PROMPT_WORDS = { text: "Copy as prompt", copied: "Prompt copied.", failed: "Copy failed. Select and copy selects the prompt." };
+var PROMPT_TOGGLE = "Show the prompt";
+var PROMPT_HEAD = "Prompt for an AI assistant";
+var PROMPT_KEY = "prompt";
 var IMPACTS = ["cost", "time", "quality"];
 var IMPACT_NAMES = { cost: "Cost", time: "Time", quality: "Quality" };
 var GROUP_CLASSES = { change: "chg", consider: "con", ok: "okg", info: "ifg", unmeasured: "nmg" };
@@ -17624,11 +17706,13 @@ var createHealthReportView = (hooks) => {
   let filter = { stage: "all", impact: "all" };
   const open2 = /* @__PURE__ */ new Set();
   const openChanges = /* @__PURE__ */ new Set();
+  const openPrompt = /* @__PURE__ */ new Set();
   let last;
   let report;
   let keyless = false;
   let drawnParts = [];
   let panelCount2 = 0;
+  let scrollTimer;
   let items = /* @__PURE__ */ new Map();
   let groups2 = [];
   let options = [];
@@ -17784,7 +17868,7 @@ var createHealthReportView = (hooks) => {
     }
     return block;
   };
-  const disclosure = (kind, finding, content, toggle, opened) => {
+  const disclosure = (kind, key, content, toggle, opened) => {
     panelCount2 += 1;
     const panel = el("div", "xp");
     panel.id = `${prefix}-${kind}-${panelCount2}`;
@@ -17797,23 +17881,23 @@ var createHealthReportView = (hooks) => {
       panel.classList.toggle("open", on);
       panel.inert = !on;
     };
-    setOpen2(opened.has(finding.id));
+    setOpen2(opened.has(key));
     toggle.addEventListener("click", () => {
-      const on = !opened.has(finding.id);
+      const on = !opened.has(key);
       if (on) {
-        opened.add(finding.id);
+        opened.add(key);
       } else {
-        opened.delete(finding.id);
+        opened.delete(key);
       }
       setOpen2(on);
     });
     return panel;
   };
   const evidencePanel = (finding, evidence, toggle) => {
-    return disclosure("evidence", finding, evidenceBlock(finding, evidence), toggle, open2);
+    return disclosure("evidence", finding.id, evidenceBlock(finding, evidence), toggle, open2);
   };
-  const copyControl = (finding, lines, block) => {
-    const button = register(`copy:${finding.id}`, el("button", "hcp", COPY_TEXT));
+  const copyControl = (key, words, text2, block, reveal) => {
+    const button = register(key, el("button", "hcp", words.text));
     button.type = "button";
     const status = el("span", "visually-hidden");
     status.setAttribute("role", "status");
@@ -17822,21 +17906,22 @@ var createHealthReportView = (hooks) => {
     const done = (copied) => {
       failed = !copied;
       setText(button, copied ? COPIED_TEXT : COPY_FAILED_TEXT);
-      setText(status, copied ? COPIED_STATUS : COPY_FAILED_STATUS);
+      setText(status, copied ? words.copied : words.failed);
       clearTimeout(timer);
       timer = setTimeout(() => {
         failed = false;
-        setText(button, COPY_TEXT);
+        setText(button, words.text);
         setText(status, "");
       }, COPY_RESET_MS);
     };
     button.addEventListener("click", () => {
       if (failed) {
+        reveal?.();
         getSelection()?.selectAllChildren(block);
         return;
       }
       try {
-        void navigator.clipboard.writeText(lines.join("\n")).then(() => done(true), () => done(false));
+        void navigator.clipboard.writeText(text2).then(() => done(true), () => done(false));
       } catch {
         done(false);
       }
@@ -17861,7 +17946,7 @@ var createHealthReportView = (hooks) => {
       lines.append(line);
     }
     const head = el("div", "dfh");
-    head.append(el("span", "dff", change.file), ...copyControl(finding, change.lines, lines));
+    head.append(el("span", "dff", change.file), ...copyControl(`copy:${finding.id}`, LINES_WORDS, change.lines.join("\n"), lines));
     block.append(head, lines);
     return block;
   };
@@ -17897,7 +17982,7 @@ var createHealthReportView = (hooks) => {
     if (change) {
       const toggle = actionToggle(`change:${finding.id}`, "Show the change");
       actions.append(toggle);
-      panels.push(disclosure("change", finding, changeBlock(finding, change), toggle, openChanges));
+      panels.push(disclosure("change", finding.id, changeBlock(finding, change), toggle, openChanges));
     }
     if (finding.evidence) {
       const toggle = actionToggle(`evidence:${finding.id}`, "Evidence");
@@ -17958,9 +18043,61 @@ var createHealthReportView = (hooks) => {
     void item2.offsetWidth;
     item2.classList.add("hflash");
   };
+  const scrollOpened = (panel) => {
+    window.requestAnimationFrame(() => {
+      const reduced = hooks.reducedMotion();
+      const behavior = reduced ? "auto" : "smooth";
+      panel.scrollIntoView({ block: "nearest", behavior });
+      if (reduced) {
+        return;
+      }
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => {
+        if (panel.classList.contains("open")) {
+          panel.scrollIntoView({ block: "nearest", behavior });
+        }
+      }, PANEL_OPEN_MS);
+    });
+  };
+  const footer = (next) => {
+    const foot = [next.closing, next.footer].filter((text3) => text3 !== "").join(" ");
+    const block = el("div", "hfooter");
+    block.append(el("p", "hfoot", foot));
+    if (next.groups.length === 0) {
+      return block;
+    }
+    const prompt = healthPrompt(next);
+    const text2 = register("prompt:text", el("pre", void 0, prompt));
+    text2.tabIndex = 0;
+    text2.setAttribute("role", "region");
+    text2.setAttribute("aria-labelledby", `${prefix}-prompt-head`);
+    const title = el("span", "dff", PROMPT_HEAD);
+    title.id = `${prefix}-prompt-head`;
+    const head = el("div", "dfh");
+    head.append(title);
+    const box = el("div", "diff hpr");
+    box.append(head, text2);
+    const toggle = actionToggle("prompt:toggle", PROMPT_TOGGLE);
+    const reveal = () => {
+      if (toggle.getAttribute("aria-expanded") !== "true") {
+        toggle.click();
+      }
+    };
+    const actions = el("div", "fda");
+    actions.append(...copyControl("prompt:copy", PROMPT_WORDS, prompt, text2, reveal), toggle);
+    const panel = disclosure("prompt", PROMPT_KEY, box, toggle, openPrompt);
+    toggle.addEventListener("click", () => {
+      if (panel.classList.contains("open")) {
+        scrollOpened(panel);
+      }
+    });
+    block.append(actions, panel);
+    return block;
+  };
   const draw2 = (next, animate) => {
     const active = document.activeElement;
     const focused = [...focusables].find(([, control]) => control === active)?.[0];
+    const promptScroll = focusables.get("prompt:text")?.scrollTop ?? 0;
     const previous = last;
     if (filter.stage !== "all" && !next.stages.some((stage) => stage.id === filter.stage)) {
       filter = { ...filter, stage: "all" };
@@ -17981,10 +18118,13 @@ var createHealthReportView = (hooks) => {
     }
     parts.push(...next.groups.map(groupSection));
     none = el("p", "hnone", "Nothing matches these filters.");
-    const foot = [next.closing, next.footer].filter((text2) => text2 !== "").join(" ");
-    parts.push(none, el("p", "hfoot", foot));
+    parts.push(none, footer(next));
     element.replaceChildren(...parts);
     drawnParts = parts;
+    const promptText = focusables.get("prompt:text");
+    if (promptText) {
+      promptText.scrollTop = promptScroll;
+    }
     sizes.disconnect();
     segs.forEach((seg) => sizes.observe(seg));
     apply();
@@ -18013,6 +18153,7 @@ var createHealthReportView = (hooks) => {
     filter = { stage: next.stage ?? "all", impact: next.impact ?? "all" };
     open2.clear();
     openChanges.clear();
+    openPrompt.clear();
     last = void 0;
   };
   return { element, reset, draw: draw2, parts: () => drawnParts };
@@ -26994,7 +27135,7 @@ var createSignInNotice = () => {
 // src/ui/update.ts
 var SKIP_KEY = "nurselog.skipVersion";
 var NOTES_SHOWN = 6;
-var COPY_TEXT2 = "Copy";
+var COPY_TEXT = "Copy";
 var COPIED_TEXT3 = "Copied";
 var COPY_FAILED_TEXT2 = "Select and copy";
 var COPY_RESET_MS2 = 1600;
@@ -27068,7 +27209,7 @@ var createUpdateButton = (options) => {
   allChanges.target = "_blank";
   allChanges.rel = "noopener";
   const command = el("code");
-  const copy = el("button", "button update-copy", COPY_TEXT2);
+  const copy = el("button", "button update-copy", COPY_TEXT);
   copy.type = "button";
   const commandBox = el("div", "update-command");
   commandBox.append(command, copy);
@@ -27213,7 +27354,7 @@ var createUpdateButton = (options) => {
     const done = (copied) => {
       setText(copy, copied ? COPIED_TEXT3 : COPY_FAILED_TEXT2);
       window.clearTimeout(copyReset);
-      copyReset = window.setTimeout(() => setText(copy, COPY_TEXT2), COPY_RESET_MS2);
+      copyReset = window.setTimeout(() => setText(copy, COPY_TEXT), COPY_RESET_MS2);
     };
     try {
       navigator.clipboard.writeText(text2).then(() => done(true), () => done(false));
