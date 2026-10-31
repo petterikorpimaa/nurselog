@@ -15,23 +15,23 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-PIJFT6QM.js";
+} from "./chunk-7RCTHUHY.js";
 import {
   FIELD_NAMES,
+  FOLLOWUP_CATEGORIES,
   HOOK_DEFAULTS,
-  MAIN_AGENT,
   MAX_READ_DAYS,
+  MAX_SETUP_FILES,
   NONCE,
   RUNNING_CHECK_MS,
+  SETUP_PATH,
   STREAM_ID,
   TOKEN_CHANGED,
-  VERIFY_KINDS,
   appendPrivate,
   appendSpoolLine,
   blockingForYou,
   boardProof,
   boardUrl,
-  byStart,
   cacheDirOf,
   checkBoard,
   compareText,
@@ -47,11 +47,13 @@ import {
   expandHome,
   findConfig,
   gitCommonDir,
+  isSetupEntry,
   listSpoolFiles,
   localDay,
   loopbackJson,
+  mergeOutcomes,
   newLineId,
-  newMainSteps,
+  newOutcome,
   notSetUpMessage,
   openNoFollow,
   ownEntry,
@@ -71,7 +73,8 @@ import {
   repositoryRoot,
   sameText,
   serverStatePath,
-  sessionMetrics,
+  sessionAggregate,
+  sessionOutcomes,
   spoolDirExists,
   spoolDirFor,
   startCommand,
@@ -85,7 +88,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-255XBBTU.js";
+} from "./chunk-L5UAFSAH.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -139,7 +142,9 @@ var trimAgent = (agent) => {
 };
 var trimSession = (session) => {
   const agents = Object.fromEntries(Object.entries(session.agents).map(([id, agent]) => [id, trimAgent(agent)]));
-  return { ...session, agents };
+  const trimmed = { ...session, agents };
+  delete trimmed.setupHashes;
+  return trimmed;
 };
 var sessionView = (view, now) => {
   const nowMs = Date.parse(now ?? "");
@@ -739,7 +744,9 @@ ${message}`);
   const ownOrigin = (origin) => origin === `http://127.0.0.1:${boundPort}` || origin === `http://localhost:${boundPort}`;
   const foreignRead = (request) => {
     const { origin } = request.headers;
-    return request.headers["sec-fetch-site"] === "cross-site" || origin !== void 0 && !ownOrigin(origin);
+    const fetchSite = request.headers["sec-fetch-site"];
+    const fromAnotherPage = fetchSite !== void 0 && fetchSite !== "same-origin" && fetchSite !== "none";
+    return fromAnotherPage || origin !== void 0 && !ownOrigin(origin);
   };
   const answer = (request, response) => {
     request.resume();
@@ -785,9 +792,7 @@ ${message}`);
       sendUnauthorized(response);
       return;
     }
-    const fetchSite = request.headers["sec-fetch-site"];
-    const fixtureFromAnotherPage = target.path === "/api/fixture" && fetchSite !== void 0 && fetchSite !== "same-origin" && fetchSite !== "none";
-    if (request.method === "GET" && target.path.startsWith("/api/") && (foreignRead(request) || fixtureFromAnotherPage)) {
+    if (request.method === "GET" && target.path.startsWith("/api/") && foreignRead(request)) {
       sendJson(response, 403, { error: "forbidden", message: "The Nurselog API is read only by the Nurselog board." });
       return;
     }
@@ -1004,13 +1009,163 @@ var replayFixtures = (paths, speed, onLine) => replayFixtureTexts(paths.map((pat
 
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
-import { existsSync, linkSync, lstatSync as lstatSync3, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
-import { dirname, join as join6, resolve as resolve3 } from "path";
+import { existsSync, linkSync, lstatSync as lstatSync4, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
+import { dirname, join as join7, resolve as resolve3 } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 // src/server/context.ts
 import { readFileSync as readFileSync5 } from "fs";
-import { join as join3, resolve } from "path";
+import { join as join4, resolve } from "path";
+
+// src/agent-files.ts
+import { lstatSync, readdirSync } from "fs";
+import { basename, join as join2 } from "path";
+var AGENT_NAME = /^[\w.-]{1,64}$/;
+var AGENT_HEAD_BYTES = 4096;
+var MAX_AGENT_FILES = 200;
+var MAX_LINE = 512;
+var AGENT_FILES_MS = 5e3;
+var FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
+var MODEL_LINE = /^model:[ \t]*([\w.:\[\]-]{1,64})[ \t]*$/;
+var MAX_TURNS_LINE = /^maxTurns:[ \t]*(\d{1,5})[ \t]*$/;
+var COMMENT_START = /\s#/;
+var ARGUMENTS = /\([^)]*\)?/g;
+var QUOTED = /^(["'])((?:(?!\1).)*)\1$/;
+var SKIPPED_LIST_LINE = /^\s*(?:#.*)?$/;
+var unquote = (value) => value.replace(/^(["'])(.*)\1$/, "$2");
+var withoutComment = (text) => {
+  const at = text.search(COMMENT_START);
+  return at < 0 ? text : text.slice(0, at).trimEnd();
+};
+var toolNamesOf = (lines) => {
+  const start = lines.findIndex((line) => /^tools:/.test(line));
+  if (start < 0) {
+    return void 0;
+  }
+  const inline = withoutComment(lines[start].slice("tools:".length)).trim();
+  const items = [];
+  if (inline === "") {
+    for (const line of lines.slice(start + 1)) {
+      if (SKIPPED_LIST_LINE.test(line)) {
+        continue;
+      }
+      const item = /^\s*-(.*)$/.exec(line)?.[1];
+      if (item === void 0 || item === "") {
+        break;
+      }
+      items.push(item.trim());
+    }
+    if (items.length === 0) {
+      return void 0;
+    }
+  } else {
+    items.push(...inline.replace(QUOTED, "$2").replace(/^\[|\]$/g, "").replace(ARGUMENTS, "").split(","));
+  }
+  return items.map((item) => unquote(withoutComment(item).replace(ARGUMENTS, "").trim())).filter((tool) => tool !== "");
+};
+var keyLine = (lines, key) => lines.find((line) => line.startsWith(`${key}:`));
+var setupFields = (lines) => {
+  const fields = {};
+  const modelLine = keyLine(lines, "model");
+  const model = modelLine === void 0 ? void 0 : MODEL_LINE.exec(modelLine)?.[1];
+  if (modelLine !== void 0 && model !== void 0) {
+    fields.model = model;
+    fields.modelLine = modelLine;
+  }
+  const turnsLine = keyLine(lines, "maxTurns");
+  const turns = Number(turnsLine === void 0 ? void 0 : MAX_TURNS_LINE.exec(turnsLine)?.[1]);
+  if (Number.isInteger(turns) && turns > 0) {
+    fields.maxTurns = turns;
+  }
+  return fields;
+};
+var frontmatterLines = (head) => FRONTMATTER.exec(head)?.[1].split(/\r?\n/);
+var cappedLines = (lines) => lines.map((line) => line.length > MAX_LINE ? "" : line);
+var agentHeadOf = (head, fallback) => {
+  const lines = frontmatterLines(head) ?? [];
+  const short = cappedLines(lines);
+  const name = unquote(keyLine(short, "name")?.slice("name:".length).trim() ?? "");
+  return { name: AGENT_NAME.test(name) ? name : fallback, tools: toolNamesOf(lines), ...setupFields(short) };
+};
+var readAgent = (file) => {
+  const fallback = basename(file, ".md");
+  let head = "";
+  try {
+    head = readSmallFile(file, AGENT_HEAD_BYTES, { head: true });
+  } catch {
+    return { name: fallback, tools: void 0 };
+  }
+  return agentHeadOf(head, fallback);
+};
+var realDirectory = (path) => {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+var byText = (a, b) => a < b ? -1 : Number(a > b);
+var setupAgentOf = (dir, entry) => {
+  const stem = entry.name.slice(0, -".md".length);
+  if (!AGENT_NAME.test(stem) || !entry.isFile()) {
+    return void 0;
+  }
+  let head;
+  try {
+    head = readSmallFile(join2(dir, entry.name), AGENT_HEAD_BYTES, { head: true });
+  } catch {
+    return void 0;
+  }
+  if (frontmatterLines(head) === void 0) {
+    return void 0;
+  }
+  const { name, model, modelLine, maxTurns } = agentHeadOf(head, stem);
+  if (model === void 0 && maxTurns === void 0) {
+    return void 0;
+  }
+  const agent = { name, file: `.claude/agents/${entry.name}` };
+  if (model !== void 0 && modelLine !== void 0) {
+    agent.model = model;
+    agent.modelLine = modelLine;
+  }
+  if (maxTurns !== void 0) {
+    agent.maxTurns = maxTurns;
+  }
+  return agent;
+};
+var readAgentFiles = (root) => {
+  const dir = join2(root, ".claude", "agents");
+  if (!realDirectory(join2(root, ".claude")) || !realDirectory(dir)) {
+    return [];
+  }
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const listed2 = entries.filter((entry) => entry.name.endsWith(".md")).sort((a, b) => byText(a.name, b.name)).slice(0, MAX_AGENT_FILES);
+  const agents = [];
+  const names = /* @__PURE__ */ new Set();
+  for (const entry of listed2) {
+    const agent = setupAgentOf(dir, entry);
+    if (agent !== void 0 && !names.has(agent.name)) {
+      names.add(agent.name);
+      agents.push(agent);
+    }
+  }
+  return agents;
+};
+var cachedAgentFiles = (root, ms = AGENT_FILES_MS, now = Date.now) => {
+  let read;
+  return () => {
+    const at = now();
+    if (read === void 0 || at - read.at >= ms || at < read.at) {
+      read = { at, agents: readAgentFiles(root) };
+    }
+    return read.agents;
+  };
+};
 
 // src/spool/activity.ts
 var readLine = (text) => {
@@ -1031,8 +1186,8 @@ var activityAt = (text) => {
 var lineAt = (text) => readLine(text).at;
 
 // src/spool/aggregates.ts
-import { closeSync, lstatSync, readdirSync, readFileSync as readFileSync4, readSync, renameSync, rmSync, unlinkSync } from "fs";
-import { join as join2 } from "path";
+import { closeSync, lstatSync as lstatSync2, readdirSync as readdirSync2, readFileSync as readFileSync4, readSync, renameSync, rmSync, unlinkSync } from "fs";
+import { join as join3 } from "path";
 
 // src/insights/percentile.ts
 var percentile = (values, p) => {
@@ -1093,102 +1248,16 @@ var typicalLengths = (entries) => {
   return lengths;
 };
 
-// src/model/aggregate.ts
-var WORK_SESSION_CALLS = 5;
-var DIALOG_ORIGINS = /* @__PURE__ */ new Set(["marker", "ask-tool", "permission"]);
-var isDialog = (question) => question.audience === "user" && DIALOG_ORIGINS.has(question.origin);
-var allSubagents = (session) => Object.values(session.agents).filter((agent) => agent.id !== MAIN_AGENT).sort(byStart);
-var subagentsOf = (session, stage) => allSubagents(session).filter((agent) => agent.stage === stage);
-var implementOf = (agent) => {
-  const { toolCalls, verifyRounds } = agent.budget;
-  const commands = VERIFY_KINDS.reduce((sum2, kind) => sum2 + verifyRounds.commands[kind], 0);
-  const failed = VERIFY_KINDS.reduce((sum2, kind) => sum2 + verifyRounds.results[kind].filter((result) => result === "fail").length, 0);
-  const callLimit = toolCalls.limit > 0 ? toolCalls.limit : null;
-  return { role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, callLimit, commands, failed };
-};
-var agentOf = (agent) => ({ role: agent.role, startedAt: agent.startedAt, callsAtFirstStop: agent.budget.toolCallsAtFirstStop ?? null, stage: agent.stage });
-var useOf = ({ calls, chars, largeOutputs: largeOutputs2 }) => ({ calls, chars, largeOutputs: largeOutputs2 });
-var stepsOf = (main) => {
-  const { calls, explore, implement, verify } = main?.mainSteps ?? newMainSteps();
-  return { calls, explore: useOf(explore), implement: useOf(implement), verify: useOf(verify) };
-};
-var reviewOf = (agent) => {
-  const block = agent.report?.block;
-  const fixItems = block ? block.followups.filter((item) => item.type === "fix").length : null;
-  return { role: agent.role, startedAt: agent.startedAt, fixItems, usd: agent.budget.costUsd };
-};
-var branchOf = (row) => row.runIds.includes(row.branch) ? "?" : row.branch;
-var metricsBranchOf = (branch) => branch.includes(":") ? "?" : branch;
-var rowOf = (row) => {
-  const rounds = row.reviewers.map((reviewer) => reviewer.round);
-  const reviewRound = rounds.length > 0 ? Math.max(...rounds) : null;
-  const streamRuns2 = row.streams.filter((stream) => stream.runs.length > 0).map((stream) => stream.runs.length);
-  const pr = row.pr?.pr;
-  return {
-    branch: branchOf(row),
-    owner: row.owner,
-    prNumber: pr?.number ?? null,
-    reviewRound,
-    streamRuns: streamRuns2,
-    firstWorkAt: row.firstWorkAt,
-    prOpenedAt: pr?.createdAt ?? null,
-    additions: pr?.additions ?? null,
-    deletions: pr?.deletions ?? null
-  };
-};
-var sameCall = (head, question) => question.origin === "ask-tool" && head.origin === "ask-tool" && question.id.startsWith(`${head.id}-`) && question.createdAt === head.createdAt && question.source.agentId === head.source.agentId;
-var questionsOf = (session) => {
-  const dialogs = session.questions.filter(isDialog);
-  const heads = [];
-  for (const question of [...dialogs].sort((a, b) => compareText(a.id, b.id))) {
-    if (!heads.some((head) => sameCall(head, question))) {
-      heads.push(question);
-    }
-  }
-  heads.sort((a, b) => time(a.createdAt) - time(b.createdAt) || compareText(a.id, b.id));
-  return heads.map((question) => {
-    const answeredAt = question.state === "answered" && question.resolvedAt !== void 0 ? question.resolvedAt : null;
-    return { origin: question.origin, askedAt: question.createdAt, answeredAt };
-  });
-};
-var sessionAggregate = (session) => {
-  const { endedAt, finishedAt } = session;
-  if (endedAt === void 0 || finishedAt === void 0 || Object.values(session.agents).some((agent) => agent.trimmed)) {
-    return void 0;
-  }
-  const main = Object.hasOwn(session.agents, MAIN_AGENT) ? session.agents[MAIN_AGENT] : void 0;
-  const limit = main?.budget.context.limit;
-  const contextLimit = limit !== void 0 && limit > 0 ? limit : null;
-  const toolCalls = main?.budget.toolCalls.used ?? 0;
-  const { waits: waits2, totalMs, breaks } = session.developerWait;
-  const metrics = sessionMetrics(session);
-  const branches = metrics.branches.map((entry) => ({ ...entry, branch: metricsBranchOf(entry.branch) }));
-  const { count: count2, expired, cacheWriteUsd } = metrics.resumes;
-  return {
-    v: 1,
-    id: session.id,
-    ...session.key === void 0 ? {} : { key: session.key },
-    ...session.title === void 0 ? {} : { title: session.title },
-    kind: session.kind,
-    startedAt: session.startedAt,
-    endedAt,
-    finishedAt,
-    work: session.kind === "card" && toolCalls >= WORK_SESSION_CALLS,
-    metrics: { ...metrics, branches, resumes: { count: count2, expired, cacheWriteUsd } },
-    main: { toolCalls, largeOutputs: main?.budget.largeOutputs ?? 0, contextLimit, steps: stepsOf(main) },
-    builds: subagentsOf(session, "implement").map(implementOf),
-    reviews: subagentsOf(session, "review").map(reviewOf),
-    agents: allSubagents(session).map(agentOf),
-    rows: session.rows.map(rowOf),
-    questions: questionsOf(session),
-    developerWait: { waits: waits2, totalMs, breaks }
-  };
-};
-
 // src/spool/aggregate-parse.ts
 var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isString = (value) => typeof value === "string";
+var isBoolean = (value) => typeof value === "boolean";
 var isDate = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
+var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+var isNullOr = (valid) => (value) => value === null || valid(value);
+var isCommands = (value) => isPlainObject(value) && isCount(value.typecheck) && isCount(value.lint) && isCount(value.test);
+var CATEGORIES = FOLLOWUP_CATEGORIES;
+var isCategoryCount = (category, value) => CATEGORIES.includes(category) && isCount(value);
 var OPTIONAL_FIELDS = [
   ["key", isString],
   ["title", isString],
@@ -1201,8 +1270,73 @@ var OPTIONAL_FIELDS = [
   ["reviews", Array.isArray],
   ["rows", Array.isArray],
   ["questions", Array.isArray],
-  ["agents", Array.isArray]
+  ["agents", Array.isArray],
+  ["pipelines", isCount],
+  ["setupHashes", isNullOr(isPlainObject)]
 ];
+var MAIN_FIELDS = [
+  ["wholeReads", isCount],
+  ["wholeReadChars", isCount],
+  ["planMode", isBoolean]
+];
+var ENTRY_FIELDS = [
+  ["builds", "commandsAtFirstStop", isNullOr(isCommands)],
+  ["agents", "endedAt", isNullOr(isDate)],
+  ["agents", "outputChars", isCount],
+  ["agents", "wholeReads", isCount],
+  ["agents", "wholeReadChars", isCount],
+  ["reviews", "fixCategories", isNullOr(isPlainObject)]
+];
+var dropFields = (object, rules) => {
+  let dropped = false;
+  for (const [field, valid] of rules) {
+    if (Object.hasOwn(object, field) && !valid(object[field])) {
+      delete object[field];
+      dropped = true;
+    }
+  }
+  return dropped;
+};
+var objectsIn = (entry, list) => {
+  const items = Object.hasOwn(entry, list) ? entry[list] : void 0;
+  return Array.isArray(items) ? items.filter(isPlainObject) : [];
+};
+var dropEntryFields = (entry) => {
+  let dropped = false;
+  for (const [list, field, valid] of ENTRY_FIELDS) {
+    for (const item of objectsIn(entry, list)) {
+      if (Object.hasOwn(item, field) && !valid(item[field])) {
+        delete item[field];
+        dropped = true;
+      }
+    }
+  }
+  return dropped;
+};
+var keepMapEntries = (holder, field, valid, max = Infinity) => {
+  const map = Object.hasOwn(holder, field) ? holder[field] : void 0;
+  if (!isPlainObject(map)) {
+    return false;
+  }
+  const kept = {};
+  const entries = Object.entries(map);
+  let count2 = 0;
+  for (const [key, value] of entries) {
+    if (count2 < max && valid(key, value) && key !== "__proto__") {
+      ownEntry(kept, key, () => value);
+      count2 += 1;
+    }
+  }
+  holder[field] = kept;
+  return count2 < entries.length;
+};
+var dropMapEntries = (entry) => {
+  let dropped = keepMapEntries(entry, "setupHashes", isSetupEntry, MAX_SETUP_FILES);
+  for (const review of objectsIn(entry, "reviews")) {
+    dropped = keepMapEntries(review, "fixCategories", isCategoryCount) || dropped;
+  }
+  return dropped;
+};
 var completeLines = (text) => text.split("\n").slice(0, -1).filter((line) => line.trim() !== "");
 var parseObject = (line) => {
   try {
@@ -1220,13 +1354,12 @@ var storedAggregate = (line) => {
   if (!isDate(entry.startedAt) || !isDate(entry.finishedAt)) {
     return void 0;
   }
-  let repaired = false;
-  for (const [field, valid] of OPTIONAL_FIELDS) {
-    if (Object.hasOwn(entry, field) && !valid(entry[field])) {
-      delete entry[field];
-      repaired = true;
-    }
+  let repaired = dropFields(entry, OPTIONAL_FIELDS);
+  if (Object.hasOwn(entry, "main") && isPlainObject(entry.main)) {
+    repaired = dropFields(entry.main, MAIN_FIELDS) || repaired;
   }
+  repaired = dropEntryFields(entry) || repaired;
+  repaired = dropMapEntries(entry) || repaired;
   return { aggregate: entry, repaired };
 };
 var parseAggregates = (text) => {
@@ -1275,6 +1408,59 @@ var duration = (ms) => {
 };
 var plural = (count2, noun) => `${count2} ${noun}${count2 === 1 ? "" : "s"}`;
 
+// src/insights/setup-changes.ts
+var INSTRUCTION_FILES = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"];
+var isSetupPath = (path) => SETUP_PATH.test(path);
+var setupHashesOf = (value) => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const hashes = /* @__PURE__ */ new Map();
+  for (const [path, hash] of Object.entries(value)) {
+    if (isSetupEntry(path, hash)) {
+      hashes.set(path, hash);
+    }
+  }
+  return hashes;
+};
+var heldPaths = (confirmed, current, next) => {
+  const paths = /* @__PURE__ */ new Set([...confirmed.keys(), ...current.keys()]);
+  return [...paths].filter((path) => current.get(path) !== confirmed.get(path) && next.get(path) === current.get(path)).sort(compareText);
+};
+var setupHistoryOf = (sessions) => {
+  const ordered = sessions.filter((session) => Number.isFinite(session.started)).sort((a, b) => a.started - b.started || compareText(a.id, b.id));
+  const known = ordered.flatMap((session) => session.setupHashes === null ? [] : [{ session, hashes: session.setupHashes }]);
+  const changed = /* @__PURE__ */ new Map();
+  const confirmed = new Map(known[0]?.hashes ?? []);
+  for (let index = 1; index < known.length - 1; index += 1) {
+    const current = known[index].hashes;
+    const paths = heldPaths(confirmed, current, known[index + 1].hashes);
+    for (const path of paths) {
+      const hash = current.get(path);
+      if (hash === void 0) {
+        confirmed.delete(path);
+      } else {
+        confirmed.set(path, hash);
+      }
+    }
+    if (paths.length > 0) {
+      changed.set(known[index].session, paths);
+    }
+  }
+  const changes = [];
+  const latest = /* @__PURE__ */ new Map();
+  for (const session of ordered) {
+    const paths = changed.get(session);
+    if (paths !== void 0) {
+      changes.push({ session: session.id, startedAt: new Date(session.started).toISOString(), paths });
+    }
+    if (changes.length > 0) {
+      latest.set(session.id, changes.length - 1);
+    }
+  }
+  return { changes, latest };
+};
+
 // src/insights/insights.ts
 var AREAS = ["delivery", "explore", "implementers", "review", "verification", "tokens", "questions"];
 var AREA_NAMES = {
@@ -1290,6 +1476,9 @@ var SIGNAL_NAMES = {
   "cost-per-pr": "cost per PR",
   "time-to-pr": "time to PR",
   "cost-per-100-lines": "cost per 100 changed lines",
+  "time-to-merge": "time to merge",
+  "red-checks": "PRs with a red check",
+  "sent-back": "PRs sent back",
   "budget-first-stop": "budget at the first stop",
   "second-implementer": "second implement runs",
   "second-round": "second review rounds",
@@ -1308,12 +1497,21 @@ var SIGNAL_NAMES = {
   "unchecked-sessions": "sessions without a check",
   "question-open-time": "question open time",
   "questions-per-session": "questions per session",
-  "developer-wait": "developer wait"
+  "developer-wait": "developer wait",
+  "untested-first-stop": "first stops without a test",
+  "research-overlap": "research still running",
+  "several-pipelines": "sessions with several pipelines",
+  "fix-categories": "fix items by cause",
+  "whole-reads": "whole reads",
+  "plan-share": "plan share of tokens",
+  "no-review": "review before the PR"
 };
 var FACTOR = 1.5;
 var BUDGET_RUNS = 5;
 var QUIET_RUNS = 10;
 var GUIDELINE_SESSIONS = 3;
+var GUIDELINE_PRS = 3;
+var HOUR_MS = 60 * 60 * 1e3;
 var SPREAD_VALUES = 3;
 var MAIN_ROLE = "main";
 var MAIN_STEPS = ["explore", "implement", "verify"];
@@ -1322,6 +1520,16 @@ var MAX_SESSION_ID2 = 256;
 var MAX_SHOWN_TEXT = 200;
 var CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 var plainText = (text) => text.replace(CONTROL, "");
+var restsOnBaseline = (insight) => {
+  return insight.flag === "comparison" && insight.overGuideline !== true && insight.signal !== "fix-categories";
+};
+var isWorseThanBefore = (insight) => {
+  return insight.worseThanBefore === true || restsOnBaseline(insight);
+};
+var reasonText = (reason) => {
+  const text = plainText(reason);
+  return text.endsWith(".") ? text.slice(0, -1) : text;
+};
 var NO_IMPLEMENT_RUNS = "no subagent of an implement-stage role ran (roles.<role>.stage) and no other subagent edited a file on a branch";
 var NO_BUDGET = "no tool-call budget is set for the roles of the implement runs (budgets.roles.<role>.toolCalls)";
 var NO_FIRST_STOP = "no implement run with a tool-call budget stopped";
@@ -1339,6 +1547,14 @@ var NO_PR_AFTER_WORK = "no PR was opened after the session's first work on its b
 var NO_PR_SIZE = "no PR size is known (the gh poll of github.repo reads it)";
 var NO_CHANGED_LINE = "the PRs changed no line";
 var NO_EDIT = "no work session edited a file";
+var NO_STOP = "no implement run stopped";
+var NO_STOP_UNDER_BUDGET = "no implement run stopped before its tool-call budget";
+var NO_TEST = "no test command matched verification.kinds";
+var NO_RESEARCH = "no research agent ran (a subagent of stage other, plan roles excluded; roles.<role>.stage and step)";
+var NO_MERGE = "no PR merged";
+var NO_CHECKS = "no check state of a PR is known (the gh poll reads it while a PR is open; a repository without checks has none)";
+var NO_READ_CHARS = "no read of the Explore step returned characters";
+var NO_REVIEW_DECISION = "no review decision of a PR is known (the gh poll reads it while a PR is open)";
 var PR = ["PR", "PRs"];
 var LINE = ["line", "lines"];
 var IMPLEMENT_RUN = ["implement run", "implement runs"];
@@ -1351,6 +1567,10 @@ var ANSWERED = ["answered question", "answered questions"];
 var EDITED = ["session with a file edit", "sessions with a file edit"];
 var CHARACTER = ["character", "characters"];
 var MAIN_CALL = ["main-thread call", "main-thread calls"];
+var CATEGORISED = ["fix item with a category", "fix items with a category"];
+var WHOLE_READ = ["whole read", "whole reads"];
+var READ_CALL = ["Read", "Reads"];
+var TOKEN = ["token", "tokens"];
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var fieldsOf = (value) => isRecord(value) ? value : {};
 var entriesOf = (value) => Array.isArray(value) ? value.filter(isRecord) : void 0;
@@ -1359,18 +1579,52 @@ var timeOf2 = (value) => typeof value === "string" ? time(value) : Number.NaN;
 var isNumber = (value) => value !== null;
 var lineCountOf = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 var countOf = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+var testsAt = (entry) => {
+  if (entry.commandsAtFirstStop === null) {
+    return null;
+  }
+  const tests = isRecord(entry.commandsAtFirstStop) ? countOf(entry.commandsAtFirstStop.test) : null;
+  return tests === null ? void 0 : tests;
+};
 var implementRun = (entry) => ({
   callsAtFirstStop: numberOf(entry.callsAtFirstStop),
   callLimit: numberOf(entry.callLimit),
   commands: numberOf(entry.commands),
-  failed: numberOf(entry.failed)
+  failed: numberOf(entry.failed),
+  start: timeOf2(entry.startedAt),
+  testsAtFirstStop: testsAt(entry)
 });
+var isResearch = (entry, planRole) => {
+  const planned = typeof entry.role === "string" && planRole(plainText(entry.role));
+  return entry.stage === "other" && !planned;
+};
+var researchRuns = (entries, planRole) => {
+  if (entries === void 0 || !entries.every((entry) => Object.hasOwn(entry, "endedAt"))) {
+    return void 0;
+  }
+  const research = entries.filter((entry) => isResearch(entry, planRole));
+  return research.map((entry) => ({ start: timeOf2(entry.startedAt), end: entry.endedAt === null ? null : timeOf2(entry.endedAt) }));
+};
+var categoriesOf = (value) => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const categories = {};
+  for (const category of FOLLOWUP_CATEGORIES) {
+    const items = Object.hasOwn(value, category) ? countOf(value[category]) : null;
+    if (items !== null && items > 0) {
+      categories[category] = items;
+    }
+  }
+  return categories;
+};
 var reviewRuns = (entries, session) => {
   const runs = [];
   entries.forEach((entry, index) => {
     if (typeof entry.role === "string") {
       const start = timeOf2(entry.startedAt);
-      runs.push({ role: plainText(entry.role), session, start: Number.isFinite(start) ? start : 0, index, fixItems: numberOf(entry.fixItems), usd: numberOf(entry.usd) });
+      const categories = categoriesOf(entry.fixCategories);
+      runs.push({ role: plainText(entry.role), session, start: Number.isFinite(start) ? start : 0, index, fixItems: numberOf(entry.fixItems), usd: numberOf(entry.usd), categories });
     }
   });
   return runs;
@@ -1386,7 +1640,11 @@ var rowNumbers = (entry) => {
     firstWork: timeOf2(entry.firstWorkAt),
     prOpened: timeOf2(entry.prOpenedAt),
     additions: lineCountOf(entry.additions),
-    deletions: lineCountOf(entry.deletions)
+    deletions: lineCountOf(entry.deletions),
+    outcomeKnown: entry.mergedAt === null || typeof entry.mergedAt === "string",
+    merged: timeOf2(entry.mergedAt),
+    redCheck: typeof entry.redCheck === "boolean" ? entry.redCheck : null,
+    sentBack: typeof entry.sentBack === "boolean" ? entry.sentBack : null
   };
 };
 var roleNumbers = (entries) => entries.flatMap((entry) => {
@@ -1394,7 +1652,8 @@ var roleNumbers = (entries) => entries.flatMap((entry) => {
     return [];
   }
   const role = plainText(entry.role);
-  return [{ role, runs: numberOf(entry.runs), cacheRead: numberOf(entry.cacheRead), output: numberOf(entry.output), peakContext: numberOf(entry.peakContext), usd: numberOf(entry.usd) }];
+  const models = Array.isArray(entry.models) ? entry.models.flatMap((model) => shownText(model) ?? []) : [];
+  return [{ role, models, runs: numberOf(entry.runs), cacheRead: numberOf(entry.cacheRead), output: numberOf(entry.output), peakContext: numberOf(entry.peakContext), usd: numberOf(entry.usd) }];
 });
 var openTime = (entry) => {
   const asked = timeOf2(entry.askedAt);
@@ -1420,6 +1679,35 @@ var stepCalls = (value) => {
   const inSteps = explore.calls + implement.calls + verify.calls;
   return inSteps > calls ? void 0 : { calls, explore, implement, verify };
 };
+var agentReads = (entry) => {
+  const whole = countOf(entry.wholeReads);
+  const wholeChars = countOf(entry.wholeReadChars);
+  const chars = countOf(entry.outputChars);
+  return whole === null || wholeChars === null || chars === null ? void 0 : { whole, wholeChars, chars, reads: null };
+};
+var isReads = (reads) => reads !== void 0;
+var agentReadsOf = (entries, planRole) => {
+  const research = (entries ?? []).filter((entry) => isResearch(entry, planRole)).map(agentReads);
+  const counted = research.filter(isReads);
+  return research.length === 0 || counted.length < research.length ? void 0 : pooledReads(counted);
+};
+var mainReadCalls = (metrics) => {
+  const tools = entriesOf(fieldsOf(metrics.tools).main);
+  if (tools === void 0) {
+    return null;
+  }
+  const entry = tools.find((tool) => tool.tool === "Read");
+  return entry === void 0 ? 0 : countOf(entry.calls);
+};
+var mainReadsOf = (main, steps, metrics) => {
+  const whole = countOf(main.wholeReads);
+  const wholeChars = countOf(main.wholeReadChars);
+  if (whole === null || wholeChars === null || steps === void 0) {
+    return void 0;
+  }
+  const reads = mainReadCalls(metrics);
+  return { whole, wholeChars, chars: steps.explore.chars, reads: reads !== null && reads >= whole ? reads : null };
+};
 var ranCheck = (entry) => {
   const commands = fieldsOf(entry.commands);
   return (numberOf(commands.typecheck) ?? 0) > 0 || (numberOf(commands.test) ?? 0) > 0;
@@ -1427,6 +1715,10 @@ var ranCheck = (entry) => {
 var editedWith = (entry) => {
   const editTool = typeof entry.tool === "string" && EDIT_TOOLS.has(entry.tool);
   return editTool && (numberOf(entry.calls) ?? 0) > 0;
+};
+var ranTest = (metrics) => {
+  const verification = entriesOf(metrics.verification) ?? [];
+  return verification.some((entry) => (numberOf(fieldsOf(entry.commands).test) ?? 0) > 0);
 };
 var checksOf = (metrics) => {
   const tools = fieldsOf(metrics.tools);
@@ -1446,16 +1738,36 @@ var shownText = (value) => {
   const text = plainText(value);
   return text !== "" && text.length <= MAX_SHOWN_TEXT ? text : void 0;
 };
-var readSession = (aggregate, finished) => {
+var tokensOf = (metrics) => {
+  const tokens2 = fieldsOf(metrics.tokens);
+  const total = countOf(tokens2.total);
+  const byStage = isRecord(tokens2.byStage) ? tokens2.byStage : void 0;
+  const plan = byStage === void 0 || !Object.hasOwn(byStage, "plan") ? 0 : countOf(byStage.plan);
+  return total === null || plan === null || byStage === void 0 ? void 0 : { plan: Math.min(plan, total), total };
+};
+var planRoleOf = (roles) => (role) => {
+  const entry = ownValue(roles, role) ?? ownValue(roles, "*");
+  return entry?.stage === "other" && entry.step === "plan";
+};
+var otherRoles = (entries, planRole) => {
+  const others = (entries ?? []).filter((entry) => entry.stage === "other").map((entry) => typeof entry.role === "string" ? plainText(entry.role) : "");
+  return { others, plan: [...new Set(others.filter((role) => role !== "" && planRole(role)))] };
+};
+var readSession = (aggregate, finished, planRole) => {
   const main = fieldsOf(aggregate.main);
   const metrics = fieldsOf(aggregate.metrics);
   const roles = entriesOf(metrics.roles);
   const reviews = entriesOf(aggregate.reviews);
+  const steps = stepCalls(main.steps);
+  const agents = entriesOf(aggregate.agents);
+  const { others, plan } = otherRoles(agents, planRole);
   return {
     id: aggregate.id,
     key: shownText(aggregate.key),
     title: shownText(aggregate.title),
     finished,
+    started: timeOf2(aggregate.startedAt),
+    setupHashes: setupHashesOf(aggregate.setupHashes),
     builds: entriesOf(aggregate.builds)?.map(implementRun),
     reviews: reviews === void 0 ? void 0 : reviewRuns(reviews, aggregate.id),
     rows: entriesOf(aggregate.rows)?.map(rowNumbers),
@@ -1466,9 +1778,17 @@ var readSession = (aggregate, finished) => {
     contextLimit: numberOf(main.contextLimit),
     questions: entriesOf(aggregate.questions)?.map(openTime),
     waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs),
-    steps: stepCalls(main.steps),
-    otherAgent: entriesOf(aggregate.agents)?.some((entry) => entry.stage === "other") ?? false,
-    checks: checksOf(metrics)
+    steps,
+    otherAgent: others.some((role) => role === "" || !planRole(role)),
+    planMode: main.planMode === true,
+    planRoles: plan,
+    tokens: tokensOf(metrics),
+    checks: checksOf(metrics),
+    tested: ranTest(metrics),
+    research: researchRuns(agents, planRole),
+    pipelines: countOf(aggregate.pipelines),
+    agentReads: agentReadsOf(agents, planRole),
+    mainReads: mainReadsOf(main, steps, metrics)
   };
 };
 var pad = (value) => String(value).padStart(2, "0");
@@ -1507,7 +1827,12 @@ var spreadFlag = (window, baseline) => {
 };
 var comparison = (flagged) => flagged ? "comparison" : void 0;
 var guidelineOf = (limit, worse = "above") => limit === null ? void 0 : { limit, worse };
-var flagOf = (broken, compared) => broken ? "guideline" : comparison(compared);
+var flagOf = (broken, compared) => {
+  if (!broken) {
+    return { flag: comparison(compared) };
+  }
+  return compared ? { flag: "guideline", worseThanBefore: true } : { flag: "guideline" };
+};
 var aside = (comparedTo, phrase) => phrase === void 0 ? `(${comparedTo})` : `(${comparedTo}; guideline: ${phrase})`;
 var before = (sides, baseline, noun, text) => {
   if (baseline === void 0) {
@@ -1630,6 +1955,70 @@ var costPer100Lines = (sides) => {
   const body = `100 changed lines cost ${cost(window.value ?? 0)}, over ${count(window.n, PR)} of ${groupedCount(sized.lines, LINE)} (${comparedTo})`;
   return { lines: [{ flag: comparison(factorFlag(window, baseline)), window, baseline, body }] };
 };
+var newestPrs = (sessions) => {
+  const newest = /* @__PURE__ */ new Map();
+  for (const row of prsIn(sessions)) {
+    if (!newest.has(row.prNumber)) {
+      newest.set(row.prNumber, row);
+    }
+  }
+  return [...newest.values()];
+};
+var isMerged = (row) => Number.isFinite(row.merged) && Number.isFinite(row.prOpened) && row.merged >= row.prOpened;
+var mergeTimes = (sessions) => newestPrs(sessions).filter(isMerged).map((row) => row.merged - row.prOpened);
+var printedMs = (ms) => {
+  const seconds = Math.round(Math.max(0, ms) / 1e3);
+  if (seconds < 60) {
+    return seconds * 1e3;
+  }
+  const tenthMinutes = Math.round(seconds / 6);
+  if (tenthMinutes < 100) {
+    return tenthMinutes * 6e3;
+  }
+  const minutes = Math.round(seconds / 60);
+  return minutes < 120 ? minutes * 60 * 1e3 : Math.round(seconds / 360) * 360 * 1e3;
+};
+var timeToMerge = (sides) => {
+  const prs = prsIn(sides.window);
+  if (prs.length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  if (mergeTimes(sides.window).length === 0) {
+    return { lacks: prs.some((row) => row.outcomeKnown) ? NO_MERGE : NOT_STORED };
+  }
+  const { window, baseline, flag } = spreadSides(sides, mergeTimes);
+  const hours = sides.guidelines.timeToMergeHours;
+  const guideline = guidelineOf(hours === null ? null : hours * HOUR_MS);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_PRS && printedMs(window.value ?? 0) > printedMs(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `at most ${duration(guideline.limit)}`;
+  const comparedTo = before(sides, baseline, PR, (evidence) => duration(evidence.value ?? 0));
+  const body = `a PR merged a median of ${duration(window.value ?? 0)} after it opened, over ${count(window.n, PR)} ${aside(comparedTo, phrase)}`;
+  return { lines: [{ ...flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
+};
+var flaggedPrs = (flag) => (sessions) => newestPrs(sessions).filter((row) => row[flag] !== null);
+var prShare = (sides, flag, limit, lacks, phrase) => {
+  const prs = prsIn(sides.window);
+  if (prs.length === 0) {
+    return noPrOutcome(sides.window);
+  }
+  const units = flaggedPrs(flag);
+  const hit = (row) => row[flag] === true;
+  const window = kOfN(units(sides.window), hit);
+  if (window.n === 0) {
+    return { lacks: prs.some((row) => row.outcomeKnown) ? lacks : NOT_STORED };
+  }
+  const baseline = onBaseline(sides, (sessions) => kOfN(units(sessions), hit));
+  const k = window.k ?? 0;
+  const floored = Math.floor(k * 100 / window.n);
+  const guideline = guidelineOf(limit);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_PRS && floored >= percent(guideline.limit);
+  const limitPhrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const share = `${floored}%; ${before(sides, baseline, PR, kOfNText)}`;
+  const body = `${k} of the last ${count(window.n, PR)} ${phrase} ${aside(share, limitPhrase)}`;
+  return { lines: [{ ...flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
+};
+var redChecks = (sides) => prShare(sides, "redCheck", sides.guidelines.redChecks, NO_CHECKS, "had a failed check");
+var sentBack = (sides) => prShare(sides, "sentBack", sides.guidelines.sentBack, NO_REVIEW_DECISION, "had changes requested");
 var recordedSteps = (sessions) => sessions.flatMap((session) => session.steps ?? []);
 var stepChars = (step) => (sessions) => recordedSteps(sessions).map((steps) => steps[step].chars);
 var stepCharsLine = (sides, step, limit, what) => {
@@ -1645,7 +2034,7 @@ var stepCharsLine = (sides, step, limit, what) => {
   const returned = `returned ${groupedCount(Math.round(sum(chars)), CHARACTER)} in the last ${count(window.n, SESSION)}`;
   const comparedTo = before(sides, baseline, SESSION, (evidence) => grouped(evidence.value ?? 0));
   const body = `the main thread's own ${what} ${returned}, a median of ${grouped(window.value ?? 0)} per session ${aside(comparedTo, phrase)}`;
-  return { lines: [{ flag: flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
+  return { lines: [{ ...flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
 };
 var mainReads = (sides) => stepCharsLine(sides, "explore", sides.guidelines.mainReadChars, "reads and searches");
 var mainCheckOutput = (sides) => stepCharsLine(sides, "verify", sides.guidelines.mainCheckChars, "verification commands");
@@ -1677,12 +2066,128 @@ var mainStepsLine = (sides) => {
   const body = `${listText(parts)} of ${groupedCount(pooled.calls, MAIN_CALL)}`;
   return { lines: [{ window: { n: pooled.sessions, value: inSteps }, steps: shares, body }] };
 };
+var roleModelsOf = (window) => {
+  const models = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of window.flatMap((session) => session.roles ?? [])) {
+    if (entry.models.length > 0 && !seen.has(entry.role)) {
+      seen.add(entry.role);
+      if (entry.models.length === 1) {
+        models.push({ role: entry.role, model: entry.models[0] });
+      }
+    }
+  }
+  return models;
+};
 var mainStepsOf = (window) => {
   const shares = stepShares(pooledSteps(window));
   const built = window.some((session) => (session.builds?.length ?? 0) > 0);
   const explored = window.some((session) => session.otherAgent);
-  const shareOf = (step, subagents) => ({ share: shares?.[step] ?? null, subagents });
-  return { explore: shareOf("explore", explored), implement: shareOf("implement", built), verify: shareOf("verify", built) };
+  const shareOf2 = (step, subagents) => ({ share: shares?.[step] ?? null, subagents });
+  return { explore: shareOf2("explore", explored), implement: shareOf2("implement", built), verify: shareOf2("verify", built) };
+};
+var planUseOf = (window) => ({
+  mode: window.some((session) => session.planMode),
+  roles: [...new Set(window.flatMap((session) => session.planRoles))]
+});
+var tokenTotals = (sessions) => {
+  const recorded = sessions.flatMap((session) => session.tokens ?? []);
+  return recorded.filter((tokens2) => tokens2.total > 0);
+};
+var planEvidence = (sessions) => {
+  const counted = tokenTotals(sessions);
+  const total = sum(counted.map((entry) => entry.total));
+  return valueOver(counted.length, total > 0 ? sum(counted.map((entry) => entry.plan)) / total : void 0);
+};
+var planPoint = (session, window) => {
+  const evidence = planEvidence([session]);
+  return evidence.value === void 0 ? { session: session.id, value: null, window } : { session: session.id, value: evidence.value, n: 1, window };
+};
+var planShare = (sides) => {
+  const use = planUseOf(sides.window);
+  if (!use.mode && use.roles.length === 0) {
+    return { lines: [] };
+  }
+  const window = planEvidence(sides.window);
+  if (window.value === void 0) {
+    return { lacks: NO_REQUESTS };
+  }
+  const baseline = onBaseline(sides, planEvidence);
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percent(evidence.value ?? 0)}%`);
+  const total = sum(tokenTotals(sides.window).map((entry) => entry.total));
+  const older = sides.baseline.map((session) => planPoint(session, false)).reverse();
+  const recent = sides.window.map((session) => planPoint(session, true)).reverse();
+  const series = [...older, ...recent];
+  const body = `plan ${percent(window.value)}% of ${groupedCount(total, TOKEN)} in the last ${count(window.n, SESSION)} (${comparedTo})`;
+  return { lines: [{ window, baseline, series, body }] };
+};
+var runningAt = (research, start) => research.start < start && (research.end === null || research.end > start);
+var overlapRuns = (sessions) => sessions.flatMap((session) => {
+  const research = session.research;
+  if (research === void 0) {
+    return [];
+  }
+  const starts = (session.builds ?? []).map((run) => run.start).filter((start) => Number.isFinite(start));
+  return starts.map((start) => research.some((run) => runningAt(run, start)));
+});
+var researchOverlap = (sides) => {
+  if (buildsOf(sides.window).length === 0) {
+    return noRuns(NO_IMPLEMENT_RUNS);
+  }
+  const units = overlapRuns(sides.window);
+  if (units.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  if (!sides.window.some((session) => (session.research?.length ?? 0) > 0)) {
+    return noRuns(NO_RESEARCH);
+  }
+  const window = kOfN(units, (overlap) => overlap);
+  const baseline = onBaseline(sides, (sessions) => kOfN(overlapRuns(sessions), (overlap) => overlap));
+  const k = window.k ?? 0;
+  const floored = Math.floor(k * 100 / window.n);
+  const guideline = guidelineOf(sides.guidelines.researchOverlap);
+  const crossed = guideline !== void 0 && window.n >= BUDGET_RUNS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const share = `${floored}%; ${before(sides, baseline, IMPLEMENT_RUN, kOfNText)}`;
+  const body = `${k} of the last ${count(window.n, IMPLEMENT_RUN)} started while a research agent was still running ${aside(share, phrase)}`;
+  const rated = rateFlag(window, baseline);
+  const worse = rated ? { worseThanBefore: true } : {};
+  const over = crossed ? { overGuideline: true, ...worse } : {};
+  return { lines: [{ flag: comparison(crossed || rated), ...over, window, baseline, guideline, body }] };
+};
+var exploreReadsIn = (sessions, of) => sessions.flatMap((session) => of(session) ?? []);
+var pooledReads = (units) => {
+  const counts = units.map((unit) => unit.reads);
+  const reads = counts.includes(null) ? null : sum(counts.map((value) => value ?? 0));
+  return { whole: sum(units.map((unit) => unit.whole)), wholeChars: sum(units.map((unit) => unit.wholeChars)), chars: sum(units.map((unit) => unit.chars)), reads };
+};
+var shareOf = (reads) => reads.chars > 0 ? Math.min(1, reads.wholeChars / reads.chars) : void 0;
+var wholeShare = (units) => valueOver(units.length, shareOf(pooledReads(units)));
+var wholeReads = (sides) => {
+  const agents = sides.window.some((session) => session.otherAgent);
+  const ownReads = (session) => session.otherAgent ? void 0 : session.mainReads;
+  const of = (session) => agents ? session.agentReads : ownReads(session);
+  const units = exploreReadsIn(sides.window, of);
+  if (units.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const pooled = pooledReads(units);
+  const share = shareOf(pooled);
+  if (share === void 0) {
+    return { lacks: NO_READ_CHARS };
+  }
+  const window = valueOver(units.length, share);
+  const baseline = onBaseline(sides, (sessions) => wholeShare(exploreReadsIn(sessions, of)));
+  const guideline = guidelineOf(sides.guidelines.wholeReads);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_SESSIONS && percent(share) > percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `at most ${percent(guideline.limit)}%`;
+  const comparedTo = before(sides, baseline, SESSION, (evidence) => evidence.value === void 0 ? "no characters read" : `${percent(evidence.value)}%`);
+  const whole = pooled.reads === null ? count(pooled.whole, WHOLE_READ) : `${pooled.whole} of ${count(pooled.reads, READ_CALL)} whole`;
+  const reads = `${whole}, ${grouped(pooled.wholeChars)} of ${groupedCount(pooled.chars, CHARACTER)}`;
+  const whose = agents ? "the characters the research agents read" : "the characters of the main thread's own reads and searches";
+  const body = `whole reads gave ${percent(share)}% of ${whose} in the last ${count(window.n, SESSION)}: ${reads} ${aside(comparedTo, phrase)}`;
+  const role = agents ? {} : { role: MAIN_ROLE };
+  return { lines: [{ ...role, ...flagOf(broken, factorFlag(window, baseline)), window, baseline, guideline, body }] };
 };
 var buildsOf = (sessions) => sessions.flatMap((session) => session.builds ?? []);
 var budgetRuns = (sessions) => {
@@ -1714,7 +2219,7 @@ var budgetFirstStop = (sides) => {
   const comparedTo = before(sides, baseline, IMPLEMENT_RUN, kOfNText);
   const share = `${floored}%; ${comparedTo}`;
   const body = `${k} of the last ${count(window.n, IMPLEMENT_RUN)} reached their tool-call budget by their first stop ${aside(share, phrase)}`;
-  return { lines: [{ flag: flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
+  return { lines: [{ ...flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
 };
 var streamRuns = (sessions) => ownedRows(sessions).flatMap((row) => row.streamRuns);
 var ownerLacks = (sessions) => {
@@ -1729,6 +2234,35 @@ var secondImplementer = (sides) => {
     return { lacks: ownerLacks(sides.window) ? NOT_STORED : NO_STREAM };
   }
   return { lines: [rateLine(sides, streamRuns, (runs) => runs >= 2, STREAM, "had a second implement run")] };
+};
+var stoppedAtBudget = (run) => run.callsAtFirstStop !== null && run.callLimit !== null && run.callLimit > 0 && run.callsAtFirstStop >= run.callLimit;
+var stoppedRuns = (sessions) => buildsOf(sessions).filter((run) => typeof run.testsAtFirstStop === "number" && !stoppedAtBudget(run));
+var untested = (run) => run.testsAtFirstStop === 0;
+var untestedFirstStop = (sides) => {
+  const builds = buildsOf(sides.window);
+  if (builds.length === 0) {
+    return noRuns(NO_IMPLEMENT_RUNS);
+  }
+  const units = stoppedRuns(sides.window);
+  if (units.length === 0) {
+    if (builds.some((run) => typeof run.testsAtFirstStop === "number")) {
+      return { lacks: NO_STOP_UNDER_BUDGET };
+    }
+    return { lacks: builds.some((run) => run.testsAtFirstStop === null) ? NO_STOP : NOT_STORED };
+  }
+  if (!sides.window.some((session) => session.tested)) {
+    return { lacks: NO_TEST };
+  }
+  const window = kOfN(units, untested);
+  const baseline = onBaseline(sides, (sessions) => kOfN(stoppedRuns(sessions), untested));
+  const k = window.k ?? 0;
+  const floored = Math.floor(k * 100 / window.n);
+  const guideline = guidelineOf(sides.guidelines.untestedFirstStop);
+  const broken = guideline !== void 0 && window.n >= BUDGET_RUNS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const share = `${floored}%; ${before(sides, baseline, IMPLEMENT_RUN, kOfNText)}`;
+  const body = `${k} of the last ${count(window.n, IMPLEMENT_RUN)} ran no test command before their first stop ${aside(share, phrase)}`;
+  return { lines: [{ ...flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
 };
 var reviewsOf = (sessions) => sessions.flatMap((session) => session.reviews ?? []);
 var blockRuns = (sessions) => reviewsOf(sessions).filter((run) => run.fixItems !== null);
@@ -1804,6 +2338,27 @@ var quietReviewer = (sides) => {
   }
   return { lines };
 };
+var NO_REVIEW_TRIGGERS = [
+  { id: "red-checks", of: redChecks },
+  { id: "sent-back", of: sentBack }
+];
+var noReview = (sides) => {
+  if (reviewsOf(sides.window).length > 0) {
+    return { lines: [] };
+  }
+  for (const trigger of NO_REVIEW_TRIGGERS) {
+    const outcome = trigger.of(sides);
+    const line = "lines" in outcome ? outcome.lines[0] : void 0;
+    if (line?.flag === "guideline") {
+      const read = oldestOf(sides);
+      const alone = outcomesAlone(trigger, read, sides);
+      const series = read.map((entry, index) => pointOf(entry, alone[index], void 0));
+      const body = `no review-stage role ran in the last ${count(sides.window.length, WORK_SESSION)}, and ${line.body}`;
+      return { lines: [{ ...line, trigger: trigger.id, series, body }] };
+    }
+  }
+  return { lines: [] };
+};
 var commandCounts = (sessions) => buildsOf(sessions).map((run) => run.commands).filter(isNumber);
 var verifiedRuns = (sessions) => buildsOf(sessions).filter((run) => run.commands !== null && run.commands > 0);
 var commandLacks = (sides) => {
@@ -1851,7 +2406,7 @@ var uncheckedSessions = (sides) => {
   const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
   const share = `${floored}%; ${before(sides, baseline, EDITED, kOfNText)}`;
   const body = `${k} of the last ${count(window.n, EDITED)} ran no typecheck or test command matched by verification.kinds ${aside(share, phrase)}`;
-  return { lines: [{ flag: flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
+  return { lines: [{ ...flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
 };
 var outputRoles = (sessions, role) => {
   const entries = sessions.flatMap((session) => session.roles ?? []);
@@ -1888,7 +2443,7 @@ var cachePerOutput = (sides) => {
     const cached = count(perOutput, ["cached token", "cached tokens"]);
     const comparedTo = before(sides, baseline, SESSION, (evidence) => String(Math.round(evidence.value ?? 0)));
     const body = `${role} read ${cached} per output token ${aside(comparedTo, phrase)}`;
-    return { role, flag: flagOf(broken, factorFlag(window, baseline)), window, baseline, guideline, body };
+    return { role, ...flagOf(broken, factorFlag(window, baseline)), window, baseline, guideline, body };
   });
   return { lines };
 };
@@ -1920,7 +2475,35 @@ var mainPeakContext = (sides) => {
   const over = `${window.k} of ${count(window.n, SESSION)} over ${limitText} the model's context limit`;
   const comparedTo = before(sides, baseline, SESSION, (evidence) => tokens(evidence.value ?? 0));
   const body = `the main thread's peak context had a median of ${tokens(window.value ?? 0)} per session, ${over} ${aside(comparedTo, phrase)}`;
-  return { lines: [{ flag: flagOf(broken, spread.flag !== void 0), window, baseline, guideline, body }] };
+  return { lines: [{ ...flagOf(broken, spread.flag !== void 0), window, baseline, guideline, body }] };
+};
+var pipelineSessions = (sessions) => sessions.filter((session) => session.pipelines !== null);
+var severalOf = (session) => (session.pipelines ?? 0) >= 2;
+var peakMedian = (sessions) => {
+  const peaks = sessions.map((session) => session.roles?.find((entry) => entry.role === MAIN_ROLE)?.peakContext ?? null);
+  return median(peaks.filter(isNumber));
+};
+var severalPipelines = (sides) => {
+  const units = pipelineSessions(sides.window);
+  if (units.length === 0) {
+    return { lacks: NOT_STORED };
+  }
+  const window = kOfN(units, severalOf);
+  const baseline = onBaseline(sides, (sessions) => kOfN(pipelineSessions(sessions), severalOf));
+  const k = window.k ?? 0;
+  const floored = Math.floor(k * 100 / window.n);
+  const guideline = guidelineOf(sides.guidelines.severalPipelines);
+  const broken = guideline !== void 0 && window.n >= GUIDELINE_SESSIONS && floored >= percent(guideline.limit);
+  const phrase = guideline === void 0 ? void 0 : `under ${percent(guideline.limit)}%`;
+  const share = `${floored}%; ${before(sides, baseline, WORK_SESSION, kOfNText)}`;
+  const several = peakMedian(units.filter(severalOf));
+  const single = peakMedian(units.filter((session) => session.pipelines === 1));
+  let peaks = "";
+  if (several !== void 0 && single !== void 0) {
+    peaks = `; the main thread's peak context had a median of ${tokens(several)} in those against ${tokens(single)} in the sessions with one`;
+  }
+  const body = `${k} of the last ${count(window.n, WORK_SESSION)} had two or more pipelines ${aside(share, phrase)}${peaks}`;
+  return { lines: [{ ...flagOf(broken, rateFlag(window, baseline)), window, baseline, guideline, body }] };
 };
 var mainShares = (sessions) => {
   const shares = [];
@@ -1963,7 +2546,7 @@ var overheadShare = (sides) => {
   const phrase = guideline === void 0 ? void 0 : `at most ${percentTenths(guideline.limit)}%`;
   const comparedTo = before(sides, baseline, SESSION, (evidence) => `${percentTenths(evidence.value ?? 0)}%`);
   const took = `took a mean of ${percentTenths(window.value ?? 0)}% of a session's cost, at most ${percentTenths(Math.max(...shares))}%`;
-  return { lines: [{ flag: flagOf(broken, false), window, baseline, guideline, body: `the Nurselog overhead ${took} ${aside(comparedTo, phrase)}` }] };
+  return { lines: [{ ...flagOf(broken, false), window, baseline, guideline, body: `the Nurselog overhead ${took} ${aside(comparedTo, phrase)}` }] };
 };
 var largeOutputs = (sessions) => sessions.map((session) => session.largeOutputs).filter(isNumber);
 var mainLargeOutputs = (sides) => {
@@ -1978,7 +2561,7 @@ var mainLargeOutputs = (sides) => {
   const read = `read ${count(sum(counts), ["response", "responses"])} over 20,000 characters in the last ${count(window.n, SESSION)}`;
   const comparedTo = before(sides, baseline, SESSION, (evidence) => String(evidence.value ?? 0));
   const body = `the main thread ${read}, a median of ${window.value ?? 0} per session ${aside(comparedTo, phrase)}`;
-  return { lines: [{ flag: flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
+  return { lines: [{ ...flagOf(broken, flag !== void 0), window, baseline, guideline, body }] };
 };
 var listed = (sessions) => sessions.flatMap((session) => session.questions === void 0 ? [] : [session.questions]);
 var openTimes = (sessions) => listed(sessions).flatMap((questions) => questions.filter(isNumber));
@@ -2018,6 +2601,40 @@ var developerWait = (sides) => {
   const body = `the developer ${waited}, a median of ${duration(window.value ?? 0)} per session (${comparedTo})`;
   return { lines: [{ flag, window, baseline, body }] };
 };
+var MIN_CATEGORISED_ITEMS = 4;
+var fixCauses = (sessions) => {
+  const runs = reviewsOf(sessions);
+  const causes = FOLLOWUP_CATEGORIES.map((category) => ({ category, items: sum(runs.map((run) => run.categories?.[category] ?? 0)) }));
+  return causes.filter((cause) => cause.items > 0).sort((a, b) => b.items - a.items);
+};
+var causeEvidence = (sessions, category) => {
+  const causes = fixCauses(sessions);
+  return { n: sum(causes.map((cause) => cause.items)), k: causes.find((cause) => cause.category === category)?.items ?? 0 };
+};
+var fixCategories = (sides) => {
+  const causes = fixCauses(sides.window);
+  if (causes.length === 0) {
+    return { lines: [] };
+  }
+  const top = causes[0];
+  const n = sum(causes.map((cause) => cause.items));
+  const window = { n, k: top.items };
+  const baseline = onBaseline(sides, (sessions) => causeEvidence(sessions, top.category));
+  const flagged = n >= MIN_CATEGORISED_ITEMS && top.items * 2 >= n;
+  const parts = causes.map((cause) => `${cause.category} ${stepPercent(cause.items / n)}`);
+  const half = flagged ? `; half or more are about ${top.category}` : "";
+  const comparedTo = before(sides, baseline, CATEGORISED, (evidence) => `${top.category} ${kOfNText(evidence)}`);
+  const body = `fix items by cause: ${listText(parts)} of the last ${count(n, CATEGORISED)}${half} (${comparedTo})`;
+  const read = [...sides.window.map((session) => ({ session, window: true })), ...sides.baseline.map((session) => ({ session, window: false }))].reverse();
+  const series = read.map((entry) => {
+    const own = causeEvidence([entry.session], top.category);
+    if (own.n === 0) {
+      return { session: entry.session.id, value: null, window: entry.window };
+    }
+    return { session: entry.session.id, value: own.k / own.n, k: own.k, n: own.n, window: entry.window };
+  });
+  return { lines: [{ flag: comparison(flagged), window, baseline, fixCategories: causes, series, body }] };
+};
 var SIGNALS = [
   { id: "cost-per-pr", area: "delivery", of: costPerPr },
   { id: "time-to-pr", area: "delivery", of: timeToPr },
@@ -2040,10 +2657,26 @@ var SIGNALS = [
   { id: "main-large-outputs", area: "tokens", of: mainLargeOutputs },
   // Informational: no flag, no guideline and no not-measured line.
   { id: "main-steps", area: "tokens", of: mainStepsLine },
+  { id: "plan-share", area: "tokens", of: planShare },
   { id: "question-open-time", area: "questions", of: questionOpenTime },
   { id: "questions-per-session", area: "questions", of: questionsPerSession },
-  { id: "developer-wait", area: "questions", of: developerWait }
+  { id: "developer-wait", area: "questions", of: developerWait },
+  { id: "untested-first-stop", area: "implementers", of: untestedFirstStop },
+  { id: "research-overlap", area: "explore", of: researchOverlap },
+  { id: "several-pipelines", area: "tokens", of: severalPipelines },
+  { id: "time-to-merge", area: "delivery", of: timeToMerge },
+  { id: "red-checks", area: "delivery", of: redChecks },
+  { id: "sent-back", area: "delivery", of: sentBack },
+  // A reference line unless one cause holds half: no line, and no not-measured one, without a fix item with a category.
+  { id: "fix-categories", area: "review", of: fixCategories, reference: true },
+  { id: "whole-reads", area: "explore", of: wholeReads },
+  // A line only when it flags, from the two above; no not-measured one.
+  { id: "no-review", area: "review", of: noReview, reference: true }
 ];
+var oldestOf = (sides) => {
+  const window = sides.window.map((session) => ({ session, window: true }));
+  return [...window, ...sides.baseline.map((session) => ({ session, window: false }))].reverse();
+};
 var outcomesAlone = (signal, read, sides) => {
   return read.map((entry) => signal.of({ window: [entry.session], baseline: [], comparable: false, minimum: sides.minimum, guidelines: sides.guidelines }));
 };
@@ -2067,6 +2700,10 @@ var signalLine = (area, signal, line, series) => ({
   ...line.window === void 0 ? {} : { window: line.window },
   ...line.baseline === void 0 ? {} : { baseline: line.baseline },
   ...line.guideline === void 0 ? {} : { guideline: line.guideline },
+  ...line.overGuideline === void 0 ? {} : { overGuideline: line.overGuideline },
+  ...line.worseThanBefore === void 0 ? {} : { worseThanBefore: line.worseThanBefore },
+  ...line.fixCategories === void 0 ? {} : { fixCategories: line.fixCategories },
+  ...line.trigger === void 0 ? {} : { trigger: line.trigger },
   series,
   text: `${AREA_NAMES[area]}: ${line.body}.`
 });
@@ -2106,19 +2743,20 @@ var reportLines = (sides, read) => {
       }
     }
     if (lacks.length > 0) {
-      others.push(notMeasuredOf(area, lacks, lacks.length === signals.length, sides.window.length));
+      const lacking = signals.filter((signal) => signal.reference !== true);
+      others.push(notMeasuredOf(area, lacks, lacks.length === lacking.length, sides.window.length));
     }
   }
   return [...flagged, ...others];
 };
 var reportSessionId = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID2 && plainText(id) === id;
-var selectSessions = (aggregates, options, now) => {
+var selectSessions = (aggregates, options, now, planRole) => {
   const at = time(now);
   const today = new Date(at);
   const oldest = localDay2(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
   const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay2(new Date(finished)) >= oldest;
   const selected = aggregates.filter((aggregate) => aggregate.work === true && reportSessionId(aggregate.id)).map((aggregate) => ({ aggregate, finished: timeOf2(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
-  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished));
+  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished, planRole));
 };
 var reportSession = (session) => ({
   id: session.id,
@@ -2126,21 +2764,35 @@ var reportSession = (session) => ({
   ...session.title === void 0 ? {} : { title: session.title },
   finishedAt: new Date(session.finished).toISOString()
 });
+var withSetupChanges = (insight, history) => {
+  if (history.changes.length === 0 || insight.series.length === 0) {
+    return insight;
+  }
+  const series = insight.series.map((point) => {
+    const change = history.latest.get(point.session);
+    return change === void 0 ? point : { ...point, setupChange: change };
+  });
+  return { ...insight, series };
+};
 var guidelinesOf = (guidelines) => {
   const { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cachePerOutput2 } = guidelines;
   const { mainReadChars, mainCheckChars, uncheckedSessions: uncheckedSessions2 } = guidelines;
+  const { untestedFirstStop: untestedFirstStop2, researchOverlap: researchOverlap2, severalPipelines: severalPipelines2 } = guidelines;
+  const { redChecks: redChecks2, sentBack: sentBack2, timeToMergeHours, wholeReads: wholeReads2 } = guidelines;
   const cache = { main: cachePerOutput2.main, agents: cachePerOutput2.agents };
   const main = { mainReadChars, mainCheckChars, uncheckedSessions: uncheckedSessions2 };
-  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache, ...main };
+  const steps = { untestedFirstStop: untestedFirstStop2, researchOverlap: researchOverlap2, severalPipelines: severalPipelines2 };
+  const outcomes = { redChecks: redChecks2, sentBack: sentBack2, timeToMergeHours };
+  return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache, ...main, ...steps, ...outcomes, wholeReads: wholeReads2 };
 };
-var insightsOf = (aggregates, options, now) => {
-  const sessions = selectSessions(aggregates, options, now);
+var insightsOf = (aggregates, options, now, roles = {}) => {
+  const sessions = selectSessions(aggregates, options, now, planRoleOf(roles));
   const window = sessions.slice(0, options.window);
   const baseline = sessions.slice(options.window, options.window + options.baseline);
   const minimum = Math.min(options.minBaseline, options.baseline);
   const sides = { window, baseline, comparable: baseline.length >= minimum, minimum, guidelines: options.guidelines };
   const read = [...window, ...baseline];
-  const oldest = [...window.map((session) => ({ session, window: true })), ...baseline.map((session) => ({ session, window: false }))].reverse();
+  const oldest = oldestOf(sides);
   const basis = { window: window.length, baseline: baseline.length };
   let closing = `Based on ${count(0, WORK_SESSION)}.`;
   if (read.length > 0) {
@@ -2151,15 +2803,17 @@ var insightsOf = (aggregates, options, now) => {
   const guidelines = guidelinesOf(options.guidelines);
   const settings = { window: options.window, baseline: options.baseline, minBaseline: options.minBaseline, keepDays: options.keepDays, guidelines };
   const listed2 = oldest.map((entry) => reportSession(entry.session));
-  const insights = window.length === 0 ? [] : reportLines(sides, oldest);
+  const history = setupHistoryOf(read);
+  const insights = window.length === 0 ? [] : reportLines(sides, oldest).map((insight) => withSetupChanges(insight, history));
   const mainSteps = mainStepsOf(window);
-  return { generatedAt: now, options: settings, basis, sessions: listed2, insights, mainSteps, closing };
+  const plan = planUseOf(window);
+  return { generatedAt: now, options: settings, basis, sessions: listed2, setupChanges: history.changes, insights, mainSteps, roleModels: roleModelsOf(window), plan, closing };
 };
 
 // src/spool/report-keeper.ts
 var newestFirst = (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt) || compareText(a.id, b.id);
 var createReportKeeper = (options) => {
-  const { insights, now, onError } = options;
+  const { insights, roles, now, onError } = options;
   let kept = [];
   let report = null;
   let reportFailure;
@@ -2197,7 +2851,7 @@ var createReportKeeper = (options) => {
     compute() {
       const before2 = report;
       try {
-        report = insightsOf(kept, insights, now().toISOString());
+        report = insightsOf(kept, insights, now().toISOString(), roles);
         reportFailure = void 0;
       } catch (error) {
         report = null;
@@ -2299,7 +2953,7 @@ var readText = (path) => withOpened(path, ({ fd, stat }) => {
   }
 });
 var readAggregates = (dir, onError) => {
-  const path = join2(dir, AGGREGATES_FILE);
+  const path = join3(dir, AGGREGATES_FILE);
   let text;
   try {
     text = readText(path);
@@ -2312,7 +2966,7 @@ var readAggregates = (dir, onError) => {
   }
   const { aggregates, skipped, repaired } = parseAggregates(text);
   const skippedPart = skipped > 0 ? [`${lineCount(skipped)} skipped, broken, of another format version or without a date`] : [];
-  const repairedPart = repaired > 0 ? [`${lineCount(repaired)} repaired, a field of a wrong type dropped`] : [];
+  const repairedPart = repaired > 0 ? [`${lineCount(repaired)} repaired, a field of a wrong type or an invalid map entry dropped`] : [];
   const problems = [...skippedPart, ...repairedPart];
   if (problems.length > 0) {
     onError(`${path}: ${problems.join("; ")}`, false);
@@ -2333,7 +2987,7 @@ ${line}`;
 }) ?? line;
 var appendAggregate = (dir, aggregate) => {
   ensurePrivateDir(dir);
-  const path = join2(dir, AGGREGATES_FILE);
+  const path = join3(dir, AGGREGATES_FILE);
   appendPrivate(path, appendText(path, `${JSON.stringify(aggregate)}
 `));
 };
@@ -2371,7 +3025,7 @@ var leftOver = (name, stat) => {
 var removeTemps = (dir) => {
   let names;
   try {
-    names = readdirSync(dir);
+    names = readdirSync2(dir);
   } catch (error) {
     if (error.code === "ENOENT") {
       return;
@@ -2379,15 +3033,15 @@ var removeTemps = (dir) => {
     throw error;
   }
   for (const name of names.filter((entry) => TEMP_FILE.test(entry))) {
-    const stat = lstatSync(join2(dir, name), { throwIfNoEntry: false });
+    const stat = lstatSync2(join3(dir, name), { throwIfNoEntry: false });
     if ((stat?.isFile() || stat?.isSymbolicLink()) && leftOver(name, stat)) {
-      rmSync(join2(dir, name), { force: true });
+      rmSync(join3(dir, name), { force: true });
     }
   }
 };
 var rewrite = (dir, keep) => {
   removeTemps(dir);
-  const path = join2(dir, AGGREGATES_FILE);
+  const path = join3(dir, AGGREGATES_FILE);
   if (countLines(path, (line) => !keep(line)) === 0) {
     return 0;
   }
@@ -2435,11 +3089,11 @@ var countForPurge = (path, stat) => {
   }
 };
 var purgeableAggregates = (dir, before2) => {
-  const path = join2(dir, AGGREGATES_FILE);
+  const path = join3(dir, AGGREGATES_FILE);
   if (!spoolDirExists(dir)) {
     return 0;
   }
-  const stat = lstatSync(path, { throwIfNoEntry: false });
+  const stat = lstatSync2(path, { throwIfNoEntry: false });
   if (stat?.isFile() !== true) {
     return 0;
   }
@@ -2453,8 +3107,8 @@ var purgeAggregates = (dir, before2) => {
   if (!spoolDirExists(dir)) {
     return 0;
   }
-  const path = join2(dir, AGGREGATES_FILE);
-  const stat = lstatSync(path, { throwIfNoEntry: false });
+  const path = join3(dir, AGGREGATES_FILE);
+  const stat = lstatSync2(path, { throwIfNoEntry: false });
   if (before2 !== void 0) {
     const taken = stat?.isFile() ? rewrite(dir, finishedFrom(dayStart(before2))) : 0;
     removeTemps(dir);
@@ -2483,12 +3137,14 @@ var createAggregateLog = (options) => {
   const settleMs = options.settleMs ?? AGGREGATE_SETTLE_MS;
   const now = options.now ?? (() => /* @__PURE__ */ new Date());
   const onInfo = options.onInfo ?? (() => void 0);
-  const path = join2(dir, AGGREGATES_FILE);
+  const path = join3(dir, AGGREGATES_FILE);
   const known = /* @__PURE__ */ new Map();
   const pending = /* @__PURE__ */ new Map();
   let appendFailure;
   let typical = {};
-  const report = createReportKeeper({ insights, now, onError });
+  const report = createReportKeeper({ insights, roles: options.roles, now, onError });
+  const outside = /* @__PURE__ */ new Set();
+  let outsideNew = 0;
   const recompute = () => {
     try {
       typical = typicalLengths([...known.values()]);
@@ -2497,8 +3153,12 @@ var createAggregateLog = (options) => {
       onError(`typical lengths not computed: ${error.message}`);
     }
   };
-  const keep = ({ id, finishedAt, agents }) => {
-    known.set(id, { finishedAt, agents: Array.isArray(agents) ? agents : void 0 });
+  const keep = ({ id, finishedAt, rows, agents }) => {
+    known.set(id, { finishedAt, outcomes: mergeOutcomes(rows), agents: Array.isArray(agents) ? agents : void 0 });
+  };
+  const isWritten = (session, finishedAt) => {
+    const kept = known.get(session.id);
+    return kept !== void 0 && kept.finishedAt === finishedAt && !newOutcome(kept.outcomes, sessionOutcomes(session));
   };
   const load = (tellRefused) => {
     let refused = false;
@@ -2527,7 +3187,14 @@ var createAggregateLog = (options) => {
   const write = (store, sessionId) => {
     const session = store.session(sessionId);
     const finishedAt = session?.finishedAt;
-    if (session === void 0 || finishedAt === void 0 || known.get(sessionId)?.finishedAt === finishedAt || !begunInWindow(store, session, windowStartMs)) {
+    if (session === void 0 || finishedAt === void 0 || isWritten(session, finishedAt)) {
+      return "skipped";
+    }
+    if (!begunInWindow(store, session, windowStartMs)) {
+      if (!outside.has(sessionId)) {
+        outside.add(sessionId);
+        outsideNew += 1;
+      }
       return "skipped";
     }
     if (Date.parse(finishedAt) < pruneCutoff(keepDays, now())) {
@@ -2598,10 +3265,23 @@ var createAggregateLog = (options) => {
     if (written) {
       report.compute();
     }
+    if (outsideNew > 0) {
+      const count2 = outsideNew === 1 ? "1 session aggregate" : `${outsideNew} session aggregates`;
+      outsideNew = 0;
+      try {
+        onInfo(`${count2} not written: the session's start lies before the read window (spool.readDays)`);
+      } catch (error) {
+        onError(`session aggregates not reported: ${error.message}`);
+      }
+    }
   };
   return {
     noteFinish(sessionId, finishedAt) {
       pending.set(sessionId, finishedAt);
+    },
+    noteOutcome(sessionId, at) {
+      const queued = pending.get(sessionId);
+      pending.set(sessionId, queued !== void 0 && Date.parse(queued) > Date.parse(at) ? queued : at);
     },
     flush,
     typical: () => typical,
@@ -2641,6 +3321,18 @@ var createAggregateLog = (options) => {
 };
 
 // src/spool/sample-report.ts
+var SAMPLE_AGENTS = [
+  { name: "implementer", file: ".claude/agents/implementer.md", model: "sonnet", modelLine: "model: sonnet", maxTurns: 40 },
+  { name: "security-reviewer", file: ".claude/agents/security-reviewer.md", model: "opus", modelLine: "model: opus" }
+];
+var SAMPLE_ACCEPTED = { "developer-wait": "I review each step before the next starts." };
+var sampleSetup = (config) => {
+  const setup = workflowSetupOf(config, SAMPLE_AGENTS);
+  for (const [id, reason] of Object.entries(SAMPLE_ACCEPTED)) {
+    ownEntry(setup.accepted, id, () => reason);
+  }
+  return setup;
+};
 var createSampleReport = (options) => {
   const { insights } = options;
   const onError = (message) => {
@@ -2658,12 +3350,12 @@ var createSampleReport = (options) => {
     clock = newestFinish;
   }
   const skippedPart = skipped > 0 ? [`${plural(skipped, "line")} skipped, broken, of another format version or without a date`] : [];
-  const repairedPart = repaired > 0 ? [`${plural(repaired, "line")} repaired, a field of a wrong type dropped`] : [];
+  const repairedPart = repaired > 0 ? [`${plural(repaired, "line")} repaired, a field of a wrong type or an invalid map entry dropped`] : [];
   const problems = [...skippedPart, ...repairedPart];
   if (problems.length > 0) {
     onError(`sample aggregate log: ${problems.join("; ")}`);
   }
-  const keeper = createReportKeeper({ insights, now: () => new Date(clock), onError });
+  const keeper = createReportKeeper({ insights, roles: options.roles, now: () => new Date(clock), onError });
   const pending = /* @__PURE__ */ new Map();
   const added = /* @__PURE__ */ new Map();
   if (keeper.add(aggregates).length === 0) {
@@ -2726,7 +3418,7 @@ var createSampleReport = (options) => {
 
 // src/server/context.ts
 var TICK_MS = 60 * 1e3;
-var SAMPLE_AGGREGATES = join3(PACKAGE_ROOT, "fixtures", "aggregates.ndjson");
+var SAMPLE_AGGREGATES = join4(PACKAGE_ROOT, "fixtures", "aggregates.ndjson");
 var AGGREGATE_CHECK_MS = 60 * 1e3;
 var hasOpenRun = (state) => Object.values(state.runs).some((run) => run.branch !== "" && run.branch !== "?" && run.chip.tone !== "done");
 var stopEach = (stops, warn) => {
@@ -2746,12 +3438,13 @@ var createSpoolContext = (options) => {
   const windowStart = readWindowStart(/* @__PURE__ */ new Date(), config.spool.readDays);
   const first = localDay(windowStart);
   const info = (message) => log("info", stripControlLines(`${name}: ${message}`));
-  const aggregates = createAggregateLog({ dir: spoolDir, insights: config.insights, windowStartMs: windowStart.getTime(), onError: warn, onInfo: info });
-  const store = createStore(config, { onFinish: (sessionId, finishedAt) => aggregates.noteFinish(sessionId, finishedAt) });
+  const aggregates = createAggregateLog({ dir: spoolDir, insights: config.insights, roles: config.roles, windowStartMs: windowStart.getTime(), onError: warn, onInfo: info });
+  const onFinish = (sessionId, finishedAt) => aggregates.noteFinish(sessionId, finishedAt);
+  const store = createStore(config, { onFinish, onOutcome: (sessionId, at) => aggregates.noteOutcome(sessionId, at) });
   const write = (line) => appendEvent(spoolDir, line, config.spool.maxLineBytes);
-  const fixtureWorker = options.fixtureWorker ?? join3(PACKAGE_ROOT, "dist", "fixture-worker.js");
+  const fixtureWorker = options.fixtureWorker ?? join4(PACKAGE_ROOT, "dist", "fixture-worker.js");
   const slowReplayMs = options.slowReplayMs ?? SLOW_REPLAY_MS;
-  const replayWorker = options.replayWorker || join3(PACKAGE_ROOT, "dist", "replay-worker.js");
+  const replayWorker = options.replayWorker || join4(PACKAGE_ROOT, "dist", "replay-worker.js");
   const stops = [];
   const observers = [];
   let lastLineAt2 = options.lastLineAt;
@@ -2898,6 +3591,7 @@ var createSpoolContext = (options) => {
     const queue = options.queueReplay ?? ((replay) => void replay());
     queue(() => replayInWorker().finally(finish));
   }
+  const agentFiles = cachedAgentFiles(root, options.agentFilesMs);
   return {
     id: options.id,
     get name() {
@@ -2919,7 +3613,8 @@ var createSpoolContext = (options) => {
       return answer.fixture;
     },
     uiConfig: () => ({ ...uiConfig(config, root), repo: name, sessionFixtures: true }),
-    setup: () => workflowSetupOf(config),
+    // Read on a request at most once per window (ADR-0022), so an edited agent file shows on a request after it.
+    setup: () => workflowSetupOf(config, agentFiles()),
     lastLineAt: () => lastLineAt2,
     typical: () => aggregates.typical(),
     insights: () => aggregates.insights(),
@@ -2946,7 +3641,7 @@ var replaySampleReport = (path, texts, config, warn) => {
     warn(`no sample workflow health report: the sample aggregate log cannot be read: ${describeError(error)}`);
     return void 0;
   }
-  return createSampleReport({ text, insights: config.insights, startAt: replayStartAt(texts), onError: warn });
+  return createSampleReport({ text, insights: config.insights, roles: config.roles, startAt: replayStartAt(texts), onError: warn });
 };
 var createReplayContext = (options) => {
   const { config, log } = options;
@@ -2971,7 +3666,8 @@ var createReplayContext = (options) => {
     ready: Promise.resolve(),
     loading: () => false,
     uiConfig: () => options.ui,
-    setup: () => workflowSetupOf(config),
+    // A replay reads no repository: its setup names the sample's agent files and its accepted finding.
+    setup: () => sampleSetup(config),
     lastLineAt: () => lastLineAt2,
     typical: () => ({}),
     insights: () => sample?.current() ?? null,
@@ -2984,15 +3680,15 @@ var createReplayContext = (options) => {
 };
 
 // src/server/repositories.ts
-import { closeSync as closeSync2, constants, lstatSync as lstatSync2, openSync, readdirSync as readdirSync2, readSync as readSync2 } from "fs";
-import { join as join4, relative, resolve as resolve2, sep } from "path";
+import { closeSync as closeSync2, constants, lstatSync as lstatSync3, openSync, readdirSync as readdirSync3, readSync as readSync2 } from "fs";
+import { join as join5, relative, resolve as resolve2, sep } from "path";
 var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
 var RECORD_FILE = "repository.json";
 var CONFIG_FILE = "nurselog.config.json";
 var hashDirectories = (base) => {
   let entries;
   try {
-    entries = readdirSync2(base, { withFileTypes: true });
+    entries = readdirSync3(base, { withFileTypes: true });
   } catch (error) {
     if (error.code === "ENOENT") {
       return [];
@@ -3002,7 +3698,7 @@ var hashDirectories = (base) => {
   return entries.filter((entry) => entry.isDirectory() && HASH_DIRECTORY.test(entry.name)).map((entry) => entry.name);
 };
 var recordedRoot = (base, hash) => {
-  const root = readRepositoryRecord(join4(base, hash, RECORD_FILE))?.root;
+  const root = readRepositoryRecord(join5(base, hash, RECORD_FILE))?.root;
   return root !== void 0 && recordedRootValid(root, hash) ? root : void 0;
 };
 var NEWLINE2 = 10;
@@ -3036,7 +3732,7 @@ var newestActivityIn = (path, from, to) => {
 };
 var scanned = /* @__PURE__ */ new Map();
 var newestActivityOf = (path) => {
-  const stat = lstatSync2(path);
+  const stat = lstatSync3(path);
   if (!stat.isFile() || typeof process.getuid === "function" && stat.uid !== process.getuid()) {
     return void 0;
   }
@@ -3143,7 +3839,7 @@ var newestDayIn = (dir, onError) => {
 };
 var holdsAggregates = (dir, onError) => {
   try {
-    return spoolDirExists(dir) && lstatSync2(join4(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
+    return spoolDirExists(dir) && lstatSync3(join5(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
   } catch (error) {
     reportLookup(dir, error, onError);
     return false;
@@ -3154,7 +3850,7 @@ var foreignOwner = (dir, uid) => {
     return void 0;
   }
   try {
-    const stat = lstatSync2(dir, { throwIfNoEntry: false });
+    const stat = lstatSync3(dir, { throwIfNoEntry: false });
     return stat?.isDirectory() === true && stat.uid !== uid ? stat.uid : void 0;
   } catch {
     return void 0;
@@ -3165,8 +3861,8 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = proce
   const today = localDay(now);
   const orphans = [];
   for (const hash of hashDirectories(base).sort()) {
-    const dir = join4(base, hash);
-    const root = readRepositoryRecord(join4(dir, RECORD_FILE))?.root;
+    const dir = join5(base, hash);
+    const root = readRepositoryRecord(join5(dir, RECORD_FILE))?.root;
     if (root !== void 0 && recordedRootValid(root, hash)) {
       continue;
     }
@@ -3190,7 +3886,7 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = proce
 var pruneOrphanedSpools = (now, onError) => {
   const deleted = [];
   for (const orphan of listOrphanedSpools(now, onError)) {
-    const config = join4(orphan.dir, CONFIG_FILE);
+    const config = join5(orphan.dir, CONFIG_FILE);
     const shown = tildeHome(orphan.dir);
     try {
       const keepDays = configKeepDays(config) ?? HOOK_DEFAULTS.spool.keepDays;
@@ -3231,7 +3927,7 @@ var pruneRecordedAggregates = (now, onError) => {
     if (root === void 0) {
       continue;
     }
-    const dir = join4(base, hash);
+    const dir = join5(base, hash);
     let keepDays = DEFAULT_CONFIG.insights.keepDays;
     try {
       keepDays = configKeepDays(userConfigPath(root), "insights") ?? keepDays;
@@ -3280,7 +3976,7 @@ var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
 };
 
 // src/server/update-check.ts
-import { isAbsolute, join as join5 } from "path";
+import { isAbsolute, join as join6 } from "path";
 var UPDATE_COMMAND = "claude plugin update nurselog@nurselog";
 var MARKETPLACE = "nurselog";
 var FIRST_CHECK_MS = 5 * 1e3;
@@ -3459,8 +4155,8 @@ var githubFiles = (source, fetcher, signal) => {
   };
 };
 var directoryFiles = (path) => ({
-  plugin: () => readSmallFile(join5(path, ".claude-plugin", "plugin.json"), MAX_FILE_BYTES),
-  changelog: () => readSmallFile(join5(path, "CHANGELOG.md"), MAX_FILE_BYTES, { head: true })
+  plugin: () => readSmallFile(join6(path, ".claude-plugin", "plugin.json"), MAX_FILE_BYTES),
+  changelog: () => readSmallFile(join6(path, "CHANGELOG.md"), MAX_FILE_BYTES, { head: true })
 });
 var isNewer = (latest, current) => noticeOf(current, latest, []) !== null;
 var startUpdateCheck = (options = {}) => {
@@ -3470,7 +4166,7 @@ var startUpdateCheck = (options = {}) => {
   if (cacheDir === void 0 || env.NURSELOG_UPDATE_CHECK === "0") {
     return void 0;
   }
-  const recordFile = options.recordFile ?? join5(cacheDir, "..", "..", "..", "known_marketplaces.json");
+  const recordFile = options.recordFile ?? join6(cacheDir, "..", "..", "..", "known_marketplaces.json");
   const fetcher = options.fetch ?? fetch;
   const log = options.log ?? (() => void 0);
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
@@ -3496,7 +4192,7 @@ var startUpdateCheck = (options = {}) => {
     }
   };
   const run = async () => {
-    const current = versionIn(readSmallFile(join5(packageRoot, "package.json"), MAX_FILE_BYTES), "the package.json of the running copy");
+    const current = versionIn(readSmallFile(join6(packageRoot, "package.json"), MAX_FILE_BYTES), "the package.json of the running copy");
     const source = marketplaceSourceOf(readSmallFile(recordFile, MAX_FILE_BYTES));
     if (source.kind === "other") {
       notice = null;
@@ -3589,8 +4285,8 @@ var START_TICKET_MS = 10 * 60 * 1e3;
 var LOCK_STALE_MS = 10 * 1e3;
 var LOCK_RETRY_MS = 25;
 var SCAN_MS = 10 * 1e3;
-var PACKAGE_FILE = join6(PACKAGE_ROOT, "src", "ui", "index.html");
-var ORPHAN_MARKER = join6(PACKAGE_ROOT, ".orphaned_at");
+var PACKAGE_FILE = join7(PACKAGE_ROOT, "src", "ui", "index.html");
+var ORPHAN_MARKER = join7(PACKAGE_ROOT, ".orphaned_at");
 var packageGone = (path) => {
   try {
     statSync(path);
@@ -3613,7 +4309,7 @@ var linkNew = (temp, target) => {
 };
 var lockAge = (lock) => {
   try {
-    return Date.now() - lstatSync3(lock).mtimeMs;
+    return Date.now() - lstatSync4(lock).mtimeMs;
   } catch {
     return 0;
   }
@@ -3688,7 +4384,7 @@ var startNurselog = async (options = {}) => {
   if (live && existsSync(orphanMarker)) {
     throw new OrphanedCopyError(orphanMarker);
   }
-  const token = live ? ensureBoardToken(join6(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
+  const token = live ? ensureBoardToken(join7(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
   const speed = options.replay?.speed ?? 1;
   const contexts = /* @__PURE__ */ new Map();
   const setups = /* @__PURE__ */ new Map();
@@ -3924,7 +4620,7 @@ var startNurselog = async (options = {}) => {
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
 import { closeSync as closeSync3, constants as constants2, existsSync as existsSync2, fstatSync, openSync as openSync2, readFileSync as readFileSync6, readSync as readSync3 } from "fs";
-import { join as join7, resolve as resolve4 } from "path";
+import { join as join8, resolve as resolve4 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
   start [--replay <fixture>] [--speed <n>] [--port <n>]  start the one board for every repository, or print the repository's tab while it runs (the default command; builds the package once when dist/ is missing)
@@ -3939,7 +4635,7 @@ var USAGE = `Usage: nurselog <command> [--repo <path>]
   init [--repo-file] [--write] [--from -]                propose a config from what the repository shows; --write saves it (never replaces a file)
   purge [--all] [--before <YYYY-MM-DD>] [--yes]          delete the repository's spool day files (of every repository and orphaned spool directory with --all, only the days before a date with --before); asks first unless --yes
   fixture <session id or prefix> [--out <file>]          print one session's spool lines as a replay fixture (a prefix of 8+ characters names it), or write them to a new file with --out
-  insights [--json | --prompt]                           workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data, --prompt the report as a prompt for an AI assistant
+  insights [--json | --prompt [--finding <id>]]          workflow health: the last 5 work sessions against the 20 before them, per area, flagged lines first; --json prints the data, --prompt the report as a prompt for an AI assistant, with --finding one finding's prompt
   install-cli [--remove]                                 write the terminal command ~/.local/bin/nurselog, which runs the newest installed plugin copy (from a clone, the clone); --remove deletes it; a file Nurselog did not write is never touched
   uninstall [--yes] [--keep-data]                        remove Nurselog from this machine: stop the board, delete the terminal command and every repository's recorded data (kept with --keep-data), remove the plugin from Claude Code; lists what you added by hand; asks first unless --yes
 --repo <path> names the repository; the default is the git worktree of the current directory.
@@ -4204,7 +4900,7 @@ ${USAGE}`);
   const stateFile = serverStatePath();
   const state = readServerState(stateFile);
   const dir = spoolDirFor(config, root);
-  const today = join7(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
+  const today = join8(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
   const lines = linesToday(today);
   const board = await checkBoard(stateFile, RUNNING_CHECK_MS);
   const running = state !== void 0 && board.status !== "none";
@@ -4288,12 +4984,21 @@ export {
   shiftTimes,
   mergeFixtures,
   replayFixtures,
-  WORK_SESSION_CALLS,
+  AGENT_NAME,
+  unquote,
+  readAgent,
+  readAgentFiles,
+  percentile,
   cost,
   tokens,
   duration,
   plural,
+  INSTRUCTION_FILES,
+  isSetupPath,
   plainText,
+  restsOnBaseline,
+  isWorseThanBefore,
+  reasonText,
   insightsOf,
   readAggregates,
   purgeableAggregates,

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Nurselog hook (design sections 2, 3 and 9): appends every Claude Code hook payload, redacted, as one
 // line to today's spool file. The server maps the payload to an event; this script does no git, no network
-// and no transcript reading. It must never slow down or fail a session, so every error is swallowed and the
-// exit code is always 0. It keeps the repository record (design section 3) so the board finds the repository. With
+// and no transcript reading. Of the repository it reads its config, its `.git` entry and, at SessionStart, its setup
+// files, of which it writes only their hashes (the setup fingerprint, design section 2.3). It must never slow down or
+// fail a session, so every error is swallowed and the exit code is always 0. It keeps the repository record (design section 3) so the board finds the repository. With
 // `--check-server` a SessionStart also checks that the board is running and starts it when it is not. SessionStart and
 // SubagentStart inject context (design section 13): the hook prints at most one JSON object on one line. A repository
 // without a config is inactive: the hook reads stdin and exits without writing or printing anything.
@@ -10,7 +11,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MARKERS_PARAGRAPH, REPORT_BLOCK_PARAGRAPH } from './context.mjs';
-import { appendSpoolLine, autoOpenLine, autoOpenStartingLine, boardLogPath, buildHookLine, buildStubLine, ensurePrivateDir, newLineId, pruneOncePerDay, readHookConfig, recordRepository, redactString, repositoryRoot, roleStage, serverRunning, serverStatePath, spoolDirFor, startBoardDetached, startCommand, tildeHome, waitForBoard, writePrivate } from './lib.mjs';
+import { appendSpoolLine, autoOpenLine, autoOpenStartingLine, boardLogPath, buildHookLine, buildStubLine, ensurePrivateDir, newLineId, pruneOncePerDay, readHookConfig, recordRepository, redactString, repositoryRoot, roleStage, serverRunning, serverStatePath, setupFingerprint, spoolDirFor, startBoardDetached, startCommand, tildeHome, waitForBoard, writePrivate } from './lib.mjs';
 
 const STDIN_TIMEOUT_MS = 1000;
 /** Buffered stdin is capped here (design section 2.3); the rest is dropped and the line marked truncated. */
@@ -73,15 +74,17 @@ const parsePayload = (raw, truncated) => {
 const INJECTING_HOOKS = new Set(['SessionStart', 'SubagentStart']);
 
 /**
- * Appends the hook line of `payload`, or its stub line when building the line throws (design section 2.3); a
- * SessionStart or SubagentStart line also gets `injectedChars` when the caller knows it.
+ * Appends the hook line of `payload`, or its stub line when building the line throws (design section 2.3), with the
+ * line-level `fields` that are set: `injectedChars` on a SessionStart or SubagentStart line when the caller knows it,
+ * `setupHashes` on a SessionStart line (design section 3, "Hook lines").
  */
-const appendLine = (dir, payload, truncated, maxLineBytes, injectedChars) => {
+const appendLine = (dir, payload, truncated, maxLineBytes, fields) => {
   const at = new Date().toISOString();
   const id = newLineId();
-  const withChars = (line) => (injectedChars === undefined ? line : { ...line, injectedChars });
+  const set = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+  const withFields = (line) => ({ ...line, ...set });
   if (payload[CUT_AT_CAP]) {
-    appendSpoolLine(dir, withChars(buildStubLine(payload, at, id)), 'payload', maxLineBytes);
+    appendSpoolLine(dir, withFields(buildStubLine(payload, at, id)), 'payload', maxLineBytes);
     return;
   }
   try {
@@ -89,9 +92,9 @@ const appendLine = (dir, payload, truncated, maxLineBytes, injectedChars) => {
     if (truncated) {
       line.truncated = true;
     }
-    appendSpoolLine(dir, withChars(line), 'payload', maxLineBytes);
+    appendSpoolLine(dir, withFields(line), 'payload', maxLineBytes);
   } catch {
-    appendSpoolLine(dir, withChars(buildStubLine(payload, at, id)), 'payload', maxLineBytes);
+    appendSpoolLine(dir, withFields(buildStubLine(payload, at, id)), 'payload', maxLineBytes);
   }
 };
 
@@ -200,10 +203,17 @@ const run = async (raw, truncated) => {
   } catch {
     // Without a context the session goes on as before, and its line records no length.
   }
+  let setupHashes;
+  try {
+    // Every SessionStart source: the reducer keeps the session's first (design section 2.3).
+    setupHashes = payload.hook_event_name === 'SessionStart' ? setupFingerprint(root) : undefined;
+  } catch {
+    // Without a fingerprint the line goes without the field.
+  }
   let dir;
   try {
     dir = spoolDirFor(config, root);
-    appendLine(dir, payload, truncated, config.spool.maxLineBytes, injectedChars);
+    appendLine(dir, payload, truncated, config.spool.maxLineBytes, { injectedChars, setupHashes });
   } catch {
     // An unwritable spool loses this line; the session goes on.
   }

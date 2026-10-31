@@ -64,6 +64,15 @@ such as one you created. Joins, reviewers, merges and promotions are derived and
 state `waiting`. Claude Code asks for permission on the first use of each tool; a plugin cannot pre-approve it. The CLI
 `nurselog emit plan|gate|question ...` adds the same markers and is the fallback (`nurselog help` prints its flags).
 
+## Workflow health
+
+When the user asks to improve, tune or review the workflow (the agent files, the models, the reviewers, what the
+sessions cost), call `health` first: it returns the workflow health report of this repository as a prompt, computed from
+the recorded sessions with no board running. Pass `finding` (an id such as `quiet-reviewer:security-reviewer`) for the
+prompt of that one finding; an unknown id answers with the ids that exist. It only reads: make a change it suggests
+only when the user asks for it. The CLI `nurselog insights --prompt [--finding <id>]` prints the same. Without
+`dist/` in the plugin root it says to run `pnpm build` there.
+
 ## Config
 
 A repository is active, recorded and given context, only when it has a config:

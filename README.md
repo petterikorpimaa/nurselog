@@ -69,7 +69,7 @@ copy in the sessions that load it. `/plugin` in a session lists `nurselog` when 
 | The plugin | In every repository | In a set-up repository |
 | --- | --- | --- |
 | Skill `/nurselog:nurselog` (start the board, status, markers, config, setup) | yes | yes |
-| Marker tools `plan`, `gate`, `question` | answer "not set up" | yes |
+| Tools `plan`, `gate`, `question` and `health` | answer "not set up" | yes |
 | `nurselog` on the Bash tool's PATH (your terminal's through the [terminal command](#terminal-command)) | yes | yes |
 | Records every event to the spool | no | yes |
 | Injects the markers and report-block instructions | no | yes |
@@ -220,7 +220,7 @@ alias nurselog='node ~/github/nurselog/bin/nurselog'
 | Branches and token use | One bar holding the Branches and Token use panels, closed by default and kept open or closed per repository. Its header shows a glance at both: a dot per live branch in its stage colour with live, waiting and merged counts, and the token total and cost with a bar of the stage split. Click the header to open it. |
 | Branches | Inside the bar: trunk and promote lines, one lane per work branch coloured by stage, merges and promotions, a time axis up to 24 h. |
 | Token use by ticket | Inside the bar: tokens and cost per ticket key (else branch), split by stage. |
-| Workflow health | The workflow health report as a folded strip with its count of findings to change and to consider; it opens to a map of seven steps from Main thread to Your answers, each with its setup and verdict, and its report opens from a step or "Open report". |
+| Workflow health | The workflow health report as a folded strip with its count of findings to change and to consider; it opens to a map of seven steps from Main thread to Your answers (eight with Plan while the sessions planned), each with its setup and verdict, and its report opens from a step or "Open report". |
 | Session card | One per session that runs a subagent, edits files or opens a PR. It starts collapsed to its header, chips, graph, questions and main-thread strip; its collapse button opens the rest. Hovering a lane or ranking row lights its card. |
 | Card header | Ticket key and title, a progress chip (what works or waits), elapsed time, cost, model, session id (click to copy for `claude --resume`), fixture download, Summary. |
 | Graph | Plan, then per branch the Implement streams, Join, Review, Fix, PR, Merge, Promote and Docs, with "You" gates and question bubbles. Each `plan` starts a new pipeline. |
@@ -308,23 +308,27 @@ When a repository's loop differs, the board draws what it can derive and leaves 
 <details>
 <summary>Roles and the report block</summary>
 
-- The config `roles` maps an agent type to `{ "stage": "implement" | "review" | "pr" | "other", "short"?: "<label>" }`;
+- The config `roles` maps an agent type to `{ "stage": "implement" | "review" | "pr" | "other", "short"?: "<label>", "step"?: "plan" }`;
   the fallback `*` is required and is `other` by default. A stage `build`, the old name of `implement`, is still
   read as `implement`. An `other` agent appears in the agent table and under the Plan node, until its first file edit
   on a branch makes it an Implement stream there.
 - Default roles: `implementer` implements; `conventions-checker`, `code-reviewer`, `spec-reviewer`,
   `typescript-reviewer`, `security-reviewer`, `design-reviewer`, `database-reviewer`, `silent-failure-hunter` and
-  `pr-test-analyzer` review; `pr-shepherd` opens the PR. Any other agent type needs its own entry in `roles`;
+  `pr-test-analyzer` review; `pr-shepherd` opens the PR; `planner`, `architect` and the built-in `Plan`
+  agent plan (stage `other`, step `plan`).
+  Any other agent type needs its own entry in `roles`;
   `nurselog init` writes one for each agent in `.claude/agents` whose name is `implementer`, `builder`, `developer`,
   `coder` or `engineer` or ends in `-` plus one of them or in `-dev` (implement), is `reviewer`, `qa` or `tester` or
   ends in `-reviewer`, `-checker`, `-analyzer`, `-hunter`, `-qa` or `-tester` (review) or ends in `shepherd` (pr). An
   implement name whose `tools` list has none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` is read-only
   and gets none. Any other agent gets an implement role when its `tools` key lists `Edit`, `Write`, `MultiEdit` or
-  `NotebookEdit`, except the names in `docs.roles` (default `doc-updater`); an agent without a `tools` key inherits
+  `NotebookEdit`, except the names in `docs.roles` (default `doc-updater`) and the default plan roles `planner`,
+  `architect` and `Plan`, which keep their default; an agent without a `tools` key inherits
   every tool and gets no role from them.
 - Agents with an implement, review or pr role get an injected instruction to end their report with a fenced `nurselog`
-  YAML block: `decisions`, `followups` (`issue`, `improve` or `fix`, with text and an optional file), `questions` and
-  `files`. It feeds the follow-ups, the reviewer verdicts and the questions with the main thread.
+  YAML block: `decisions`, `followups` (`issue`, `improve` or `fix`, with text, an optional file and an optional
+  category: `tests`, `types`, `errors`, `security`, `performance`, `style`, `docs` or `ui`), `questions` and `files`.
+  It feeds the follow-ups, the reviewer verdicts and the questions with the main thread.
 
 </details>
 
@@ -465,6 +469,13 @@ when its case comes up (working alone, it may need none):
 permission on each tool's first use; a plugin cannot pre-approve it. Joins, reviews, merges and promotions are derived
 and need no marker.
 
+A fourth tool, `health`, records nothing: it reads. It returns the [workflow health](#workflow-health) report of the
+repository as a prompt for improving the workflow, or with `finding` (a finding id such as
+`quiet-reviewer:security-reviewer`) that one finding's prompt, so a session you ask to improve your workflow reads the
+findings itself. It runs `nurselog insights --prompt` on the repository's recorded sessions, so it needs no running
+board and holds no board token, and it needs the plugin's build (a release has it; a clone gets it with `pnpm build`).
+The prompt holds counts, costs and times, no session id, title or prompt text.
+
 <details>
 <summary>Markers from a terminal: <code>nurselog emit</code></summary>
 
@@ -503,7 +514,7 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | `nurselog link [--session <id>] [--osc8]` | This repository's board URL, for a status line. |
 | `nurselog init [--write] [--repo-file] [--from -]` | Proposes a config, or writes it. Never overwrites a file. |
 | `nurselog emit plan\|gate\|question ...` | Adds a marker. |
-| `nurselog insights [--json \| --prompt]` | Workflow health report; `--prompt` prints it as a prompt for an AI assistant. |
+| `nurselog insights [--json \| --prompt [--finding <id>]]` | Workflow health report; `--prompt` prints it as a prompt for an AI assistant, with `--finding` the prompt of one finding to change or to consider. |
 | `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, answers, commands and reports included, so check it before you share it). |
 | `nurselog purge [--before <day>] [--all] [--yes]` | Deletes recorded data. |
 | `nurselog install-cli [--remove]` | Writes the [terminal command](#terminal-command) `~/.local/bin/nurselog`, or deletes it. |
@@ -590,7 +601,8 @@ Arrays such as `packages` replace the default list whole.
 | `github.promoteTitlePrefix` | `{}` | PR title prefix per promote target; required for each target. |
 | `packages` | `[]` | `{ id, color, paths[], label? }`, up to 50. An implementer with no package is in the stream `repo`. |
 | `stageColors` | built in | Hex colour per `plan`, `implement`, `review`, `fix`, `pr`, `docs`, `wait`; the old key `build` is still read as `implement`. |
-| `roles` | see "Roles and the report block" | Agent type to `{ stage, short? }`; `*` required. |
+| `roles` | see "Roles and the report block" | Agent type to `{ stage, short?, step? }`; `*` required. |
+| `roles.<name>.step` | `plan` for `planner`, `architect` and `Plan` | `plan` puts a role of stage `other` in the Plan step of the workflow health map instead of Explore; another stage ignores it. |
 | `docs.roles` | `["doc-updater"]` | Agents that put a run in Docs. |
 | `docs.tools` | `[]` | Tool names that put a run in Docs. |
 | `modelLetters` | Haiku H, Sonnet S, Opus O, Fable F | Short model label per model prefix; the longest prefix wins. |
@@ -614,7 +626,15 @@ Arrays such as `packages` replace the default list whole.
 | `insights.guidelines.mainPeakContext` / `mainLargeOutputs` | `0.4` / `2` | Guidelines of the main thread: the median peak context as a share of the context limit, the median count of outputs over 20,000 characters per session. |
 | `insights.guidelines.mainReadChars` / `mainCheckChars` | `100000` / `20000` | Guidelines of the main thread's own work, per session: the median characters of its reads and searches (about 25,000 tokens), and of its verification command output (one raw test run); flags above. |
 | `insights.guidelines.uncheckedSessions` | `0.8` | Guideline share of the work sessions with a file edit and no typecheck or test command (counted through `verification.kinds`); flags at or above. |
+| `insights.guidelines.untestedFirstStop` | `0.3` | Guideline share of the implement runs that stopped before their tool-call budget with no test command up to that stop; flags at or above. `null` turns it off. |
+| `insights.guidelines.researchOverlap` | `0.5` | Guideline share of the implement runs that started while a research agent (a role of stage other) was still running; at or above it the finding is one to consider, never to change. `null` turns it off. |
+| `insights.guidelines.severalPipelines` | `0.5` | Guideline share of the work sessions with two or more pipelines (several tasks in one session); flags at or above. `null` turns it off. |
+| `insights.guidelines.redChecks` | `0.3` | Provisional guideline share of the PRs with a failed check while open; flags at or above; `null` turns it off. |
+| `insights.guidelines.sentBack` | `0.2` | Provisional guideline share of the PRs sent back with changes requested; flags at or above; `null` turns it off. |
+| `insights.guidelines.timeToMergeHours` | `4` | Provisional guideline on the median hours from a PR's opening to its merge; flags above; `null` turns it off. With `github.mergeBy: developer` it is at most a finding to consider. |
+| `insights.guidelines.wholeReads` | `0.6` | Provisional guideline share of the Explore step's read characters that came from whole-file Reads (no `offset` or `limit`), of the research agents or else of the main thread; flags above; `null` turns it off. |
 | `insights.guidelines.cachePerOutput.main` / `agents` | `350` / `100` | Guideline of cache-read tokens per output token, for the main thread and for each subagent role. |
+| `insights.accepted` | `{}` | Findings you keep as they are on purpose: a finding's id (such as `quiet-reviewer:security-reviewer`, which "Copy accept entry" in its evidence gives) mapped to a short reason. The workflow health report shows it under Accepted with the reason, out of the counts, until it gets worse than before; restart the board after you add one. |
 | `retention.indexHours` | `6` | In-memory index retention of the reducer. |
 | `features.answerFromUi` | `false` | Answering from the board is not built yet. |
 
@@ -626,7 +646,8 @@ board.
 ## Security and privacy
 
 - **Loopback only**: the board binds `127.0.0.1`. A request with another `Host` gets 403, and so does an API request
-  from a foreign `Origin` or with `Sec-Fetch-Site: cross-site`.
+  from a foreign `Origin` or from another page (`Sec-Fetch-Site: cross-site` or `same-site`, such as a page on another
+  localhost port).
 - **Token**: every API route but the health check needs the board token (a bearer header or a cookie derived from it),
   so other users of the machine cannot read the board. The browser signs in with a single-use ticket.
 - **Minimal recording**: the hook drops file contents, edit bodies and tool output, and redacts secrets before
@@ -635,7 +656,7 @@ board.
 - **No telemetry**: nothing leaves the machine except the `gh` calls of a repository whose config sets `github.repo`
   and the update check of a board from a marketplace install, which reads two files of the marketplace and sends
   nothing of yours ("Update the plugin").
-- **No runtime dependencies**: Node built-ins only; the hook and the marker tool server are plain ESM.
+- **No runtime dependencies**: Node built-ins only; the hook and the tool server are plain ESM.
 
 <details>
 <summary>What the hook keeps, drops and redacts</summary>
@@ -719,7 +740,10 @@ nurselog purge --all --yes             # every repository and orphaned spool dir
 - The board and the hook delete day files older than `spool.keepDays`, and their `notified/` markers, once a day. The
   hook leaves `aggregates.ndjson` alone, so aggregates are pruned only while a board runs.
 - An aggregate holds numbers, roles, tool and branch names, PR numbers, the ticket key and the session title, which can
-  be the first line of the first prompt (up to 60 characters).
+  be the first line of the first prompt (up to 60 characters), and the paths of the repository's setup files
+  (`CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.claude/agents/*.md`) with a 12-character hash of
+  each, never their content: at session start the hook hashes these files, so workflow health can tell when the setup
+  changed.
 - `purge` lists per repository the tab, the number of day files and their first and last day, the number of
   aggregates and the directory, then asks `Delete N day files and M session aggregates? [y/N]`. Without a terminal it
   deletes nothing unless `--yes` is given. A running board keeps what it already read until it restarts.
@@ -741,7 +765,12 @@ nurselog purge --all --yes             # every repository and orphaned spool dir
 Token economy, Questions and waits): the last 5 work sessions against the up to 20 before them and against a
 guideline. It reads only the session aggregates, so it needs no running board. The board shows the same report as a
 folded strip between the Branches and token use bar and the session cards, which opens to a map of seven workflow
-steps, each with its setup and verdict. A step is a button that opens the workflow health report filtered to that
+steps, each with its setup and verdict; a Plan step joins them between Main thread and Explore while a recent session
+used plan mode or ran a plan role (`planner`, `architect`, the built-in `Plan` agent, or a role with `"step": "plan"`). A step's setup names the model of its roles and the implementers' turn limit:
+the board and `nurselog insights --prompt` read the `name`, `model` and `maxTurns` lines of the frontmatter in
+`.claude/agents/*.md` (the first 4096 bytes of at most 200 files, no symbolic links) and no other text of those files,
+and without a `model` line, or with `model: inherit`, a step shows the model its sessions recorded. `CLAUDE.md` is not
+read. A step is a button that opens the workflow health report filtered to that
 step, and "Open report" in the strip's header opens it whole.
 
 The report groups its findings as Worth changing, Worth considering, Working well, For reference and Not measured, and a
@@ -750,9 +779,17 @@ the one furthest from its guideline stands first with a "Start here" chip: the o
 evidence: the step's setup line, the last sessions against the ones before and the guideline, a sparkline of the
 recorded sessions and the sessions themselves, each with "Show card" to open it on the board. A finding to change or to
 consider also suggests one fix with its effect, a measured target such as "back within the guideline", and "Show the
-change" shows the lines to add to `CLAUDE.md`, with "Copy added lines"; the board never changes a file. "Copy as
+change" shows the lines to add to `CLAUDE.md`, with "Copy added lines"; for a reviewer that finds little and runs on
+Opus it shows its agent file's `model` line replaced by `model: sonnet` instead, and for a reviewer that found nothing
+in its last 10 runs "Stop running <role> by default" with a `CLAUDE.md` line that runs it only when you ask. Where a
+step would cut what the numbers show, the change adds it: a new agent file, marked "new file", in a box over the
+`CLAUDE.md` line that runs it, each with its own "Copy added lines" (a `check-runner` agent when the main thread reads
+long check output, a `code-reviewer` when no reviewer ran and PRs fail their checks or are sent back). Where the file a finding's fix goes to
+changed within the recorded sessions (and the next session kept the change), its sparkline marks the change, its
+evidence compares the sessions since with the ones before, and the finding reads "changed <date>" with whether it got
+better, worse or shows no change yet. The board never changes a file. "Copy as
 prompt" copies the whole report with instructions for an AI assistant to read it and suggest changes, and "Show the prompt"
-shows what is copied. The token ranking, inside the Branches and token use bar, links to the report with "N workflow
+shows what is copied. A session reads the same prompts itself through the `health` tool ([Markers](#markers)). The token ranking, inside the Branches and token use bar, links to the report with "N workflow
 changes would cut token use", and a finished session's Summary panel ends with "In workflow health", the findings its
 numbers fed.
 
@@ -771,7 +808,12 @@ numbers fed.
   times the earlier one, a median above the earlier 75th percentile). Every line carries its numbers, the earlier ones
   and its guideline; there is no score.
 - Delivery counts the PRs of the work sessions: their cost per PR and per 100 changed lines (the PR size comes from
-  the gh poll), and the time from the first work on a branch to its PR. Without PRs it reads not measured.
+  the gh poll), the time from the first work on a branch to its PR, the time from the PR to its merge, and the share
+  of PRs with a red check and of PRs sent back with changes requested (the check state and the review decision come
+  from the gh poll while a PR is open). These three have provisional guidelines; with `github.mergeBy: developer` the
+  time to merge is at most a finding to consider, as the merge is yours. Without PRs it reads not measured.
+- Review lists the reviewers' fix items by cause while their report blocks name a category; when one category is half
+  or more of at least 4 such items, it is a finding to consider with a `CLAUDE.md` line for the implementers.
 - A work session is a session card with at least 5 main-thread tool calls. The board writes one aggregate per session
   it has seen finish; its first start backfills `spool.readDays` days.
 - The first comparison comes after 10 earlier work sessions; until then a line reads `(before: fewer than 10 work

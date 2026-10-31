@@ -16,6 +16,10 @@ export const DEFAULT_ROLES = {
   'database-reviewer': { stage: 'review', short: 'db' },
   'pr-test-analyzer': { stage: 'review', short: 'tests' },
   'pr-shepherd': { stage: 'pr' },
+  planner: { stage: 'other', step: 'plan' },
+  architect: { stage: 'other', step: 'plan' },
+  // Claude Code's built-in Plan agent type.
+  Plan: { stage: 'other', step: 'plan' },
   '*': { stage: 'other' },
 };
 

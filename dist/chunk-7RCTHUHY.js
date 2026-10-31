@@ -40,7 +40,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-255XBBTU.js";
+} from "./chunk-L5UAFSAH.js";
 
 // src/config.ts
 import { existsSync } from "fs";
@@ -932,14 +932,76 @@ var pollIntervalMs = (seconds) => {
   return Math.min(MAX_POLL_SECONDS, Math.max(MIN_POLL_SECONDS, value)) * 1e3;
 };
 var PR_FIELDS = "number,title,url,state,headRefName,baseRefName,createdAt,mergedAt,closedAt,additions,deletions";
+var OPEN_FIELDS = "number,statusCheckRollup,reviewDecision";
 var ACCOUNT_CHECK_MS = 10 * 60 * 1e3;
 var NUDGE_MS = 10 * 1e3;
 var BODY_CHARS = 4e3;
 var PR_COMMAND = /\bgh\s+pr\s+(create|merge)\b/;
 var HOST = "github.com";
-var prSignature = (pr) => `${pr.state}|${pr.mergedAt ?? ""}|${pr.additions ?? ""}|${pr.deletions ?? ""}`;
+var prSignature = (pr) => {
+  const size = `${pr.additions ?? ""}|${pr.deletions ?? ""}`;
+  const forgeParts = `${pr.checks ?? ""}|${pr.review ?? ""}`;
+  return `${pr.state}|${pr.mergedAt ?? ""}|${size}|${forgeParts}`;
+};
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var firstLine = (error) => String(error instanceof Error ? error.message : error).split("\n")[0];
+var FAILED_CONCLUSIONS = /* @__PURE__ */ new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"]);
+var PASSED_CONCLUSIONS = /* @__PURE__ */ new Set(["SUCCESS", "NEUTRAL", "SKIPPED", "STALE"]);
+var FAILED_STATES = /* @__PURE__ */ new Set(["FAILURE", "ERROR"]);
+var checkOutcome = (item) => {
+  if (!isRecord(item)) {
+    return "pending";
+  }
+  if (item.__typename === "CheckRun") {
+    const conclusion = String(item.conclusion);
+    if (FAILED_CONCLUSIONS.has(conclusion)) {
+      return "failed";
+    }
+    if (conclusion === "CANCELLED") {
+      return void 0;
+    }
+    return item.status === "COMPLETED" && PASSED_CONCLUSIONS.has(conclusion) ? "passed" : "pending";
+  }
+  if (item.__typename === "StatusContext") {
+    const state = String(item.state);
+    if (FAILED_STATES.has(state)) {
+      return "failed";
+    }
+    return state === "SUCCESS" ? "passed" : "pending";
+  }
+  return "pending";
+};
+var checksOf = (rollup) => {
+  const outcomes = new Set(Array.isArray(rollup) ? rollup.map(checkOutcome) : []);
+  return ["failed", "pending", "passed"].find((outcome) => outcomes.has(outcome));
+};
+var REVIEWS = /* @__PURE__ */ new Map([["APPROVED", "approved"], ["CHANGES_REQUESTED", "changes-requested"], ["REVIEW_REQUIRED", "required"]]);
+var reviewOf = (decision) => REVIEWS.get(decision);
+var openStates = (output) => {
+  if (output.trim() === "") {
+    throw new Error("the answer is empty");
+  }
+  const parsed = JSON.parse(output);
+  if (!Array.isArray(parsed)) {
+    throw new Error("the answer is not a JSON list");
+  }
+  const states = /* @__PURE__ */ new Map();
+  for (const entry of parsed.filter(isRecord)) {
+    const rollup = entry.statusCheckRollup;
+    if (rollup !== null && !Array.isArray(rollup)) {
+      throw new Error("a statusCheckRollup is neither null nor a list");
+    }
+    const checks = checksOf(rollup);
+    const review = reviewOf(entry.reviewDecision);
+    if (typeof entry.number === "number" && Number.isInteger(entry.number)) {
+      states.set(entry.number, { ...checks ? { checks } : {}, ...review ? { review } : {} });
+    }
+  }
+  if (parsed.length > 0 && states.size === 0) {
+    throw new Error("no entry of the answer has a PR number");
+  }
+  return states;
+};
 var matchesLogin = (pattern, login) => {
   const input = patternInput(login);
   return pattern !== void 0 && (pattern.test(input) || pattern.test(input.toLowerCase()));
@@ -983,6 +1045,7 @@ var createGhFacts = (options) => {
   const run = options.run ?? runCommand;
   const now = options.now ?? Date.now;
   const known = /* @__PURE__ */ new Map();
+  const forge = /* @__PURE__ */ new Map();
   const bashCalls = createBashTracker();
   let accountOk = false;
   let account;
@@ -1026,6 +1089,15 @@ var createGhFacts = (options) => {
   };
   const warnRepo = onceWarning();
   const warnRemotesFailure = onceWarning();
+  let openWarnedAt;
+  const warnOpenFailure = (message) => {
+    if (message === void 0) {
+      openWarnedAt = void 0;
+    } else if (openWarnedAt === void 0 || now() - openWarnedAt >= ACCOUNT_CHECK_MS) {
+      openWarnedAt = now();
+      options.log?.("warning", message);
+    }
+  };
   const checkRemotes = async () => {
     if (options.root === void 0 || config.github.repo === "" || now() - remotesCheckedAt <= ACCOUNT_CHECK_MS) {
       return;
@@ -1138,10 +1210,37 @@ var createGhFacts = (options) => {
     await checkActiveAccount();
     return void 0;
   };
+  const shownCause = (error, env) => {
+    const reason = stripControl(failureCause(error));
+    return env ? reason.replaceAll(env.GH_TOKEN, "<token>") : reason;
+  };
+  const openList = async (env) => {
+    const args = ["pr", "list", "--repo", config.github.repo, "--base", config.branches.trunk, "--state", "open", "--limit", "50", "--json", OPEN_FIELDS];
+    try {
+      const states = openStates(await run("gh", args, void 0, env));
+      warnOpenFailure(void 0);
+      return states;
+    } catch (error) {
+      warnOpenFailure(redactValue(`gh pr list --state open failed: ${shownCause(error, env)}; the check states and review decisions keep their last values`));
+      return void 0;
+    }
+  };
+  const withForge = (pr, open) => {
+    const seen = open?.get(pr.number);
+    const last = forge.get(pr.number);
+    const checks = seen?.checks ?? last?.checks;
+    const review = seen?.review ?? last?.review;
+    return { ...pr, ...checks ? { checks } : {}, ...review ? { review } : {} };
+  };
   const list = async (base, withBody, env) => {
     const fields = withBody ? `${PR_FIELDS},body` : PR_FIELDS;
     const output = await run("gh", ["pr", "list", "--repo", config.github.repo, "--base", base, "--state", "all", "--limit", "50", "--json", fields], void 0, env);
     return JSON.parse(output || "[]");
+  };
+  const noteForge = (pr) => {
+    if (pr.checks !== void 0 || pr.review !== void 0) {
+      forge.set(pr.number, { ...pr.checks ? { checks: pr.checks } : {}, ...pr.review ? { review: pr.review } : {} });
+    }
   };
   const record = (pr) => {
     const signature = prSignature(pr);
@@ -1149,6 +1248,7 @@ var createGhFacts = (options) => {
       return;
     }
     known.set(pr.number, signature);
+    noteForge(pr);
     const kept = { ...pr, title: redactValue(pr.title) };
     if (pr.body !== void 0) {
       kept.body = redactValue(pr.body).slice(0, BODY_CHARS);
@@ -1168,23 +1268,33 @@ var createGhFacts = (options) => {
     if (!accountOk) {
       return;
     }
+    let trunk;
     try {
-      for (const pr of await list(config.branches.trunk, false, env)) {
-        record(pr);
+      trunk = await list(config.branches.trunk, false, env);
+      for (const pr of trunk) {
+        record(withForge(pr));
       }
       for (const target of config.branches.promote) {
         const prefix = Object.hasOwn(config.github.promoteTitlePrefix, target) ? config.github.promoteTitlePrefix[target] : "";
         for (const pr of await list(target, true, env)) {
           if (pr.title.startsWith(prefix)) {
-            record(pr);
+            record(withForge(pr));
           }
         }
       }
       emitStatus({ polling: true, activeAccount: account, accountOk: true });
     } catch (error) {
-      const reason = stripControl(failureCause(error));
-      const shown = env ? reason.replaceAll(env.GH_TOKEN, "<token>") : reason;
-      emitStatus({ polling: false, activeAccount: account, accountOk: true, error: redactValue(`gh pr list failed: ${shown}`) });
+      emitStatus({ polling: false, activeAccount: account, accountOk: true, error: redactValue(`gh pr list failed: ${shownCause(error, env)}`) });
+      return;
+    }
+    if (!trunk.some((pr) => pr.state === "OPEN")) {
+      return;
+    }
+    const open = await openList(env);
+    if (open) {
+      for (const pr of trunk) {
+        record(withForge(pr, open));
+      }
     }
   };
   const failed = (error) => options.log?.("warning", `gh poll failed: ${error.message}`);
@@ -1208,6 +1318,7 @@ var createGhFacts = (options) => {
     observe(event) {
       if (event.event === "gh.fact" && event.data.kind === "pr") {
         known.set(event.data.pr.number, prSignature(event.data.pr));
+        noteForge(event.data.pr);
         return;
       }
       if (event.event === "git.fact" && event.data.kind === "worktree-removed") {
@@ -1221,9 +1332,10 @@ var createGhFacts = (options) => {
         poll().catch(failed);
       }
     },
-    historyView: () => ({ known: new Map(known), openBash: bashCalls.view() }),
+    historyView: () => ({ known: new Map(known), forge: new Map(forge), openBash: bashCalls.view() }),
     restoreHistory(view) {
       refillMap(known, view.known);
+      refillMap(forge, view.forge ?? /* @__PURE__ */ new Map());
       bashCalls.restore(view.openBash);
     },
     checkAccount,
@@ -1657,7 +1769,7 @@ var OPEN_BASH = isMap(isObject);
 var VIEWS = {
   git: isRecord2({ branches: isMap(), forks: isSet, subjects: isSet, candidates: isSet, eventDirs: isSet, pendingAdds: isMap(isRecord2({ seen: isSet })), statWarnings: isMap(), historyReviewers: isMap(), historyDiffs: isMap(), openBash: OPEN_BASH }),
   usage: isRecord2({ mainTranscripts: isMap(), files: isMap(isRecord2({ partial: isBytes })), known: isMap(), reported: isSet }),
-  gh: isRecord2({ known: isMap(), openBash: OPEN_BASH })
+  gh: isRecord2({ known: isMap(), forge: isMap(isObject), openBash: OPEN_BASH })
 };
 var LOG = isRecord2({ level: isString, message: isString, named: (value) => typeof value === "boolean" });
 var readReplayAnswer = (value, producers) => {

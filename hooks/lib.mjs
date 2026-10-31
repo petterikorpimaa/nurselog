@@ -166,11 +166,11 @@ export const MAX_CONFIG_BYTES = 256 * 1024;
 const MAX_GIT_FILE_BYTES = 4096;
 
 /**
- * Reads a small regular file (design section 8): the open follows no final symlink and never blocks on a FIFO, and
- * the file must be a regular file of at most `maxBytes`, else it throws. With `head` a longer file is not refused;
+ * The bytes of a small regular file (design section 8): the open follows no final symlink and never blocks on a FIFO,
+ * and the file must be a regular file of at most `maxBytes`, else it throws. With `head` a longer file is not refused;
  * only its first `maxBytes` are read. A config linked to `/dev/zero` costs one `open`, not a read without end.
  */
-export const readSmallFile = (path, maxBytes, { head = false } = {}) => {
+const readSmallBytes = (path, maxBytes, { head = false } = {}) => {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = fstatSync(fd);
@@ -189,11 +189,14 @@ export const readSmallFile = (path, maxBytes, { head = false } = {}) => {
       }
       length += read;
     }
-    return buffer.toString('utf8', 0, length);
+    return buffer.subarray(0, length);
   } finally {
     closeSync(fd);
   }
 };
+
+/** Reads a small regular file as UTF-8 text, under the guards of `readSmallBytes`. */
+export const readSmallFile = (path, maxBytes, options) => readSmallBytes(path, maxBytes, options).toString('utf8');
 
 const readGitFile = (path) => {
   try {
@@ -228,6 +231,95 @@ export const gitCommonDir = (start) => {
 
 /** First 12 hex characters of the SHA-256 of the git common directory, so all worktrees of a clone share one spool. */
 export const repoHash = (start) => createHash('sha256').update(gitCommonDir(start) ?? resolve(start)).digest('hex').slice(0, 12);
+
+/* ---------- the setup fingerprint (design section 2.3; ADR-0022) ---------- */
+
+/** The setup files of a repository root that the setup fingerprint hashes besides `.claude/agents/*.md`, by repository-relative path. */
+export const SETUP_FILES = ['CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md'];
+/** The `.md` entries of `.claude/agents` hashed at most, the first in name order (`MAX_AGENT_FILES` of `src/agent-files.ts`). */
+export const MAX_SETUP_AGENT_FILES = 200;
+/** A setup file larger than this gets no hash. */
+export const MAX_SETUP_FILE_BYTES = 1024 * 1024;
+/** The bytes the setup fingerprint reads at most over all its files; past them it gives up. */
+export const MAX_SETUP_TOTAL_BYTES = 8 * 1024 * 1024;
+/** How long the setup fingerprint may take; past it it gives up, well inside SessionStart's 5 s timeout. */
+export const SETUP_DEADLINE_MS = 1500;
+/** The name of an agent file that is hashed: at most 64 characters of `[\w.-]` before `.md` (`AGENT_NAME` of `src/agent-files.ts`). */
+const SETUP_AGENT_FILE = /^[\w.-]{1,64}\.md$/;
+
+/** True when `path` is a directory itself, not a symbolic link to one; false when it is missing or unreadable. */
+const realDirectory = (path) => {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const byCodeUnits = (a, b) => (a < b ? -1 : Number(a > b));
+
+/** Stores `value` under `key` of a plain map unless the map has its own `key` already or `key` is `__proto__`, as `ownEntry` of `src/model/paths.ts`. */
+const setOwn = (map, key, value) => {
+  if (key !== '__proto__' && !Object.hasOwn(map, key)) {
+    map[key] = value;
+  }
+};
+
+/**
+ * Adds to `hashes` the first 12 hex characters of the SHA-256 of the setup file `relative` of `root`, read by
+ * `readSmallBytes`, and returns the bytes it read; a file it cannot read adds nothing and counts 0.
+ */
+const addSetupHash = (hashes, root, relative) => {
+  try {
+    const bytes = readSmallBytes(join(root, ...relative.split('/')), MAX_SETUP_FILE_BYTES);
+    setOwn(hashes, relative, createHash('sha256').update(bytes).digest('hex').slice(0, 12));
+    return bytes.length;
+  } catch {
+    // Deliberate: a link, a FIFO, a directory, a file over the cap or one that cannot be read gets no key, as a missing one.
+    return 0;
+  }
+};
+
+/** The names of the agent files to hash: the first `MAX_SETUP_AGENT_FILES` `.md` entries in name order, then the name and regular-file checks. */
+const setupAgentFiles = (agentsDir) => {
+  let entries;
+  try {
+    entries = readdirSync(agentsDir, { withFileTypes: true });
+  } catch {
+    // Deliberate: a directory that cannot be listed adds no agent file.
+    return [];
+  }
+  const markdown = entries.filter((entry) => entry.name.endsWith('.md'));
+  const listed = markdown.sort((a, b) => byCodeUnits(a.name, b.name)).slice(0, MAX_SETUP_AGENT_FILES);
+  return listed.filter((entry) => SETUP_AGENT_FILE.test(entry.name) && entry.isFile()).map((entry) => entry.name);
+};
+
+/**
+ * The setup fingerprint of the repository at `root` (design section 2.3): for each of `SETUP_FILES` and the first
+ * `MAX_SETUP_AGENT_FILES` `.md` entries of `.claude/agents` in name order whose name is `SETUP_AGENT_FILE`, its
+ * repository-relative path with `/` to the first 12 hex characters of the SHA-256 of its bytes. The guards are
+ * ADR-0022's: `.claude` and `.claude/agents` count only as directories that are no links, an agent entry only as a
+ * regular file, and every file is opened without following a link, as a regular file of at most
+ * `MAX_SETUP_FILE_BYTES`; a file that fails one, or is missing, has no key, so no setup file gives `{}`. Undefined once
+ * the files read hold more than `maxTotalBytes` or the time passes `deadlineMs`: a part of the map would read as a
+ * changed setup. Only the hashes leave it. Never throws.
+ */
+export const setupFingerprint = (root, { deadlineMs = SETUP_DEADLINE_MS, maxTotalBytes = MAX_SETUP_TOTAL_BYTES, now = Date.now } = {}) => {
+  const deadline = now() + deadlineMs;
+  const hashes = {};
+  let total = 0;
+  /** Hashes one setup file; false once the fingerprint is over its byte budget or its deadline. */
+  const add = (relative) => {
+    total += addSetupHash(hashes, root, relative);
+    return total <= maxTotalBytes && now() <= deadline;
+  };
+  const claudeDir = realDirectory(join(root, '.claude'));
+  const rootFiles = SETUP_FILES.filter((relative) => claudeDir || !relative.startsWith('.claude/'));
+  const agentsDir = join(root, '.claude', 'agents');
+  const agentFiles = claudeDir && realDirectory(agentsDir) ? setupAgentFiles(agentsDir) : [];
+  const paths = [...rootFiles, ...agentFiles.map((name) => `.claude/agents/${name}`)];
+  return paths.every(add) ? hashes : undefined;
+};
 
 const DEFAULT_SPOOL_ROOT = HOOK_DEFAULTS.spool.dir;
 
@@ -505,6 +597,8 @@ const ENV_LABEL = /^[A-Z][A-Z0-9_]+$/;
 const PAIR_TOKEN = /^[A-Za-z0-9_-]+$/;
 const PAIR_PARENT = /^(?:headers|env)$/i;
 const GIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+/** A setup fingerprint's hash, the first 12 hex characters of a SHA-256 (`setupFingerprint`). */
+const SETUP_HASH = /^[0-9a-f]{12}$/;
 const TOKEN_PATTERNS = [
   /-----BEGIN [A-Z0-9 ]+-----[\s\S]*?(?:-----END [A-Z0-9 ]+-----|$)/g,
   /---- BEGIN SSH2 [A-Z0-9 ]+ ----[\s\S]*?(?:---- END SSH2 [A-Z0-9 ]+ ----|$)/g,
@@ -764,6 +858,9 @@ const isSecretKey = (key) => SECRET_KEY.test(key) && !SAFE_KEY.test(key);
 /** The plugin's marker tools (design section 2.4); their short text carries a new question's id. */
 const MARKER_TOOL = /^mcp__plugin_nurselog_nurselog__(plan|gate|question)$/;
 
+/** True for a hook line's envelope (section 3, "Hook lines"): `src: 'hook'`, a string `hook` and its own `payload`. */
+const isHookLine = (value) => value.src === 'hook' && typeof value.hook === 'string' && Object.hasOwn(value, 'payload');
+
 /** True for the name of the `plan` marker tool. */
 const isPlanTool = (name) => typeof name === 'string' && MARKER_TOOL.exec(name)?.[1] === 'plan';
 
@@ -772,10 +869,16 @@ const isPlanTool = (name) => typeof name === 'string' && MARKER_TOOL.exec(name)?
  * `value`: `root` is the value `redactValue` starts on, an envelope or a hook payload; `payload` the payload of a hook
  * line; `input` the `tool_input` of the plan marker tool directly under such a payload, or the `data` of a CLI `plan`
  * line directly under the envelope; `streams` its `streams`, `stream` one item of that and `after` the item's `after`.
- * Every other field is `none`, so the exemption reaches no other field, no deeper object and no marker shape nested in
- * another tool's input.
+ * `hashes` is the `setupHashes` of a hook line's envelope (`isHookLine`) and `hash` one value of it. Every other field is `none`, so
+ * the exemption reaches no other field, no deeper object and no marker shape nested in another tool's input.
  */
 const fieldScope = (value, field, scope) => {
+  if (scope === 'root' && field === 'setupHashes') {
+    return isHookLine(value) ? 'hashes' : 'none';
+  }
+  if (scope === 'hashes') {
+    return 'hash';
+  }
   if (scope === 'root' && field === 'data') {
     return value.src === 'cli' && value.event === 'plan' ? 'input' : 'none';
   }
@@ -794,12 +897,16 @@ const fieldScope = (value, field, scope) => {
 /**
  * Deep copy with every kept string redacted. A value under a secret-looking key becomes `[redacted]`, so
  * does the value of a `{ name, value }` object or a `[name, value]` pair with a secret name (one secret
- * token, or any secret part under `headers` or `env`); array items carry their parent's key. A git sha under `sha` stays.
+ * token, or any secret part under `headers` or `env`); array items carry their parent's key. A git sha under `sha` stays,
+ * and so does a 12-hex hash of a hook line's `setupHashes`, whose key is a file path that may look secret.
  * `scope` (`fieldScope`) marks the stream ids of a plan marker in `streams[].after`, which get only the string
  * redaction; a caller that holds the input of a plan marker itself, as `hooks/markers.mjs` does, passes `input`. An object
  * or array nested `MAX_DEPTH` levels deep becomes `[truncated]`, so a hostile payload cannot overflow the stack.
  */
 export const redactValue = (value, key = '', scope = 'root', depth = 0) => {
+  if (scope === 'hash' && typeof value === 'string' && SETUP_HASH.test(value)) {
+    return value;
+  }
   if (key && isSecretKey(key) && value !== null && value !== undefined && typeof value !== 'boolean') {
     return REDACTED;
   }
@@ -903,6 +1010,12 @@ const slimInput = (input, sensitive) => {
   const kept = { sensitive: true };
   for (const field of ['file_path', 'notebook_path', 'path', 'command']) {
     if (typeof input[field] === 'string') {
+      kept[field] = input[field];
+    }
+  }
+  // A Read's range is two numbers, nothing of the file: the reducer tells a whole read by them.
+  for (const field of ['offset', 'limit']) {
+    if (typeof input[field] === 'number') {
       kept[field] = input[field];
     }
   }
@@ -1433,13 +1546,20 @@ const stringifyShallow = (value) => {
 };
 
 /**
- * Serialises a line below `maxBytes` (the newline included): when it is longer or nested too deep to serialise, the strings under `field`
- * are cut (the head kept, the tail for stdout and stderr) and the line gets `truncated: true`.
+ * Serialises a line below `maxBytes` (the newline included): when it is longer or nested too deep to serialise, a
+ * hook line's `setupHashes` is left out first, as the optional field never costs the line its payload (design
+ * section 3, "Hook lines"); when it is still too long, the strings under `field` are cut (the head kept, the tail for
+ * stdout and stderr) and the line gets `truncated: true`.
  */
 export const serializeLine = (envelope, field, maxBytes) => {
   const line = stringifyShallow(envelope);
   if (line !== undefined && Buffer.byteLength(line) < maxBytes) {
     return line;
+  }
+  if (Object.hasOwn(envelope, 'setupHashes')) {
+    const withoutHashes = { ...envelope };
+    delete withoutHashes.setupHashes;
+    return serializeLine(withoutHashes, field, maxBytes);
   }
   for (const limit of [16000, 4000, 1000, 200, 40]) {
     const shorter = JSON.stringify({ ...envelope, [field]: capStrings(envelope[field], limit), truncated: true });

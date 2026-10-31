@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.12 (2026-10-31)
+
+- Add or remove a step in workflow health
+- One node per agent in the session graph
+- Accepted findings in workflow health
+- Plan step on the workflow health map
+- Setup changes in the workflow health report
+- Whole reads in workflow health
+- Setup fingerprint in the session aggregate
+- Fix items by cause in workflow health
+- Health read tool on the tool server
+- Time to merge, red checks and sent-back PRs in workflow health
+- Check state and review decision from the gh poll
+- Tests before a hand-back, research overlap and pipelines in workflow health
+- Model and turns from the agent files in workflow health
+- Copy one workflow health finding as a prompt
+
 ## 0.1.11 (2026-10-30)
 
 - Copy the workflow health report as a prompt for an AI assistant
