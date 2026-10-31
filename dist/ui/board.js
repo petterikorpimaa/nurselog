@@ -7968,7 +7968,7 @@ var READING = [
   "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
   '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before, or half or more of the fix items about one cause. Working well: neither. Accepted: kept as it is on purpose (`insights.accepted` of nurselog.config.json) until it gets worse than before. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
   "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
-  "- Each finding names its workflow step (Main thread, Explore, Implement, Review, Verify, PR and merge, Your answers), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.",
+  "- Each finding names its workflow step (Main thread, Plan, Explore, Implement, Review, Verify, PR and merge, Your answers), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.",
   "- A suggested change adds lines to a file, replaces a line in it, or creates a file with all its lines added, at times in two files: a line starting with - is removed, one starting with + is added. Its effect is a measured target or a direction, never an estimated saving.",
   "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
 ];

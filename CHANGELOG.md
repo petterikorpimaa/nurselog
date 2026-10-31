@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.13 (2026-10-31)
+
+- A resumed agent in the live demo and the Plan step in the report prompt
+
 ## 0.1.12 (2026-10-31)
 
 - Add or remove a step in workflow health
