@@ -12,7 +12,7 @@ import {
   sessionRunIds,
   sessionsAffected,
   time
-} from "./chunk-MDIXO4FB.js";
+} from "./chunk-UTPB24LM.js";
 
 // src/spool/fixture.ts
 var MET_SESSION_LINES = /* @__PURE__ */ new Set(["session.start", "session.end", "prompt"]);
@@ -52,7 +52,7 @@ var sessionReach = (state, sessionId) => {
   if (!session) {
     return void 0;
   }
-  const runs = sessionRunIds(session).map((id) => ownValue(state.board.runs, id)).filter((run) => run !== void 0);
+  const runs = sessionRunIds(session).map((id) => ownValue(state.branchStates, id)).filter((run) => run !== void 0);
   const runIds = new Set(runs.filter((run) => !isTrunkBranch(state, run.branch)).map((run) => run.id));
   const branches = new Set(runs.map((run) => run.branch).filter((branch) => branch !== "" && branch !== "?"));
   const prs = new Set(runs.flatMap((run) => run.pr ? [run.pr.number] : []));
@@ -96,7 +96,7 @@ var replaySpool = (days, config) => {
     } catch {
     }
     if (event.src !== "server") {
-      item.runs = Object.values(state.board.runs).filter((run) => run.lastEventAt === event.at).map((run) => run.id);
+      item.runs = Object.values(state.branchStates).filter((run) => run.lastEventAt === event.at).map((run) => run.id);
     }
     try {
       item.sessions = sessionsAffected(state, event);

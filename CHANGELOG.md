@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.15 (2026-10-31)
+
+- Tab counts and the gh poll from the sessions
+- A fork keeps its source and its continues link reads after a fork
+
 ## 0.1.14 (2026-10-31)
 
 - Where the reads moved after a setup change in workflow health

@@ -1,5 +1,5 @@
 /* The board page (design section 15): tokens, fonts, page, top bar and its repository tabs, card, card header,
-   progress chip, collapse, the conversations, the Finished runs panel, the toast and the questions section.
+   progress chip, collapse, the conversations, the Finished sessions panel, the toast and the questions section.
    One dark theme. The tokens follow reference/demo.html. Package colours come from the config as --pkg-<id> and stage
    colours as --st-<key>, set on the root by src/ui/context.ts; the stage values below are the defaults until then.
    The graph styles are in graph.css, the agent table and log line styles in table.css, the workflow health strip's
@@ -342,7 +342,7 @@ p { margin: 0; }
 .run-row[data-error] > :not(.row-error) { opacity: .6; }
 .run-row[data-error] *, .run-row[data-error] *::before, .run-row[data-error] *::after { animation-play-state: paused !important; }
 
-/* the bars of the conversations section and the Finished runs panel: a title and its count in a pill */
+/* the bars of the conversations section and the Finished sessions panel: a title and its count in a pill */
 .section-bar { display: flex; align-items: center; padding: 8px 12px 2px 14px; }
 .section-heading { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: inherit; letter-spacing: 0; }
 .section-title { font-weight: 600; font-size: 13.5px; color: var(--fg); }
@@ -356,7 +356,7 @@ p { margin: 0; }
 .conversations { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
 .conversations.folding { overflow: hidden; pointer-events: none; }
 
-/* the Finished runs panel (finished.ts), always at the bottom: the bar with the quiet disclosure toggle (its chevron
+/* the Finished sessions panel (finished.ts), always at the bottom: the bar with the quiet disclosure toggle (its chevron
    turns when open), the count pill and, while open, "Clear all"; the body opens with a grid-rows transition */
 .finished-panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
 .finished-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px 8px 6px; }
@@ -397,7 +397,7 @@ p { margin: 0; }
 .toast-progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--fg-3); transform-origin: left; }
 
 /* a lost event stream (board-page.ts sets data-connection): the board panels, the workflow health strip, the cards, the
-   conversations and the Finished runs panel dim and their CSS animations hold still, so a stale board shows no motion
+   conversations and the Finished sessions panel dim and their CSS animations hold still, so a stale board shows no motion
    that looks live; the next snapshot brings both back */
 .board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.ovw, .hstrip, .cards, .conversations, .finished-panel) { opacity: .6; }
 .board:is([data-connection="reconnecting"], [data-connection="disconnected"]) :is(.ovw, .hstrip, .cards, .conversations, .finished-panel) :is(*, *::before, *::after) {
@@ -424,13 +424,10 @@ p { margin: 0; }
   font-size: 11.5px; color: var(--fg-2); background: var(--card-2); border: 1px solid var(--border); border-radius: 6px;
   padding: 1px 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.stream-count, .elapsed { white-space: nowrap; }
+.elapsed { white-space: nowrap; }
 .cost { font: 500 12px var(--f-mono); color: var(--fg); white-space: nowrap; }
-.worktree { font: 500 11px var(--f-mono); color: var(--fg-3); padding: 0 16px; overflow-wrap: anywhere; }
-.graph-host { overflow-x: auto; padding: 0 4px; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
-/* a session card (session-card.ts): the graph track never scrolls, the graph fits its width (fit.ts), so the run
-   card's overflow rule above does not apply; the chips row hides while empty; the meta names the main thread's model
-   as the demo's .mmdl and .mdl do */
+/* a session card (session-card.ts): the graph track never scrolls, the graph fits its width (fit.ts); the chips row
+   hides while empty; the meta names the main thread's model as the demo's .mmdl and .mdl do */
 .session-graph-host { min-width: 0; padding: 0 4px; }
 .chips-row:empty { display: none; }
 /* a link jump focuses the target's heading: the ring shows for the keyboard only, as on every other focus target */
@@ -509,7 +506,7 @@ p { margin: 0; }
 .card[data-error] > :not(.card-error) { opacity: .6; }
 .card[data-error] *, .card[data-error] *::before, .card[data-error] *::after { animation-play-state: paused !important; }
 
-/* progress chip: the tone of RunState.chip as data-tone; it bumps on a change (card.ts) and `you` pulses with a halo
+/* progress chip: the tone of SessionState.chip as data-tone; it bumps on a change (card.ts) and `you` pulses with a halo
    that grows a fixed 6 px outward, whatever the chip's size */
 .progress-chip {
   position: relative; font: 600 11.5px var(--f-mono); color: var(--fg); white-space: nowrap;
@@ -620,7 +617,7 @@ p { margin: 0; }
    read-only columns, each in its type's colour --c (issue --amber, improvement --rev, fix --warm), the newest four items
    with the agent table's "Show all (N)". The heading is the questions section's, 4 px under the graph like it, and a
    disclosure toggle with the earlier messages toggle's trailing chevron, so the text keeps the columns' edge; the
-   chevron turns when open, and the columns, folded by default, open with the Finished runs panel's grid-rows
+   chevron turns when open, and the columns, folded by default, open with the Finished sessions panel's grid-rows
    transition. The section and a new item enter in followups.ts; the chip of a new follow-up (.fly-chip) flies from
    its agent's node to its column's heading, or to the section's heading while folded, drawn in the card. */
 .followups { display: flex; flex-direction: column; padding: 0 16px 16px; }
@@ -663,7 +660,6 @@ p { margin: 0; }
 @media (max-width: 760px) {
   /* the title takes its own row; the collapse button stays at its top right instead of wrapping with the meta */
   .card-header { position: relative; padding: 12px 12px 4px; }
-  .worktree { padding: 0 12px; }
   .chips-row { padding: 0 12px 4px; }
   .questions { padding: 0 12px; }
   .followups { padding-inline: 12px; }
@@ -675,7 +671,7 @@ p { margin: 0; }
   .question.compact .question-text { order: 3; flex-basis: 100%; }
   .card-title { flex-basis: 100%; padding-right: 36px; }
   .collapse-button { position: absolute; top: 11px; right: 12px; }
-  /* a run row wraps like a question item: dot, key and title keep the first row, the rest goes to rows of its own; a
+  /* a row (.run-row) wraps like a question item: dot, key and title keep the first row, the rest goes to rows of its own; a
      conversation's meta is one flex group with the card meta's rhythm */
   .run-row-line { gap: 5px 10px; }
   .run-row.conversation .run-row-line { grid-template-columns: 10px auto minmax(0, 1fr); grid-template-areas: "d k t" ". mt mt"; }

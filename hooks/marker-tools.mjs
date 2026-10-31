@@ -39,7 +39,7 @@ const packageVersion = () => {
   }
 };
 
-const RUN = { type: 'string', maxLength: TEXT_CAPS.run, description: 'Run id or a unique part of it, such as the worktree name; default: the run the session started in. Pass it for a worktree you created or work in' };
+const RUN = { type: 'string', maxLength: TEXT_CAPS.run, description: 'Run id or a unique part of it, such as the worktree name, only for a marker about that branch, such as a merge gate; leave it out otherwise' };
 const NOTE = { type: 'string', maxLength: TEXT_CAPS.note, description: 'Short note shown on the board' };
 
 const STREAM = {
@@ -58,7 +58,7 @@ const STREAMS = { type: 'array', items: STREAM, minItems: 1, maxItems: MAX_STREA
 const TOOLS = [
   {
     name: 'plan',
-    description: 'Show the plan of the current run on the Nurselog board: its streams, their order and a note. Again to replace it.',
+    description: 'Show your plan on the Nurselog board: its streams, their order and a note. Again to replace it.',
     inputSchema: { type: 'object', properties: { streams: STREAMS, note: NOTE, run: RUN }, required: ['streams'], additionalProperties: false },
   },
   {

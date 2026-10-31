@@ -40,7 +40,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-MDIXO4FB.js";
+} from "./chunk-UTPB24LM.js";
 
 // src/config.ts
 import { existsSync } from "fs";
@@ -1648,13 +1648,13 @@ import { deserialize, serialize } from "v8";
 // src/facts/diff-target.ts
 var diffTargetOf = (state, agentId) => {
   const homeId = ownValue(state.index.agentRuns, agentId);
-  const homeRun = homeId === void 0 ? void 0 : ownValue(state.board.runs, homeId);
+  const homeRun = homeId === void 0 ? void 0 : ownValue(state.branchStates, homeId);
   const home = homeRun === void 0 ? void 0 : ownValue(homeRun.agents, agentId);
   if (home === void 0 || home.endedAt !== void 0 || home.stage !== "review") {
     return void 0;
   }
   const copies = [];
-  for (const run of Object.values(state.board.runs)) {
+  for (const run of Object.values(state.branchStates)) {
     const agent = ownValue(run.agents, agentId);
     if (agent !== void 0) {
       copies.push({ run, agent });

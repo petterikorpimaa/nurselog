@@ -58,11 +58,11 @@ up (working alone, it may need none):
   and `relays` only for a subagent question you pass on, with its id (`q-<agent id>-<n>`, n its position in that
   agent's report block, from 1; the CLI flag is `--relays`). It returns the question id; `answer: <id>` closes it.
 
-`run` defaults to the run the session started in; pass `run` (the worktree name) only for work in another worktree,
-such as one you created. Joins, reviewers, merges and promotions are derived and need no marker; with
-`github.mergeBy: agent` an open PR does not wait for the developer, so hand a merge over with `gate` `merge` and the
-state `waiting`. Claude Code asks for permission on the first use of each tool; a plugin cannot pre-approve it. The CLI
-`nurselog emit plan|gate|question ...` adds the same markers and is the fallback (`nurselog help` prints its flags).
+`run` names a worktree only for a marker about that branch, such as a `merge` gate; leave it out otherwise. Joins,
+reviewers, merges and promotions are derived and need no marker; with `github.mergeBy: agent` an open PR does not wait
+for the developer, so hand a merge over with `gate` `merge` and the state `waiting`. Claude Code asks for permission on
+the first use of each tool; a plugin cannot pre-approve it. The CLI `nurselog emit plan|gate|question ...` adds the
+same markers and is the fallback (`nurselog help` prints its flags).
 
 ## Workflow health
 

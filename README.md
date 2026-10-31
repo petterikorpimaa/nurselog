@@ -238,7 +238,6 @@ alias nurselog='node ~/github/nurselog/bin/nurselog'
 
 - `?repo=<tab name>` opens a repository's tab (default: the most recently active).
 - `&session=<id>` scrolls to one session's card once.
-- `?view=runs` shows the older view with one card per run.
 
 </details>
 
@@ -466,9 +465,9 @@ when its case comes up (working alone, it may need none):
 | `gate` | A hand-over to you: gate `plan`, `merge`, `promote` or `docs`, state `waiting`, `done` or `skipped`. |
 | `question` | A question asked in prose: `text`, `blocking`, `options`, and `relays` only for a subagent question it passes on. Returns an id; `answer: <id>` closes it. |
 
-`run` defaults to the run the session started in; pass it only for work in another worktree. Claude Code asks for
-permission on each tool's first use; a plugin cannot pre-approve it. Joins, reviews, merges and promotions are derived
-and need no marker.
+`run` names a worktree only for a marker about that branch, such as a `merge` gate; leave it out otherwise. Claude Code
+asks for permission on each tool's first use; a plugin cannot pre-approve it. Joins, reviews, merges and promotions are
+derived and need no marker.
 
 A fourth tool, `health`, records nothing: it reads. It returns the [workflow health](#workflow-health) report of the
 repository as a prompt for improving the workflow, or with `finding` (a finding id such as
@@ -597,7 +596,7 @@ Arrays such as `packages` replace the default list whole.
 | `branches.promote` | `[]` | Promote targets; the Promote stage is drawn only with one. |
 | `github.repo` | `""` | `owner/name`, the repository a git remote of this repository points at (a fork may name its `upstream`); otherwise the top bar shows `gh repo mismatch`. Empty turns `gh` polling off. |
 | `github.accountPattern` | `""` | Regex the `gh` login must match. Nurselog never switches accounts; from the user config it can poll with a logged-in account that is not the active one. |
-| `github.pollSeconds` | `60` | 10 to 3600. Polls only while a browser is open and the repository has an open run. |
+| `github.pollSeconds` | `60` | 10 to 3600. Polls only while a browser is open and a session of the repository is open: it has not ended, or a branch it worked on has an open PR, a waiting promote, or no PR yet within a day of its end. |
 | `github.mergeBy` | `"developer"` | `agent`: an open PR does not wait for you. |
 | `github.promoteTitlePrefix` | `{}` | PR title prefix per promote target; required for each target. |
 | `packages` | `[]` | `{ id, color, paths[], label? }`, up to 50. An implementer with no package is in the stream `repo`. |

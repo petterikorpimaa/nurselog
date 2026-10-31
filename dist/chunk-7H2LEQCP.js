@@ -15,10 +15,11 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-EY6E4WUD.js";
+} from "./chunk-73HFVODL.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
+  GATE_IDS,
   HOOK_DEFAULTS,
   MAX_READ_DAYS,
   MAX_SETUP_FILES,
@@ -41,12 +42,12 @@ import {
   createSpoolReader,
   createStore,
   defaultRoot,
-  displayState,
   ensureBoardToken,
   ensurePrivateDir,
   expandHome,
   findConfig,
   gitCommonDir,
+  isSessionDone,
   isSetupEntry,
   listSpoolFiles,
   localDay,
@@ -74,7 +75,10 @@ import {
   sameText,
   serverStatePath,
   sessionAggregate,
+  sessionGates,
   sessionOutcomes,
+  sessionRowState,
+  sessionRunIds,
   spoolDirExists,
   spoolDirFor,
   startCommand,
@@ -88,7 +92,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-MDIXO4FB.js";
+} from "./chunk-UTPB24LM.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -106,22 +110,26 @@ var mostRecentlyActive = (repositories) => {
   }
   return newest;
 };
-var countsOf = (board) => {
+var runsInTable = (session, agent) => sessionRowState(session, agent) === "running";
+var countsOf = (state, view) => {
   let running = 0;
   let waiting = 0;
-  for (const id of board.order) {
-    const run = board.runs[id];
-    if (!run) {
+  for (const id of view.sessionOrder) {
+    const session = ownValue(view.sessions, id);
+    if (!session || isSessionDone(session)) {
       continue;
     }
-    running += Object.values(run.agents).filter((agent) => displayState(run, agent) === "running").length;
-    const open = run.questions.filter((question) => question.state === "open" && question.audience === "user");
+    running += Object.values(session.agents).filter((agent) => runsInTable(session, agent)).length;
+    const open = session.questions.filter((question) => question.state === "open" && question.audience === "user");
     const asked = new Set(open.filter((question) => question.node.kind === "gate").map((question) => question.node.id));
-    const gates = Object.entries(run.gates).filter(([gate, entry]) => entry.state === "waiting" && !asked.has(gate));
-    waiting += open.length + gates.length;
+    const record = ownValue(state.index.sessions, id);
+    const ctx = { state, sessionId: id, runIds: record ? sessionRunIds(record) : [], ...record?.gates === void 0 ? {} : { gates: record.gates } };
+    const gates = GATE_IDS.filter((gate) => !asked.has(gate)).flatMap((gate) => sessionGates(ctx, session.rows, gate));
+    waiting += open.length + gates.filter((gate) => gate.state === "waiting").length;
   }
   return { running, waiting };
 };
+var storeCounts = (store) => countsOf(store.state(), store.shownSessions());
 var SUMMARY_AFTER_MS = 30 * 60 * 1e3;
 var sessionSummary = (session) => {
   const { id, key, title, kind, startedAt, endedAt, finishedAt, lastActiveAt, outcome, costUsd } = session;
@@ -163,23 +171,23 @@ var withList = (body, listText2, typicalText = "", insightsText = "") => {
   const insightsAt = insightsText === "" ? "" : `,"insightsAt":${insightsText}`;
   return `${body.slice(0, -1)},"repositories":${listText2}${typical}${insightsAt}}`;
 };
-var typicalTextOf = (repository, view) => {
-  const typical = view === "sessions" ? repository.typical?.() : void 0;
+var typicalTextOf = (repository) => {
+  const typical = repository.typical?.();
   return typical === void 0 || Object.keys(typical).length === 0 ? "" : JSON.stringify(typical);
 };
-var insightsTextOf = (repository, view) => {
-  const report = view === "sessions" ? repository.insights?.() : void 0;
+var insightsTextOf = (repository) => {
+  const report = repository.insights?.();
   return report === void 0 || report === null ? "" : JSON.stringify(report.generatedAt);
 };
-var repositorySummary = (repository, counts = countsOf(repository.store.state().board)) => {
+var repositorySummary = (repository, counts = storeCounts(repository.store)) => {
   const { id, name } = repository;
   return { id, name, lastLineAt: repository.lastLineAt(), ...counts };
 };
-var viewBody = (store, view) => view === "runs" ? JSON.stringify(store.snapshot()) : JSON.stringify(sessionView(store.sessions(), store.state().index.now));
-var snapshotText = (repository, view, listText2, body) => {
+var viewBody = (store) => JSON.stringify(sessionView(store.sessions(), store.state().index.now));
+var snapshotText = (repository, listText2, body) => {
   const list = listText2 ?? JSON.stringify([repositorySummary(repository)]);
-  const viewText = body ?? viewBody(repository.store, view);
-  return withList(viewText, list, typicalTextOf(repository, view), insightsTextOf(repository, view));
+  const viewText = body ?? viewBody(repository.store);
+  return withList(viewText, list, typicalTextOf(repository), insightsTextOf(repository));
 };
 var sessionBody = (store, id, agentId = null) => {
   const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
@@ -321,8 +329,6 @@ var SECURITY_HEADERS = {
 };
 var UNAUTHORIZED_HEADERS = { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "WWW-Authenticate": 'Bearer realm="nurselog"' };
 var REPOSITORY_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/config", "GET /api/insights", "GET /api/events", "GET /api/session", "GET /api/fixture"]);
-var VIEW_ROUTES = /* @__PURE__ */ new Set(["GET /api/state", "GET /api/events"]);
-var VIEWS = /* @__PURE__ */ new Set(["runs", "sessions"]);
 var MAX_SESSION_ID = 256;
 var sessionIdValid = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID && stripControl(id) === id;
 var HTML = "text/html; charset=utf-8";
@@ -379,15 +385,12 @@ var targetOf = (target) => {
     const url = new URL(target, "http://127.0.0.1");
     const { searchParams } = url;
     const get = (name) => searchParams.get(name);
-    return { path: url.pathname, repo: get("repo"), view: get("view"), id: get("id"), agent: get("agent"), session: get("session"), ticket: get("ticket"), nonce: get("nonce") };
+    return { path: url.pathname, repo: get("repo"), id: get("id"), agent: get("agent"), session: get("session"), ticket: get("ticket"), nonce: get("nonce") };
   } catch {
     return void 0;
   }
 };
 var inputProblem = (key, target) => {
-  if (VIEW_ROUTES.has(key) && target.view !== null && !VIEWS.has(target.view)) {
-    return "The view parameter must be runs or sessions.";
-  }
   if (key === "GET /api/session" && !sessionIdValid(target.id ?? "")) {
     return "The id parameter must be a session id: 1 to 256 characters without control characters.";
   }
@@ -453,7 +456,7 @@ var createBoardServer = (options) => {
     if (cached) {
       return cached;
     }
-    const fresh = countsOf(repository.store.state().board);
+    const fresh = storeCounts(repository.store);
     if (followed.get(repository.id)?.store === repository.store) {
       counts.set(repository.id, fresh);
     }
@@ -461,19 +464,19 @@ var createBoardServer = (options) => {
   };
   const summaryOf = (repository) => repositorySummary(repository, countsFor(repository));
   const summaries = () => options.repositories().map(summaryOf);
-  const bodyOf = (repository, view) => {
-    const cached = bodies.get(repository.id)?.[view];
+  const bodyOf = (repository) => {
+    const cached = bodies.get(repository.id);
     if (cached !== void 0) {
       return cached;
     }
     const { store } = repository;
-    const fresh = viewBody(store, view);
+    const fresh = viewBody(store);
     if (followed.get(repository.id)?.store === store) {
-      bodies.set(repository.id, { ...bodies.get(repository.id), [view]: fresh });
+      bodies.set(repository.id, fresh);
     }
     return fresh;
   };
-  const snapshotText2 = (repository, view, listText2 = JSON.stringify(summaries())) => snapshotText(repository, view, listText2, bodyOf(repository, view));
+  const snapshotText2 = (repository, listText2 = JSON.stringify(summaries())) => snapshotText(repository, listText2, bodyOf(repository));
   const broadcast = () => {
     pending = void 0;
     sentAt = Date.now();
@@ -488,11 +491,10 @@ var createBoardServer = (options) => {
         if (!repository || repository.loading?.()) {
           continue;
         }
-        const name = `${shown.view} ${shown.id}`;
-        const message = messages.get(name) ?? `data: ${snapshotText2(repository, shown.view, listText2)}
+        const message = messages.get(shown.id) ?? `data: ${snapshotText2(repository, listText2)}
 
 `;
-        messages.set(name, message);
+        messages.set(shown.id, message);
         if (message !== shown.sent) {
           shown.sent = message;
           send(stream, message);
@@ -558,19 +560,19 @@ var createBoardServer = (options) => {
     }
     return listed2.find((repository) => repository.id === repo);
   };
-  const openStream = (request, response, repository, view) => {
+  const openStream = (request, response, repository) => {
     if (streams.size >= maxClients) {
       sendJson(response, 503, { error: "too-many-clients", message: `Nurselog serves at most ${maxClients} event streams.` });
       return;
     }
-    const message = repository.loading?.() ? "" : `data: ${snapshotText2(repository, view)}
+    const message = repository.loading?.() ? "" : `data: ${snapshotText2(repository)}
 
 `;
     response.writeHead(200, { ...SECURITY_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
     response.write(`retry: 2000
 
 ${message}`);
-    streams.set(response, { id: repository.id, view, sent: message });
+    streams.set(response, { id: repository.id, sent: message });
     request.on("close", () => streams.delete(response));
     options.onClient?.();
   };
@@ -802,7 +804,6 @@ ${message}`);
       sendJson(response, 400, { error: "bad-request", message: problem });
       return;
     }
-    const view = target.view === "runs" ? "runs" : "sessions";
     const asset = request.method === "GET" ? UI_ASSETS.get(target.path) : void 0;
     const repository = REPOSITORY_ROUTES.has(key) ? repositoryOf(target.repo) : void 0;
     if (asset) {
@@ -812,7 +813,7 @@ ${message}`);
     } else if (key === "GET /api/repositories") {
       sendJson(response, 200, summaries());
     } else if (key === "GET /api/state" && repository) {
-      whenReady(request, response, repository, () => sendJsonText(response, 200, snapshotText2(repository, view)));
+      whenReady(request, response, repository, () => sendJsonText(response, 200, snapshotText2(repository)));
     } else if (key === "GET /api/session" && repository) {
       whenReady(request, response, repository, () => sendSession(response, repository, target.id ?? "", target.agent));
     } else if (key === "GET /api/fixture" && repository) {
@@ -824,7 +825,7 @@ ${message}`);
       const body = { report: repository.insights?.() ?? null, setup: repository.setup() };
       sendJson(response, 200, body);
     } else if (key === "GET /api/events" && repository) {
-      openStream(request, response, repository, view);
+      openStream(request, response, repository);
     } else if (key === "GET /api/update") {
       sendJson(response, 200, options.update?.() ?? null);
     } else if (key === "GET /api/health") {
@@ -3526,7 +3527,26 @@ var createSampleReport = (options) => {
 var TICK_MS = 60 * 1e3;
 var SAMPLE_AGGREGATES = join4(PACKAGE_ROOT, "fixtures", "aggregates.ndjson");
 var AGGREGATE_CHECK_MS = 60 * 1e3;
-var hasOpenRun = (state) => Object.values(state.runs).some((run) => run.branch !== "" && run.branch !== "?" && run.chip.tone !== "done");
+var LATE_PR_MS = 24 * 60 * 60 * 1e3;
+var branchOpen = (run, recent) => {
+  if (run.pr?.state === "open" || run.gates.promote.state === "waiting") {
+    return true;
+  }
+  return recent && run.pr === void 0 && run.removedAt === void 0;
+};
+var sessionOpen = (state, session, nowMs) => {
+  if (session.endedAt === void 0) {
+    return true;
+  }
+  const recent = nowMs - time(session.endedAt) < LATE_PR_MS;
+  const runs = session.branchWork.map((work) => ownValue(state.branchStates, work.runId));
+  return runs.some((run) => run !== void 0 && branchOpen(run, recent));
+};
+var hasOpenSession = (state) => {
+  const nowMs = time(state.index.now ?? "");
+  const sessions = Object.values(state.index.sessions);
+  return sessions.some((session) => sessionOpen(state, session, nowMs));
+};
 var stopEach = (stops, warn) => {
   for (const stop of stops.splice(0)) {
     try {
@@ -3556,7 +3576,7 @@ var createSpoolContext = (options) => {
   let lastLineAt2 = options.lastLineAt;
   const ghWanted = options.facts && config.github.repo !== "";
   const ghLog = (level, message) => level === "warning" ? warn(message) : info(message);
-  const pollWanted = () => options.clients() > 0 && hasOpenRun(store.state().board);
+  const pollWanted = () => options.clients() > 0 && hasOpenSession(store.peek());
   const gh = ghWanted ? createGhFacts({ config, configKind: options.configKind, root, write, run: options.run, log: ghLog, wanted: pollWanted }) : void 0;
   const diffTarget = (agentId) => diffTargetOf(store.peek(), agentId);
   const repoCommonDir = options.facts ? gitCommonDir(root) : void 0;

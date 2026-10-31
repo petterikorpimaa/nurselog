@@ -35,11 +35,11 @@ import {
   startNurselog,
   tokens,
   unquote
-} from "./chunk-2GP2YXED.js";
+} from "./chunk-7H2LEQCP.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-UFOIZQO2.js";
+} from "./chunk-DXELUEKU.js";
 import {
   DEFAULT_CONFIG,
   PACKAGE_ROOT,
@@ -49,7 +49,7 @@ import {
   mergeOverDefaults,
   runCommand,
   validateConfig
-} from "./chunk-EY6E4WUD.js";
+} from "./chunk-73HFVODL.js";
 import {
   BRANCH_KEY_PATTERN,
   LINUX_APP_BROWSERS,
@@ -108,7 +108,7 @@ import {
   waitForBoard,
   workflowSetupOf,
   writeSignInFile
-} from "./chunk-MDIXO4FB.js";
+} from "./chunk-UTPB24LM.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
