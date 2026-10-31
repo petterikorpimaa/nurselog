@@ -304,6 +304,7 @@
 /* a setup change: a short tick over the bars before the first point of the change, in another token than the split line */
 .hsp .stk line { stroke: var(--focus); stroke-width: 1.5; }
 .hsp .stk rect { fill: transparent; }
+.evcs { display: flex; flex-direction: column; gap: 3px; }
 .evc { margin: 0; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
 .hevl { list-style: none; margin: 0; padding: 0 0 4px; }
 .hevr {

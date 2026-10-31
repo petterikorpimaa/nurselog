@@ -15,6 +15,8 @@ var DEFAULT_ROLES = {
   architect: { stage: "other", step: "plan" },
   // Claude Code's built-in Plan agent type.
   Plan: { stage: "other", step: "plan" },
+  // A check runner runs the typecheck and the tests and returns their verdict: a check, no research (decision 190).
+  "check-runner": { stage: "other", step: "verify" },
   "*": { stage: "other" }
 };
 var LEGACY_ROLE_STAGE = "build";
@@ -732,7 +734,7 @@ var isFraction = (value2) => typeof value2 === "number" && value2 >= 0 && value2
 var isLimit = (value2) => value2 === null || Number.isInteger(value2) && value2 >= 0;
 var isShareLimit = (value2) => value2 === null || isFraction(value2);
 var isPositiveLimit = (value2) => value2 === null || isPositive(value2);
-var isRoleStep = (value2) => value2 === void 0 || value2 === "plan";
+var isRoleStep = (value2) => value2 === void 0 || value2 === "plan" || value2 === "verify";
 var isRole = (value2) => isPlainObject(value2) && ROLE_STAGES.includes(value2.stage) && (value2.short === void 0 || typeof value2.short === "string");
 var isRoleBudget = (value2) => isPlainObject(value2) && [value2.toolCalls, value2.verifyRounds].every((limit) => limit === void 0 || isLimit(limit));
 var isKeyUrl = (value2) => {
@@ -754,7 +756,7 @@ var DEFAULTED_KEYS = [
   ["github.mergeBy", "developer or agent", isMergeBy],
   ["roles", OBJECT, isPlainObject],
   ["roles.*", "an object with a stage of implement, review, pr or other and an optional string short", isRole],
-  ["roles.*.step", "plan when present", isRoleStep],
+  ["roles.*.step", "plan or verify when present", isRoleStep],
   ["docs", OBJECT, isPlainObject],
   ["docs.roles", STRING_LIST, isStringList],
   ["docs.tools", STRING_LIST, isStringList],
@@ -1014,12 +1016,12 @@ var uiConfig = (config, root) => {
   };
 };
 var SETUP_KINDS = ["typecheck", "lint", "test"];
-var workflowSetupOf = (config, agents = []) => {
+var workflowSetupOf = (config, agents = [], named = {}) => {
   const roles = Object.entries(config.roles).map(([role, entry]) => {
     const limits = ownValue(config.budgets.roles, role) ?? {};
     const resolved = limits.toolCalls === void 0 ? config.budgets.default.toolCalls : limits.toolCalls;
     const toolCalls = resolved === 0 ? null : resolved;
-    if (entry.stage === "other" && entry.step === "plan") {
+    if (entry.stage === "other" && entry.step !== void 0) {
       return { role, stage: entry.stage, toolCalls, step: entry.step };
     }
     return { role, stage: entry.stage, toolCalls };
@@ -1029,7 +1031,11 @@ var workflowSetupOf = (config, agents = []) => {
   for (const [id, reason] of Object.entries(config.insights.accepted)) {
     ownEntry(accepted, id, () => reason);
   }
-  return { roles, verification, mergeBy: config.github.mergeBy, agents: agents.map((agent) => ({ ...agent })), accepted };
+  const claudeMd = {};
+  for (const [role, lines] of Object.entries(named)) {
+    ownEntry(claudeMd, role, () => structuredClone(lines));
+  }
+  return { roles, verification, mergeBy: config.github.mergeBy, agents: agents.map((agent) => ({ ...agent })), accepted, claudeMd };
 };
 
 // src/model/display-state.ts
@@ -5516,6 +5522,376 @@ var onGhFact = (state, event, config) => {
   return heads;
 };
 
+// src/model/messages.ts
+var QUESTION_TEXT = 300;
+var isMarkerOrAskTool = (question) => question.origin === "marker" || question.origin === "ask-tool";
+var isOpenMainAsk = (question) => {
+  const own = question.state === "open" && question.audience === "user" && question.source.agentId === "main";
+  return isMarkerOrAskTool(question) && own;
+};
+var within = (at, from, to) => at !== void 0 && time(at) >= from && time(at) <= to;
+var sessionRuns2 = (state, session) => session.runIds.map((id) => state.board.runs[id]).filter((run) => run !== void 0);
+var kindOf = (asks, planned) => {
+  if (asks) {
+    return "ask";
+  }
+  return planned ? "plan" : "update";
+};
+var byTime = (a, b) => time(a.at) - time(b.at) || Number(a.id > b.id) - Number(a.id < b.id);
+var addSessionMessage = (session, runs, message, from, to) => {
+  const own = (sessionId) => sessionId === message.sessionId;
+  const asks = runs.some((item2) => item2.questions.some((question) => own(question.sessionId) && isOpenMainAsk(question) && within(question.createdAt, from, to)));
+  const waits2 = runs.some((item2) => Object.values(item2.gates).some((gate) => own(gate.sessionId) && gate.state === "waiting" && within(gate.waitingSince, from, to)));
+  const planned = session.plans.some((plan) => within(plan.at, from, to));
+  const copy = { ...message, kind: kindOf(asks || waits2, planned) };
+  const messages = [...session.messages.filter((item2) => item2.id !== copy.id), copy].sort(byTime);
+  session.messages = keepMessages(messages);
+  const dropped = messages.slice(0, messages.length - session.messages.length);
+  const newestDropped = dropped.at(-1);
+  if (newestDropped) {
+    session.developerMessages = (session.developerMessages ?? []).filter((item2) => time(item2.at) > time(newestDropped.at));
+  }
+};
+var addMainMessage = (state, event, run) => {
+  const session = state.index.sessions[event.sessionId];
+  if (event.agentId || !session || event.data.lastMessage.trim() === "") {
+    return;
+  }
+  const home = existingHomeRun(state, session) ?? run;
+  const turnStartedAt = session.turnStartedAt ?? event.at;
+  const from = time(turnStartedAt);
+  const to = time(event.at);
+  const runs = sessionRuns2(state, session);
+  const asks = runs.flatMap((item2) => item2.questions.filter((question) => isOpenMainAsk(question) && within(question.createdAt, from, to)));
+  const waits2 = runs.some((item2) => Object.values(item2.gates).some((gate) => gate.state === "waiting" && within(gate.waitingSince, from, to)));
+  const planned = runs.some((item2) => within(item2.plan?.at, from, to));
+  const kind = kindOf(waits2 || asks.length > 0, planned);
+  const text2 = event.data.lastMessage;
+  const truncated = event.data.lastMessageTruncated === true;
+  const message = { id: event.id, sessionId: event.sessionId, turnStartedAt, at: event.at, text: text2, truncated, kind };
+  if (session.turnStartedBy !== void 0) {
+    message.startedBy = session.turnStartedBy;
+  }
+  home.messages = keepMessages([...home.messages, message]);
+  addSessionMessage(session, runs, message, from, to);
+  for (const question of asks) {
+    question.messageId = message.id;
+  }
+};
+var addDeveloperMessages = (session, added) => {
+  const ids = new Set(added.map((item2) => item2.id));
+  const kept = (session.developerMessages ?? []).filter((item2) => !ids.has(item2.id));
+  session.developerMessages = keepDeveloperMessages([...kept, ...added]);
+};
+var addDeveloperPrompt = (session, event, answered) => {
+  const data = event.data;
+  if (event.agentId || data.kind !== "user") {
+    return;
+  }
+  const asked = answered.filter(isMarkerOrAskTool).sort((a, b) => time(a.createdAt) - time(b.createdAt));
+  const message = { id: event.id, sessionId: event.sessionId, at: event.at, kind: "prompt", text: data.text, truncated: data.length > data.text.length };
+  if (asked.length > 0) {
+    message.questions = asked.map((question) => question.text.slice(0, QUESTION_TEXT));
+  }
+  addDeveloperMessages(session, [message]);
+};
+var addDeveloperAnswers = (session, event) => {
+  const answers = event.data.answers;
+  if (event.agentId || event.data.tool !== "AskUserQuestion" || !answers) {
+    return;
+  }
+  const added = answers.map((item2, index) => {
+    const truncated = item2.answer.length >= ANSWER_TEXT_CAP || (item2.notes?.length ?? 0) >= ANSWER_TEXT_CAP;
+    const message = { id: `${event.id}-${index + 1}`, sessionId: event.sessionId, at: event.at, kind: "answer", text: item2.answer, truncated, questions: [item2.question] };
+    return item2.notes ? { ...message, notes: item2.notes } : message;
+  });
+  addDeveloperMessages(session, added);
+};
+
+// src/model/reports.ts
+var VERDICT_LINE = /Verdict:\s*(APPROVE|WARNING|BLOCK|GAPS|PASS)/i;
+var reviewerVerdict = (agent) => {
+  const report = agent.report;
+  if (!report) {
+    return "failed";
+  }
+  if (report.block) {
+    return report.block.followups.some((item2) => item2.type === "fix") ? "changes" : "approved";
+  }
+  if (agent.role === "conventions-checker") {
+    return report.text.includes("No convention findings.") ? "approved" : "changes";
+  }
+  const verdict = VERDICT_LINE.exec(report.text)?.[1]?.toUpperCase();
+  if (verdict === "WARNING" || verdict === "BLOCK" || verdict === "GAPS") {
+    return "changes";
+  }
+  return verdict ? "approved" : "done";
+};
+var setReport = (agent, text2, via, at) => {
+  const parsed = parseReportBlock(text2);
+  const report = { text: text2, via, at };
+  if (parsed && isBlockError(parsed)) {
+    report.blockError = parsed.blockError;
+  } else if (parsed) {
+    report.block = parsed;
+  }
+  agent.report = report;
+};
+var fixFollowups = (agent) => agent.report?.block?.followups.filter((item2) => item2.type === "fix").length ?? 0;
+var finalizeReviewer = (run, agent, at) => {
+  const verdict = reviewerVerdict(agent);
+  agent.state = verdict;
+  const reviewer = run.reviewers.find((item2) => item2.id === agent.reviewerId);
+  if (reviewer && reviewer.agentId === agent.id) {
+    reviewer.state = verdict;
+  }
+  if (reviewer) {
+    const rounds = Object.values(run.agents).filter((item2) => item2.reviewerId === reviewer.id && item2.state !== "running");
+    reviewer.fixCount = rounds.reduce((sum2, item2) => sum2 + fixFollowups(item2), 0);
+  }
+  for (const item2 of run.fixes) {
+    if (item2.reReview?.agentId === agent.id && ACTIVE_STATES.has(item2.reReview.state)) {
+      item2.reReview.state = verdict;
+    }
+  }
+  checkReview(run, at);
+};
+var finalizeWorker = (run, agent, at, config) => {
+  const hasReport = agent.report !== void 0 && agent.report.text.trim() !== "";
+  const fix = agentFix(run, agent.id);
+  if (fix) {
+    fix.state = hasReport ? "done" : "failed";
+    agent.state = fix.state;
+    checkFix(run, at);
+    return;
+  }
+  if (agent.stage === "implement") {
+    if (agent.state !== "handed") {
+      agent.state = hasReport ? atBudget(agent) ? "handed" : "done" : "failed";
+    }
+    const stream = run.streams.find((item2) => item2.id === agent.streamId);
+    if (stream && stream.agentIds[stream.agentIds.length - 1] === agent.id) {
+      stream.state = agent.state;
+    }
+    checkImplement(run, at);
+    return;
+  }
+  agent.state = hasReport ? "done" : "failed";
+  if (agent.stage === "pr" && run.pr) {
+    setStage(run, "pr", "done", at);
+  }
+  const docsAgent2 = config.docs.roles.includes(agent.role) || agent.recent.some((call) => config.docs.tools.includes(call.tool));
+  if (docsAgent2 && ACTIVE_STATES.has(run.stages.docs.state) && run.gates.docs.state !== "waiting") {
+    setStage(run, "docs", "done", at);
+  }
+};
+var finalLogLine = (run, agent) => {
+  const fix = agentFix(run, agent.id);
+  const failed = agent.state === "failed";
+  if (fix) {
+    return { text: `fix for ${fix.reviewerId}: ${fix.state}`, tone: failed ? "failed" : "normal" };
+  }
+  if (agent.reviewerId) {
+    const text2 = agent.state === "changes" ? "changes requested" : agent.state;
+    return { text: text2, tone: agent.state === "changes" || failed ? "warn" : "done" };
+  }
+  if (agent.stage === "implement") {
+    const text2 = agent.state === "handed" ? `handed back at ${agent.budget.toolCalls.used} calls` : agent.state;
+    return { text: text2, tone: failed ? "failed" : "normal" };
+  }
+  const summary = agent.state === "done" && agent.report ? reportSummary(agent.report.text) : "";
+  return { text: summary ? `done: ${summary}` : agent.state, tone: failed ? "failed" : "normal" };
+};
+var settleNodes = (run, agent, line, config) => {
+  const { at } = line;
+  const ended = agent.endedAt !== void 0 && agent.state !== "running";
+  if (ended && !agent.report) {
+    return false;
+  }
+  const before2 = agent.state;
+  agent.endedAt = agent.endedAt ?? at;
+  agent.budget.toolCallsAtFirstStop = agent.budget.toolCallsAtFirstStop ?? agent.budget.toolCalls.used;
+  agent.budget.commandsAtFirstStop = agent.budget.commandsAtFirstStop ?? { ...agent.budget.verifyRounds.commands };
+  delete agent.now;
+  delete agent.staleSince;
+  if (agent.reviewerId) {
+    finalizeReviewer(run, agent, at);
+  } else {
+    finalizeWorker(run, agent, at, config);
+  }
+  if (!ended || agent.state !== before2) {
+    const final = finalLogLine(run, agent);
+    logRun(run, line, final.text, final.tone, agent.id);
+  }
+  return true;
+};
+var copyRuns = (state, home, agentId) => {
+  const runs = Object.values(state.board.runs);
+  return runs.filter((run) => run !== home && Object.hasOwn(run.agents, agentId));
+};
+var endCopies = (state, home, agent, line, config) => {
+  for (const run of copyRuns(state, home, agent.id)) {
+    const copy = run.agents[agent.id];
+    if (agent.report) {
+      copy.report = structuredClone(agent.report);
+    }
+    closePermissions(run, copy, line, "unanswered");
+    settleNodes(run, copy, line, config);
+  }
+};
+var resumeCopies = (state, home, agentId, line, config) => {
+  for (const run of copyRuns(state, home, agentId)) {
+    const copy = run.agents[agentId];
+    copy.state = "running";
+    copy.resumedAt = line.at;
+    delete copy.endedAt;
+    resumeRoleStage(run, copy, line, config, state.index.agentSessions);
+  }
+};
+var changedCopyRuns = (state, event, run) => {
+  let agentId;
+  if (event.event === "agent.stop") {
+    agentId = event.agentId;
+  } else if (event.event === "agent.start" && run && event.agentId && ownValue(run.agents, event.agentId)?.resumedAt === event.at) {
+    agentId = event.agentId;
+  } else if (event.event === "prompt" && event.data.kind === "task-notification") {
+    agentId = event.data.taskId;
+  } else if (event.event === "tool.fail" && run) {
+    const toolUseId = event.data.toolUseId;
+    agentId = Object.values(run.agents).find((agent) => agent.spawnToolUseId === toolUseId)?.id;
+  }
+  return agentId && run ? copyRuns(state, run, agentId) : [];
+};
+var reportOfLeg = (agent) => {
+  const reportAt = agent.report?.at;
+  return agent.resumedAt !== void 0 && reportAt !== void 0 && time(reportAt) >= time(agent.resumedAt);
+};
+var finalizeAgent = (run, agent, line, config) => {
+  if (!settleNodes(run, agent, line, config)) {
+    return;
+  }
+  const { at, sessionId } = line;
+  const leg = reportOfLeg(agent) ? agent.resumedAt : void 0;
+  const earlier = (itemAt) => leg !== void 0 && time(itemAt) < time(leg);
+  if (leg !== void 0) {
+    run.followups = run.followups.filter((item2) => item2.origin.agentId !== agent.id || !earlier(item2.at));
+  }
+  const block = agent.report?.block;
+  if (!block) {
+    return;
+  }
+  block.followups.forEach((item2, index) => {
+    const id = `f-${agent.id}-${index + 1}`;
+    if (run.followups.some((existing) => existing.id === id)) {
+      return;
+    }
+    const followup = { id, type: item2.type, text: item2.text, origin: { agentId: agent.id, role: agent.role }, at };
+    if (item2.file) {
+      followup.file = item2.file;
+    }
+    if (item2.category !== void 0) {
+      followup.category = item2.category;
+    }
+    run.followups.push(followup);
+  });
+  block.questions.forEach((item2, index) => {
+    const source = { agentId: agent.id, role: agent.role };
+    const node = agentNode(run, agent);
+    const question = { id: `q-${agent.id}-${index + 1}`, text: item2.text, blocking: item2.blocking, options: item2.options ?? [], origin: "report", source, node, sessionId, createdAt: at };
+    const asked = run.questions.find((existing) => existing.id === question.id && earlier(existing.createdAt));
+    if (asked) {
+      reaskQuestion(run, asked, question);
+    } else {
+      addQuestion(run, question);
+    }
+  });
+};
+var answeredByPrompt = (state, question, prompt) => {
+  const dialog = question.origin === "permission" || question.origin === "elicitation";
+  const answerable = question.state === "open" && question.blocking && question.audience === "user";
+  const asker = question.sessionId ? state.index.sessions[question.sessionId] : void 0;
+  const own = !question.sessionId || question.sessionId === prompt.sessionId || asker?.endedAt !== void 0;
+  return answerable && !dialog && own && time(question.createdAt) <= time(prompt.at);
+};
+var onPrompt = (state, event, config, answered) => {
+  const data = event.data;
+  const session = ensureSession(state, event);
+  if (data.kind === "task-notification") {
+    noteReport(session, data.taskId);
+    const runId = state.index.agentRuns[data.taskId];
+    const run2 = runId ? state.board.runs[runId] : void 0;
+    const agent = run2?.agents[data.taskId];
+    if (!run2 || !agent) {
+      return void 0;
+    }
+    if (!agent.report && data.result) {
+      setReport(agent, data.result, "task-notification", event.at);
+    }
+    if (data.status !== "completed" && agent.state === "running") {
+      agent.state = "failed";
+      logRun(run2, event, data.status, "failed", agent.id);
+    }
+    startRoleStageAtEnd(state, run2, agent, event, config);
+    finalizeAgent(run2, agent, event, config);
+    endCopies(state, run2, agent, event, config);
+    endProgress(state, agent.id);
+    return run2;
+  }
+  if (data.kind === "handback") {
+    noteReport(session, data.from ?? "");
+    return existingHomeRun(state, session);
+  }
+  answered.push(...handleHandbacks(state, session, event));
+  const run = homeRun(state, event, config);
+  adoptPrompt(run, { at: event.at, text: data.text.slice(0, PROMPT_LINE_CHARS), keys: data.keys }, config);
+  const closed = [];
+  for (const other of session.runIds.map((id) => state.board.runs[id])) {
+    const open2 = (other?.questions ?? []).filter((question) => answeredByPrompt(state, question, event));
+    for (const question of open2) {
+      closeQuestion(other, question, "answered", event, "terminal");
+    }
+    closed.push(...open2);
+    if (open2.length > 0 && other !== run) {
+      answered.push(other);
+    }
+  }
+  addDeveloperPrompt(session, event, closed);
+  return run;
+};
+var reportBeforeResume = (agent, at) => {
+  const resumedLeg = agent.resumedAt !== void 0 && time(at) >= time(agent.resumedAt);
+  return resumedLeg && !reportOfLeg(agent);
+};
+var onAgentStop = (state, event, config) => {
+  const agentId = event.agentId;
+  const runId = agentId ? state.index.agentRuns[agentId] : void 0;
+  const run = runId ? state.board.runs[runId] : void 0;
+  if (!agentId) {
+    return hookRun(state, event, config);
+  }
+  if (!run) {
+    state.index.pendingStops[agentId] = { ...event, atMs: time(event.at) };
+    return void 0;
+  }
+  const agent = ensureAgent(run, agentId, event, config);
+  if (event.data.transcriptPath) {
+    agent.transcriptPath = event.data.transcriptPath;
+  }
+  const handback = copyRuns(state, run, agentId).map((other) => other.agents[agentId].report).find((report) => report?.via === "handback");
+  if (!agent.report && handback) {
+    agent.report = structuredClone(handback);
+  }
+  if ((!agent.report || reportBeforeResume(agent, event.at)) && event.data.lastMessage.trim() !== "") {
+    setReport(agent, event.data.lastMessage, "stop", event.at);
+  }
+  closePermissions(run, agent, event, "unanswered");
+  startRoleStageAtEnd(state, run, agent, event, config);
+  finalizeAgent(run, agent, event, config);
+  endCopies(state, run, agent, event, config);
+  endProgress(state, agentId);
+  return run;
+};
+
 // src/model/views.ts
 var isVisible = (run, config) => {
   const subagents = Object.keys(run.agents).some((key) => key !== "main");
@@ -5743,6 +6119,37 @@ var ownFixes = (ctx, runs) => {
   }
   return [...fixes.values()];
 };
+var lastCallAt = (copy) => copy.now?.startedAt ?? copy.recent.at(-1)?.startedAt;
+var inLeg = (copy, legAt) => {
+  const last = lastCallAt(copy) ?? copy.startedAt;
+  return Math.max(time(copy.startedAt), time(last)) >= time(legAt);
+};
+var currentLegRuns = (ctx, agentId, legAt) => {
+  const working = ctx.runIds.filter((runId) => {
+    const run = ownValue(ctx.state.board.runs, runId);
+    const copy = run === void 0 ? void 0 : ownValue(run.agents, agentId);
+    return copy !== void 0 && inLeg(copy, legAt);
+  });
+  if (working.length > 0) {
+    return working;
+  }
+  const home = ownValue(ctx.state.index.agentRuns, agentId);
+  return home === void 0 ? [] : [home];
+};
+var reviewerNode = (ctx, runs, copy) => {
+  const merged = ownValue(ctx.agents, copy.id);
+  const node = agentNode2(copy, merged);
+  const legAt = (merged ?? copy).resumedAt;
+  if (legAt === void 0 || !ACTIVE_STATES.has(node.state) || inLeg(copy, legAt)) {
+    return node;
+  }
+  const current = currentLegRuns(ctx, copy.id, legAt);
+  const inRow = (runId) => runs.some((run) => run.id === runId);
+  if (current.length > 0 && !current.some(inRow)) {
+    node.state = reviewerVerdict(copy);
+  }
+  return node;
+};
 var rowReviewers = (ctx, runs, fixes) => {
   const seen = /* @__PURE__ */ new Map();
   for (const agent of runs.flatMap((run) => Object.values(run.agents))) {
@@ -5754,7 +6161,7 @@ var rowReviewers = (ctx, runs, fixes) => {
   return all.filter(({ agent }) => ownAgent2(ctx, agent.id)).map((entry) => {
     const round4 = all.filter((other) => other.reviewerId === entry.reviewerId).indexOf(entry) + 1;
     const afterFix = fixes.filter((fix) => fix.reReview?.agentId === entry.agent.id).at(-1)?.id;
-    return { ...agentNode2(entry.agent, ctx.agents[entry.agent.id]), reviewerId: entry.reviewerId, round: round4, ...afterFix === void 0 ? {} : { afterFix } };
+    return { ...reviewerNode(ctx, runs, entry.agent), reviewerId: entry.reviewerId, round: round4, ...afterFix === void 0 ? {} : { afterFix } };
   });
 };
 var answeredReviewer = (fix, reviewers) => {
@@ -6325,7 +6732,7 @@ var sessionOrder = (state) => {
   const shown = Object.entries(state.index.sessions).filter(([, session]) => isShown(session));
   return shown.sort(([aId, a], [bId, b]) => activeAt(b) - activeAt(a) || compareText(aId, bId)).map(([id]) => id);
 };
-var kindOf = (session, rows) => {
+var kindOf2 = (session, rows) => {
   const mainEdits = (session.main?.filesChanged.length ?? 0) > 0;
   const card = session.agentIds.length > 0 || mainEdits || rows.some((row2) => row2.pr?.pr !== void 0);
   return card ? "card" : "conversation";
@@ -6645,7 +7052,7 @@ var projectSession = (state, sessionId, config) => {
   const startedAt = session.prompts[0]?.at ?? session.startedAt;
   const model = session.model ?? session.main?.model;
   const finishedAt = finishedAtOf(session.endedAt, rows);
-  const kind = kindOf(session, rows);
+  const kind = kindOf2(session, rows);
   const key = sessionKey(state, sessionId, config);
   const title = sessionTitle(state, sessionId, config);
   const continues = continuesLink(state, sessionId, config);
@@ -6950,6 +7357,34 @@ var moveSeriesTokens = (series, from, to, count2) => {
     delete series.byStage[from];
   }
 };
+var bucketHolding = (points, at, stage, tokens2) => {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const item2 = points[index];
+    if (item2.at === at && item2.stage === stage && item2.tokens >= tokens2) {
+      return index;
+    }
+  }
+  return -1;
+};
+var movePoint = (points, at, from, to, share2) => {
+  const source = bucketHolding(points, at, from, share2.tokens);
+  if (source === -1) {
+    return;
+  }
+  const bucket = points[source];
+  bucket.tokens -= share2.tokens;
+  bucket.usd -= share2.usd;
+  const target = points.find((item2) => item2.at === at && item2.stage === to);
+  if (target) {
+    target.tokens += share2.tokens;
+    target.usd += share2.usd;
+  } else {
+    points.splice(source + 1, 0, { at, stage: to, ...share2 });
+  }
+  if (bucket.tokens === 0) {
+    points.splice(source, 1);
+  }
+};
 var recountWithdrawn = (state, run, agentId, sessionId, config) => {
   const agent = ownValue(run.agents, agentId);
   const stage = agent ? tokenStage(state, run, agent, sessionId, config) : void 0;
@@ -6960,11 +7395,14 @@ var recountWithdrawn = (state, run, agentId, sessionId, config) => {
     if (entry.runId !== run.id || entry.agentKey !== agentId || entry.stage !== "fix") {
       continue;
     }
+    const share2 = { agentId, tokens: processedTokens(entry.tokens), usd: entry.tokens.usd };
     moveSeriesTokens(run.tokens, "fix", stage, entry.tokens);
+    movePoint(run.tokens.points, entry.pointAt, "fix", stage, share2);
     entry.stage = stage;
     const session = entry.sessionId === void 0 ? void 0 : recordOf(state, entry.sessionId);
     if (session && entry.sessionStage === "fix") {
       moveSeriesTokens(session.tokens, "fix", stage, entry.tokens);
+      movePoint(session.tokens.points, entry.pointAt, "fix", stage, share2);
       entry.sessionStage = stage;
     }
   }
@@ -6976,8 +7414,9 @@ var noteContext = (agent, data, config) => {
 };
 var MINUTE_MS = 60 * 1e3;
 var BUCKET_LOOKBACK = 30;
+var pointMinute = (at) => new Date(Math.floor(time(at) / MINUTE_MS) * MINUTE_MS).toISOString();
 var addPoint = (points, point2) => {
-  const at = new Date(Math.floor(time(point2.at) / MINUTE_MS) * MINUTE_MS).toISOString();
+  const at = pointMinute(point2.at);
   const recent = points.slice(-BUCKET_LOOKBACK);
   const bucket = recent.find((item2) => item2.at === at && item2.stage === point2.stage);
   if (bucket) {
@@ -7016,9 +7455,10 @@ var onUsage = (state, event, config) => {
   }
   apply(counts, 1);
   const tokens2 = processedTokens(counts) - (previous ? processedTokens(previous.tokens) : 0);
-  addPoint(run.tokens.points, { at: data.at, stage, agentId: agentKey, tokens: tokens2, usd: counts.usd - (previous?.tokens.usd ?? 0) });
+  const pointAt2 = previous?.pointAt ?? pointMinute(data.at);
+  addPoint(run.tokens.points, { at: pointAt2, stage, agentId: agentKey, tokens: tokens2, usd: counts.usd - (previous?.tokens.usd ?? 0) });
   const counted = addSessionTokens(state, event, previous, counts, stage, config);
-  const entry = { runId: run.id, agentKey, stage, tokens: counts, at: event.at, atMs: time(event.at) };
+  const entry = { runId: run.id, agentKey, stage, tokens: counts, pointAt: pointAt2, at: event.at, atMs: time(event.at) };
   state.index.requests[data.requestId] = counted ? { ...entry, ...counted } : entry;
   if (!agent.model || isModelAlias(agent.model)) {
     adoptModel(run, agent, data.model);
@@ -7053,7 +7493,8 @@ var addSessionTokens = (state, event, previous, counts, stage, config) => {
   onOverheadRequest(session, event, previous?.sessionStage === void 0);
   const recounted = before2 === session ? previous : void 0;
   const tokens2 = processedTokens(counts) - (recounted ? processedTokens(recounted.tokens) : 0);
-  addPoint(session.tokens.points, { at: data.at, stage: key, agentId: event.agentId ?? "main", tokens: tokens2, usd: counts.usd - (recounted?.tokens.usd ?? 0) });
+  const pointAt2 = previous?.pointAt ?? pointMinute(data.at);
+  addPoint(session.tokens.points, { at: pointAt2, stage: key, agentId: event.agentId ?? "main", tokens: tokens2, usd: counts.usd - (recounted?.tokens.usd ?? 0) });
   if (!own) {
     return { sessionId, sessionStage: key };
   }
@@ -7400,376 +7841,6 @@ var onQuestion = (state, event, config, touched = []) => {
     touched.push(relayed.run);
   }
   addQuestion(run, data.context ? { ...question, context: data.context } : question);
-  return run;
-};
-
-// src/model/messages.ts
-var QUESTION_TEXT = 300;
-var isMarkerOrAskTool = (question) => question.origin === "marker" || question.origin === "ask-tool";
-var isOpenMainAsk = (question) => {
-  const own = question.state === "open" && question.audience === "user" && question.source.agentId === "main";
-  return isMarkerOrAskTool(question) && own;
-};
-var within = (at, from, to) => at !== void 0 && time(at) >= from && time(at) <= to;
-var sessionRuns2 = (state, session) => session.runIds.map((id) => state.board.runs[id]).filter((run) => run !== void 0);
-var kindOf2 = (asks, planned) => {
-  if (asks) {
-    return "ask";
-  }
-  return planned ? "plan" : "update";
-};
-var byTime = (a, b) => time(a.at) - time(b.at) || Number(a.id > b.id) - Number(a.id < b.id);
-var addSessionMessage = (session, runs, message, from, to) => {
-  const own = (sessionId) => sessionId === message.sessionId;
-  const asks = runs.some((item2) => item2.questions.some((question) => own(question.sessionId) && isOpenMainAsk(question) && within(question.createdAt, from, to)));
-  const waits2 = runs.some((item2) => Object.values(item2.gates).some((gate) => own(gate.sessionId) && gate.state === "waiting" && within(gate.waitingSince, from, to)));
-  const planned = session.plans.some((plan) => within(plan.at, from, to));
-  const copy = { ...message, kind: kindOf2(asks || waits2, planned) };
-  const messages = [...session.messages.filter((item2) => item2.id !== copy.id), copy].sort(byTime);
-  session.messages = keepMessages(messages);
-  const dropped = messages.slice(0, messages.length - session.messages.length);
-  const newestDropped = dropped.at(-1);
-  if (newestDropped) {
-    session.developerMessages = (session.developerMessages ?? []).filter((item2) => time(item2.at) > time(newestDropped.at));
-  }
-};
-var addMainMessage = (state, event, run) => {
-  const session = state.index.sessions[event.sessionId];
-  if (event.agentId || !session || event.data.lastMessage.trim() === "") {
-    return;
-  }
-  const home = existingHomeRun(state, session) ?? run;
-  const turnStartedAt = session.turnStartedAt ?? event.at;
-  const from = time(turnStartedAt);
-  const to = time(event.at);
-  const runs = sessionRuns2(state, session);
-  const asks = runs.flatMap((item2) => item2.questions.filter((question) => isOpenMainAsk(question) && within(question.createdAt, from, to)));
-  const waits2 = runs.some((item2) => Object.values(item2.gates).some((gate) => gate.state === "waiting" && within(gate.waitingSince, from, to)));
-  const planned = runs.some((item2) => within(item2.plan?.at, from, to));
-  const kind = kindOf2(waits2 || asks.length > 0, planned);
-  const text2 = event.data.lastMessage;
-  const truncated = event.data.lastMessageTruncated === true;
-  const message = { id: event.id, sessionId: event.sessionId, turnStartedAt, at: event.at, text: text2, truncated, kind };
-  if (session.turnStartedBy !== void 0) {
-    message.startedBy = session.turnStartedBy;
-  }
-  home.messages = keepMessages([...home.messages, message]);
-  addSessionMessage(session, runs, message, from, to);
-  for (const question of asks) {
-    question.messageId = message.id;
-  }
-};
-var addDeveloperMessages = (session, added) => {
-  const ids = new Set(added.map((item2) => item2.id));
-  const kept = (session.developerMessages ?? []).filter((item2) => !ids.has(item2.id));
-  session.developerMessages = keepDeveloperMessages([...kept, ...added]);
-};
-var addDeveloperPrompt = (session, event, answered) => {
-  const data = event.data;
-  if (event.agentId || data.kind !== "user") {
-    return;
-  }
-  const asked = answered.filter(isMarkerOrAskTool).sort((a, b) => time(a.createdAt) - time(b.createdAt));
-  const message = { id: event.id, sessionId: event.sessionId, at: event.at, kind: "prompt", text: data.text, truncated: data.length > data.text.length };
-  if (asked.length > 0) {
-    message.questions = asked.map((question) => question.text.slice(0, QUESTION_TEXT));
-  }
-  addDeveloperMessages(session, [message]);
-};
-var addDeveloperAnswers = (session, event) => {
-  const answers = event.data.answers;
-  if (event.agentId || event.data.tool !== "AskUserQuestion" || !answers) {
-    return;
-  }
-  const added = answers.map((item2, index) => {
-    const truncated = item2.answer.length >= ANSWER_TEXT_CAP || (item2.notes?.length ?? 0) >= ANSWER_TEXT_CAP;
-    const message = { id: `${event.id}-${index + 1}`, sessionId: event.sessionId, at: event.at, kind: "answer", text: item2.answer, truncated, questions: [item2.question] };
-    return item2.notes ? { ...message, notes: item2.notes } : message;
-  });
-  addDeveloperMessages(session, added);
-};
-
-// src/model/reports.ts
-var VERDICT_LINE = /Verdict:\s*(APPROVE|WARNING|BLOCK|GAPS|PASS)/i;
-var reviewerVerdict = (agent) => {
-  const report = agent.report;
-  if (!report) {
-    return "failed";
-  }
-  if (report.block) {
-    return report.block.followups.some((item2) => item2.type === "fix") ? "changes" : "approved";
-  }
-  if (agent.role === "conventions-checker") {
-    return report.text.includes("No convention findings.") ? "approved" : "changes";
-  }
-  const verdict = VERDICT_LINE.exec(report.text)?.[1]?.toUpperCase();
-  if (verdict === "WARNING" || verdict === "BLOCK" || verdict === "GAPS") {
-    return "changes";
-  }
-  return verdict ? "approved" : "done";
-};
-var setReport = (agent, text2, via, at) => {
-  const parsed = parseReportBlock(text2);
-  const report = { text: text2, via, at };
-  if (parsed && isBlockError(parsed)) {
-    report.blockError = parsed.blockError;
-  } else if (parsed) {
-    report.block = parsed;
-  }
-  agent.report = report;
-};
-var fixFollowups = (agent) => agent.report?.block?.followups.filter((item2) => item2.type === "fix").length ?? 0;
-var finalizeReviewer = (run, agent, at) => {
-  const verdict = reviewerVerdict(agent);
-  agent.state = verdict;
-  const reviewer = run.reviewers.find((item2) => item2.id === agent.reviewerId);
-  if (reviewer && reviewer.agentId === agent.id) {
-    reviewer.state = verdict;
-  }
-  if (reviewer) {
-    const rounds = Object.values(run.agents).filter((item2) => item2.reviewerId === reviewer.id && item2.state !== "running");
-    reviewer.fixCount = rounds.reduce((sum2, item2) => sum2 + fixFollowups(item2), 0);
-  }
-  for (const item2 of run.fixes) {
-    if (item2.reReview?.agentId === agent.id && ACTIVE_STATES.has(item2.reReview.state)) {
-      item2.reReview.state = verdict;
-    }
-  }
-  checkReview(run, at);
-};
-var finalizeWorker = (run, agent, at, config) => {
-  const hasReport = agent.report !== void 0 && agent.report.text.trim() !== "";
-  const fix = agentFix(run, agent.id);
-  if (fix) {
-    fix.state = hasReport ? "done" : "failed";
-    agent.state = fix.state;
-    checkFix(run, at);
-    return;
-  }
-  if (agent.stage === "implement") {
-    if (agent.state !== "handed") {
-      agent.state = hasReport ? atBudget(agent) ? "handed" : "done" : "failed";
-    }
-    const stream = run.streams.find((item2) => item2.id === agent.streamId);
-    if (stream && stream.agentIds[stream.agentIds.length - 1] === agent.id) {
-      stream.state = agent.state;
-    }
-    checkImplement(run, at);
-    return;
-  }
-  agent.state = hasReport ? "done" : "failed";
-  if (agent.stage === "pr" && run.pr) {
-    setStage(run, "pr", "done", at);
-  }
-  const docsAgent2 = config.docs.roles.includes(agent.role) || agent.recent.some((call) => config.docs.tools.includes(call.tool));
-  if (docsAgent2 && ACTIVE_STATES.has(run.stages.docs.state) && run.gates.docs.state !== "waiting") {
-    setStage(run, "docs", "done", at);
-  }
-};
-var finalLogLine = (run, agent) => {
-  const fix = agentFix(run, agent.id);
-  const failed = agent.state === "failed";
-  if (fix) {
-    return { text: `fix for ${fix.reviewerId}: ${fix.state}`, tone: failed ? "failed" : "normal" };
-  }
-  if (agent.reviewerId) {
-    const text2 = agent.state === "changes" ? "changes requested" : agent.state;
-    return { text: text2, tone: agent.state === "changes" || failed ? "warn" : "done" };
-  }
-  if (agent.stage === "implement") {
-    const text2 = agent.state === "handed" ? `handed back at ${agent.budget.toolCalls.used} calls` : agent.state;
-    return { text: text2, tone: failed ? "failed" : "normal" };
-  }
-  const summary = agent.state === "done" && agent.report ? reportSummary(agent.report.text) : "";
-  return { text: summary ? `done: ${summary}` : agent.state, tone: failed ? "failed" : "normal" };
-};
-var settleNodes = (run, agent, line, config) => {
-  const { at } = line;
-  const ended = agent.endedAt !== void 0 && agent.state !== "running";
-  if (ended && !agent.report) {
-    return false;
-  }
-  const before2 = agent.state;
-  agent.endedAt = agent.endedAt ?? at;
-  agent.budget.toolCallsAtFirstStop = agent.budget.toolCallsAtFirstStop ?? agent.budget.toolCalls.used;
-  agent.budget.commandsAtFirstStop = agent.budget.commandsAtFirstStop ?? { ...agent.budget.verifyRounds.commands };
-  delete agent.now;
-  delete agent.staleSince;
-  if (agent.reviewerId) {
-    finalizeReviewer(run, agent, at);
-  } else {
-    finalizeWorker(run, agent, at, config);
-  }
-  if (!ended || agent.state !== before2) {
-    const final = finalLogLine(run, agent);
-    logRun(run, line, final.text, final.tone, agent.id);
-  }
-  return true;
-};
-var copyRuns = (state, home, agentId) => {
-  const runs = Object.values(state.board.runs);
-  return runs.filter((run) => run !== home && Object.hasOwn(run.agents, agentId));
-};
-var endCopies = (state, home, agent, line, config) => {
-  for (const run of copyRuns(state, home, agent.id)) {
-    const copy = run.agents[agent.id];
-    if (agent.report) {
-      copy.report = structuredClone(agent.report);
-    }
-    closePermissions(run, copy, line, "unanswered");
-    settleNodes(run, copy, line, config);
-  }
-};
-var resumeCopies = (state, home, agentId, line, config) => {
-  for (const run of copyRuns(state, home, agentId)) {
-    const copy = run.agents[agentId];
-    copy.state = "running";
-    copy.resumedAt = line.at;
-    delete copy.endedAt;
-    resumeRoleStage(run, copy, line, config, state.index.agentSessions);
-  }
-};
-var changedCopyRuns = (state, event, run) => {
-  let agentId;
-  if (event.event === "agent.stop") {
-    agentId = event.agentId;
-  } else if (event.event === "agent.start" && run && event.agentId && ownValue(run.agents, event.agentId)?.resumedAt === event.at) {
-    agentId = event.agentId;
-  } else if (event.event === "prompt" && event.data.kind === "task-notification") {
-    agentId = event.data.taskId;
-  } else if (event.event === "tool.fail" && run) {
-    const toolUseId = event.data.toolUseId;
-    agentId = Object.values(run.agents).find((agent) => agent.spawnToolUseId === toolUseId)?.id;
-  }
-  return agentId && run ? copyRuns(state, run, agentId) : [];
-};
-var reportOfLeg = (agent) => {
-  const reportAt = agent.report?.at;
-  return agent.resumedAt !== void 0 && reportAt !== void 0 && time(reportAt) >= time(agent.resumedAt);
-};
-var finalizeAgent = (run, agent, line, config) => {
-  if (!settleNodes(run, agent, line, config)) {
-    return;
-  }
-  const { at, sessionId } = line;
-  const leg = reportOfLeg(agent) ? agent.resumedAt : void 0;
-  const earlier = (itemAt) => leg !== void 0 && time(itemAt) < time(leg);
-  if (leg !== void 0) {
-    run.followups = run.followups.filter((item2) => item2.origin.agentId !== agent.id || !earlier(item2.at));
-  }
-  const block = agent.report?.block;
-  if (!block) {
-    return;
-  }
-  block.followups.forEach((item2, index) => {
-    const id = `f-${agent.id}-${index + 1}`;
-    if (run.followups.some((existing) => existing.id === id)) {
-      return;
-    }
-    const followup = { id, type: item2.type, text: item2.text, origin: { agentId: agent.id, role: agent.role }, at };
-    if (item2.file) {
-      followup.file = item2.file;
-    }
-    if (item2.category !== void 0) {
-      followup.category = item2.category;
-    }
-    run.followups.push(followup);
-  });
-  block.questions.forEach((item2, index) => {
-    const source = { agentId: agent.id, role: agent.role };
-    const node = agentNode(run, agent);
-    const question = { id: `q-${agent.id}-${index + 1}`, text: item2.text, blocking: item2.blocking, options: item2.options ?? [], origin: "report", source, node, sessionId, createdAt: at };
-    const asked = run.questions.find((existing) => existing.id === question.id && earlier(existing.createdAt));
-    if (asked) {
-      reaskQuestion(run, asked, question);
-    } else {
-      addQuestion(run, question);
-    }
-  });
-};
-var answeredByPrompt = (state, question, prompt) => {
-  const dialog = question.origin === "permission" || question.origin === "elicitation";
-  const answerable = question.state === "open" && question.blocking && question.audience === "user";
-  const asker = question.sessionId ? state.index.sessions[question.sessionId] : void 0;
-  const own = !question.sessionId || question.sessionId === prompt.sessionId || asker?.endedAt !== void 0;
-  return answerable && !dialog && own && time(question.createdAt) <= time(prompt.at);
-};
-var onPrompt = (state, event, config, answered) => {
-  const data = event.data;
-  const session = ensureSession(state, event);
-  if (data.kind === "task-notification") {
-    noteReport(session, data.taskId);
-    const runId = state.index.agentRuns[data.taskId];
-    const run2 = runId ? state.board.runs[runId] : void 0;
-    const agent = run2?.agents[data.taskId];
-    if (!run2 || !agent) {
-      return void 0;
-    }
-    if (!agent.report && data.result) {
-      setReport(agent, data.result, "task-notification", event.at);
-    }
-    if (data.status !== "completed" && agent.state === "running") {
-      agent.state = "failed";
-      logRun(run2, event, data.status, "failed", agent.id);
-    }
-    startRoleStageAtEnd(state, run2, agent, event, config);
-    finalizeAgent(run2, agent, event, config);
-    endCopies(state, run2, agent, event, config);
-    endProgress(state, agent.id);
-    return run2;
-  }
-  if (data.kind === "handback") {
-    noteReport(session, data.from ?? "");
-    return existingHomeRun(state, session);
-  }
-  answered.push(...handleHandbacks(state, session, event));
-  const run = homeRun(state, event, config);
-  adoptPrompt(run, { at: event.at, text: data.text.slice(0, PROMPT_LINE_CHARS), keys: data.keys }, config);
-  const closed = [];
-  for (const other of session.runIds.map((id) => state.board.runs[id])) {
-    const open2 = (other?.questions ?? []).filter((question) => answeredByPrompt(state, question, event));
-    for (const question of open2) {
-      closeQuestion(other, question, "answered", event, "terminal");
-    }
-    closed.push(...open2);
-    if (open2.length > 0 && other !== run) {
-      answered.push(other);
-    }
-  }
-  addDeveloperPrompt(session, event, closed);
-  return run;
-};
-var reportBeforeResume = (agent, at) => {
-  const resumedLeg = agent.resumedAt !== void 0 && time(at) >= time(agent.resumedAt);
-  return resumedLeg && !reportOfLeg(agent);
-};
-var onAgentStop = (state, event, config) => {
-  const agentId = event.agentId;
-  const runId = agentId ? state.index.agentRuns[agentId] : void 0;
-  const run = runId ? state.board.runs[runId] : void 0;
-  if (!agentId) {
-    return hookRun(state, event, config);
-  }
-  if (!run) {
-    state.index.pendingStops[agentId] = { ...event, atMs: time(event.at) };
-    return void 0;
-  }
-  const agent = ensureAgent(run, agentId, event, config);
-  if (event.data.transcriptPath) {
-    agent.transcriptPath = event.data.transcriptPath;
-  }
-  const handback = copyRuns(state, run, agentId).map((other) => other.agents[agentId].report).find((report) => report?.via === "handback");
-  if (!agent.report && handback) {
-    agent.report = structuredClone(handback);
-  }
-  if ((!agent.report || reportBeforeResume(agent, event.at)) && event.data.lastMessage.trim() !== "") {
-    setReport(agent, event.data.lastMessage, "stop", event.at);
-  }
-  closePermissions(run, agent, event, "unanswered");
-  startRoleStageAtEnd(state, run, agent, event, config);
-  finalizeAgent(run, agent, event, config);
-  endCopies(state, run, agent, event, config);
-  endProgress(state, agentId);
   return run;
 };
 
@@ -10157,6 +10228,8 @@ var setupHistoryOf = (sessions) => {
   for (let index = 1; index < known.length - 1; index += 1) {
     const current = known[index].hashes;
     const paths = heldPaths(confirmed, current, known[index + 1].hashes);
+    const added = paths.filter((path) => !confirmed.has(path));
+    const removed = paths.filter((path) => !current.has(path));
     for (const path of paths) {
       const hash = current.get(path);
       if (hash === void 0) {
@@ -10166,15 +10239,15 @@ var setupHistoryOf = (sessions) => {
       }
     }
     if (paths.length > 0) {
-      changed.set(known[index].session, paths);
+      changed.set(known[index].session, { paths, added, removed });
     }
   }
   const changes = [];
   const latest = /* @__PURE__ */ new Map();
   for (const session of ordered) {
-    const paths = changed.get(session);
-    if (paths !== void 0) {
-      changes.push({ session: session.id, startedAt: new Date(session.started).toISOString(), paths });
+    const files = changed.get(session);
+    if (files !== void 0) {
+      changes.push({ session: session.id, startedAt: new Date(session.started).toISOString(), ...files });
     }
     if (changes.length > 0) {
       latest.set(session.id, changes.length - 1);
@@ -10272,7 +10345,7 @@ var NO_EDIT = "no work session edited a file";
 var NO_STOP = "no implement run stopped";
 var NO_STOP_UNDER_BUDGET = "no implement run stopped before its tool-call budget";
 var NO_TEST = "no test command matched verification.kinds";
-var NO_RESEARCH = "no research agent ran (a subagent of stage other, plan roles excluded; roles.<role>.stage and step)";
+var NO_RESEARCH = "no research agent ran (a subagent of stage other, plan and verify roles excluded; roles.<role>.stage and step)";
 var NO_MERGE = "no PR merged";
 var NO_CHECKS = "no check state of a PR is known (the gh poll reads it while a PR is open; a repository without checks has none)";
 var NO_READ_CHARS = "no read of the Explore step returned characters";
@@ -10316,15 +10389,25 @@ var implementRun = (entry) => ({
   start: timeOf3(entry.startedAt),
   testsAtFirstStop: testsAt(entry)
 });
-var isResearch = (entry, planRole) => {
-  const planned = typeof entry.role === "string" && planRole(plainText(entry.role));
-  return entry.stage === "other" && !planned;
+var configEntry = (entry, entryOf3) => typeof entry.role === "string" ? entryOf3(plainText(entry.role)) : void 0;
+var isResearch = (entry, entryOf3) => {
+  const role = configEntry(entry, entryOf3);
+  return entry.stage === "other" && !isPlanRole(role) && !isVerifyRole(role);
 };
-var researchRuns = (entries, planRole) => {
+var isCheck = (entry, entryOf3) => entry.stage === "other" && isVerifyRole(configEntry(entry, entryOf3));
+var readChars = (entries, kind) => {
+  if (entries === void 0) {
+    return void 0;
+  }
+  const chars = entries.filter(kind).map((entry) => countOf(entry.outputChars));
+  const counted = chars.filter(isNumber2);
+  return counted.length < chars.length ? void 0 : counted.reduce((total, value2) => total + value2, 0);
+};
+var researchRuns = (entries, entryOf3) => {
   if (entries === void 0 || !entries.every((entry) => Object.hasOwn(entry, "endedAt"))) {
     return void 0;
   }
-  const research = entries.filter((entry) => isResearch(entry, planRole));
+  const research = entries.filter((entry) => isResearch(entry, entryOf3));
   return research.map((entry) => ({ start: timeOf3(entry.startedAt), end: entry.endedAt === null ? null : timeOf3(entry.endedAt) }));
 };
 var categoriesOf = (value2) => {
@@ -10408,8 +10491,8 @@ var agentReads = (entry) => {
   return whole === null || wholeChars === null || chars === null ? void 0 : { whole, wholeChars, chars, reads: null };
 };
 var isReads = (reads) => reads !== void 0;
-var agentReadsOf = (entries, planRole) => {
-  const research = (entries ?? []).filter((entry) => isResearch(entry, planRole)).map(agentReads);
+var agentReadsOf = (entries, entryOf3) => {
+  const research = (entries ?? []).filter((entry) => isResearch(entry, entryOf3)).map(agentReads);
   const counted = research.filter(isReads);
   return research.length === 0 || counted.length < research.length ? void 0 : pooledReads(counted);
 };
@@ -10467,22 +10550,20 @@ var tokensOf = (metrics) => {
   const plan = byStage === void 0 || !Object.hasOwn(byStage, "plan") ? 0 : countOf(byStage.plan);
   return total === null || plan === null || byStage === void 0 ? void 0 : { plan: Math.min(plan, total), total };
 };
-var planRoleOf = (roles) => (role) => {
-  const entry = ownValue(roles, role) ?? ownValue(roles, "*");
-  return entry?.stage === "other" && entry.step === "plan";
+var isPlanRole = (entry) => entry?.stage === "other" && entry.step === "plan";
+var isVerifyRole = (entry) => entry?.stage === "other" && entry.step === "verify";
+var entryOfRoles = (roles) => (role) => ownValue(roles, role) ?? ownValue(roles, "*");
+var planRolesOf = (entries, entryOf3) => {
+  const roles = (entries ?? []).flatMap((entry) => entry.stage === "other" && typeof entry.role === "string" ? [plainText(entry.role)] : []);
+  return [...new Set(roles.filter((role) => role !== "" && isPlanRole(entryOf3(role))))];
 };
-var otherRoles = (entries, planRole) => {
-  const others = (entries ?? []).filter((entry) => entry.stage === "other").map((entry) => typeof entry.role === "string" ? plainText(entry.role) : "");
-  return { others, plan: [...new Set(others.filter((role) => role !== "" && planRole(role)))] };
-};
-var readSession = (aggregate, finished, planRole) => {
+var readSession = (aggregate, finished, entryOf3) => {
   const main = fieldsOf(aggregate.main);
   const metrics = fieldsOf(aggregate.metrics);
   const roles = entriesOf(metrics.roles);
   const reviews = entriesOf(aggregate.reviews);
   const steps = stepCalls(main.steps);
   const agents = entriesOf(aggregate.agents);
-  const { others, plan } = otherRoles(agents, planRole);
   return {
     id: aggregate.id,
     key: shownText(aggregate.key),
@@ -10501,16 +10582,19 @@ var readSession = (aggregate, finished, planRole) => {
     questions: entriesOf(aggregate.questions)?.map(openTime),
     waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs),
     steps,
-    otherAgent: others.some((role) => role === "" || !planRole(role)),
+    otherAgent: (agents ?? []).some((entry) => isResearch(entry, entryOf3)),
+    verifyAgent: (agents ?? []).some((entry) => isCheck(entry, entryOf3)),
     planMode: main.planMode === true,
-    planRoles: plan,
+    planRoles: planRolesOf(agents, entryOf3),
     tokens: tokensOf(metrics),
     checks: checksOf(metrics),
     tested: ranTest(metrics),
-    research: researchRuns(agents, planRole),
+    research: researchRuns(agents, entryOf3),
     pipelines: countOf(aggregate.pipelines),
-    agentReads: agentReadsOf(agents, planRole),
-    mainReads: mainReadsOf(main, steps, metrics)
+    agentReads: agentReadsOf(agents, entryOf3),
+    mainReads: mainReadsOf(main, steps, metrics),
+    researchChars: readChars(agents, (entry) => isResearch(entry, entryOf3)),
+    checkChars: readChars(agents, (entry) => isCheck(entry, entryOf3))
   };
 };
 var pad2 = (value2) => String(value2).padStart(2, "0");
@@ -10805,8 +10889,9 @@ var mainStepsOf = (window2) => {
   const shares = stepShares(pooledSteps(window2));
   const built = window2.some((session) => (session.builds?.length ?? 0) > 0);
   const explored = window2.some((session) => session.otherAgent);
+  const checked = window2.some((session) => session.verifyAgent);
   const shareOf2 = (step, subagents) => ({ share: shares?.[step] ?? null, subagents });
-  return { explore: shareOf2("explore", explored), implement: shareOf2("implement", built), verify: shareOf2("verify", built) };
+  return { explore: shareOf2("explore", explored), implement: shareOf2("implement", built), verify: shareOf2("verify", built || checked) };
 };
 var planUseOf = (window2) => ({
   mode: window2.some((session) => session.planMode),
@@ -11361,7 +11446,7 @@ var SIGNALS = [
   { id: "cost-per-pr", area: "delivery", of: costPerPr },
   { id: "time-to-pr", area: "delivery", of: timeToPr },
   { id: "cost-per-100-lines", area: "delivery", of: costPer100Lines },
-  { id: "main-reads", area: "explore", of: mainReads },
+  { id: "main-reads", area: "explore", of: mainReads, agentChars: (session) => session.researchChars },
   { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
   { id: "second-implementer", area: "implementers", of: secondImplementer },
   { id: "second-round", area: "review", of: secondRound },
@@ -11370,7 +11455,7 @@ var SIGNALS = [
   { id: "quiet-reviewer", area: "review", of: quietReviewer, off: (guidelines) => guidelines.quietReviewer === null },
   { id: "verify-commands", area: "verification", of: verifyCommands },
   { id: "failed-runs", area: "verification", of: failedRuns },
-  { id: "main-check-output", area: "verification", of: mainCheckOutput },
+  { id: "main-check-output", area: "verification", of: mainCheckOutput, agentChars: (session) => session.checkChars },
   { id: "unchecked-sessions", area: "verification", of: uncheckedSessions },
   { id: "cache-per-output", area: "tokens", of: cachePerOutput },
   { id: "main-peak-context", area: "tokens", of: mainPeakContext },
@@ -11402,7 +11487,7 @@ var oldestOf = (sides) => {
 var outcomesAlone = (signal, read, sides) => {
   return read.map((entry) => signal.of({ window: [entry.session], baseline: [], comparable: false, minimum: sides.minimum, guidelines: sides.guidelines }));
 };
-var pointOf = (entry, outcome, role) => {
+var pointOf = (entry, outcome, role, agentChars) => {
   const session = entry.session.id;
   const line = "lines" in outcome ? outcome.lines.find((found) => found.role === role) : void 0;
   const evidence = line?.window;
@@ -11412,7 +11497,9 @@ var pointOf = (entry, outcome, role) => {
   const share2 = evidence.k !== void 0 && evidence.n > 0 ? evidence.k / evidence.n : null;
   const counted = evidence.k === void 0 ? {} : { k: evidence.k };
   const steps = line?.steps === void 0 ? {} : { steps: line.steps };
-  return { session, value: evidence.value ?? share2, ...counted, n: evidence.n, window: entry.window, ...steps };
+  const chars = agentChars?.(entry.session);
+  const agents = chars === void 0 ? {} : { agentChars: chars };
+  return { session, value: evidence.value ?? share2, ...counted, n: evidence.n, window: entry.window, ...steps, ...agents };
 };
 var signalLine = (area, signal, line, series) => ({
   area,
@@ -11459,7 +11546,7 @@ var reportLines = (sides, read) => {
       }
       const alone = outcome.lines.every((line) => line.series !== void 0) ? [] : outcomesAlone(signal, read, sides);
       for (const line of outcome.lines) {
-        const series = line.series ?? read.map((entry, index) => pointOf(entry, alone[index], line.role));
+        const series = line.series ?? read.map((entry, index) => pointOf(entry, alone[index], line.role, signal.agentChars));
         const insight = signalLine(area, signal.id, line, series);
         (insight.flag === void 0 ? others : flagged).push(insight);
       }
@@ -11472,13 +11559,13 @@ var reportLines = (sides, read) => {
   return [...flagged, ...others];
 };
 var reportSessionId = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID && plainText(id) === id;
-var selectSessions = (aggregates, options, now, planRole) => {
+var selectSessions = (aggregates, options, now, entryOf3) => {
   const at = time(now);
   const today = new Date(at);
   const oldest = localDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
   const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay(new Date(finished)) >= oldest;
   const selected = aggregates.filter((aggregate) => aggregate.work === true && reportSessionId(aggregate.id)).map((aggregate) => ({ aggregate, finished: timeOf3(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
-  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished, planRole));
+  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished, entryOf3));
 };
 var reportSession = (session) => ({
   id: session.id,
@@ -11508,7 +11595,7 @@ var guidelinesOf = (guidelines) => {
   return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache, ...main, ...steps, ...outcomes, wholeReads: wholeReads2 };
 };
 var insightsOf = (aggregates, options, now, roles = {}) => {
-  const sessions = selectSessions(aggregates, options, now, planRoleOf(roles));
+  const sessions = selectSessions(aggregates, options, now, entryOfRoles(roles));
   const window2 = sessions.slice(0, options.window);
   const baseline = sessions.slice(options.window, options.window + options.baseline);
   const minimum = Math.min(options.minBaseline, options.baseline);
@@ -12843,9 +12930,9 @@ var graphLayout = (run, options) => {
       const text2 = stream?.package ?? "main";
       const color = stream ? `package:${stream.package}` : "shared";
       const half = pillWidth(text2) / 2;
-      const reviewerNode = keys.reviewer(fix.reviewerId);
+      const reviewerNode2 = keys.reviewer(fix.reviewerId);
       const reviewerShown = run.reviewers.some((reviewer) => reviewer.id === fix.reviewerId);
-      const origin = reviewerShown ? { key: reviewerNode } : { key: "anchor:merge" };
+      const origin = reviewerShown ? { key: reviewerNode2 } : { key: "anchor:merge" };
       add({ kind: "pill", key: keys.fixPill(key), at: { x: fixStart + 36, y }, text: text2, color, from: origin });
       const mark = markOf(run.agents[fix.agentId]?.model, options);
       const stale = isStaleNode(run, fix.agentId, fix.state);
@@ -12859,7 +12946,7 @@ var graphLayout = (run, options) => {
         const middle = reviewerIndex > 0 && reviewerIndex < run.reviewers.length - 1;
         const side = above ? -1 : 1;
         const start = { key: keys.fix(key), dy: 11 * side };
-        const landing = { key: reviewerNode, dx: (labelEnds.get(fix.reviewerId) ?? 0) - 4, dy: 8 * side };
+        const landing = { key: reviewerNode2, dx: (labelEnds.get(fix.reviewerId) ?? 0) - 4, dy: 8 * side };
         const shape = above ? "arc" : "arc-below";
         const lift = middle ? { lift: MIDDLE_LOOP_LIFT } : {};
         add({ kind: "edge", key: keys.fixLoop(key), a: start, b: landing, shape, ...lift, state: loop, color: "warm" });
@@ -15216,6 +15303,7 @@ var placeSession = (session, options, room) => {
   add({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R, agentId: "main", ...idle, ...slide2("plan", planAt) });
   add({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R + LABEL_GAP), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
   const agentKeys = /* @__PURE__ */ new Map([["main", sessionKeys.plan]]);
+  const reviewerRows = /* @__PURE__ */ new Set();
   const labelledRight = /* @__PURE__ */ new Set();
   if (multi) {
     for (const group of groups2) {
@@ -15440,30 +15528,33 @@ ${FOLD_HINT}` : label };
       const feed = exit;
       row2.reviewers.forEach((reviewer, index) => {
         const ry = y + dys[index];
-        const key = sessionKeys.agent(reviewer.agentId);
+        const token = reviewerRows.has(reviewer.agentId) ? `${branch}:${reviewer.agentId}` : reviewer.agentId;
+        reviewerRows.add(reviewer.agentId);
+        const key = sessionKeys.agent(token);
+        const edgeKey = `edge:agent:${token}`;
         const label = reviewerLabel(reviewer);
         const nodeBase = { ...base, agentId: reviewer.agentId };
         agentKeys.set(reviewer.agentId, key);
-        reviewerAt.set(reviewer.agentId, { key, x: rx });
+        reviewerAt.set(reviewer.agentId, { key, x: rx, edgeKey });
         if (reviewer.afterFix === void 0) {
-          edge(`edge:agent:${reviewer.agentId}`, feed, { key, dx: -SMALL_R }, flowOf(reviewer), "review", "curve", nodeBase);
+          edge(edgeKey, feed, { key, dx: -SMALL_R }, flowOf(reviewer), "review", "curve", nodeBase);
         }
         const nodeAt = { x: rx, y: ry };
         const mark = markOf(reviewer.model, options);
         const enter = slide2("review", { x: rx - 20, y });
         const firstRound = reviewer.afterFix === void 0 ? { fan: branch } : {};
-        const dot = { edges: [`edge:agent:${reviewer.agentId}`], when: "start", color: "review", out: [`edge:agent:${reviewer.agentId}>review`], ...firstRound };
+        const dot = { edges: [edgeKey], when: "start", color: "review", out: [`${edgeKey}>review`], ...firstRound };
         const fixCount = fixCountOf(session, reviewer);
         add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...fixCount, ...nodeBase, ...enter, dot });
         const tone2 = isEnded(reviewer.state) ? "reviewer-dim" : "reviewer";
-        add({ kind: "text", key: `text:agent:${reviewer.agentId}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
+        add({ kind: "text", key: `text:agent:${token}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
         labelledRight.add(key);
         if (isEnded(reviewer.state)) {
           const labelOut = { xKey: key, dx: SMALL_R + LABEL_GAP + 1 + textWidth(label), yKey: key };
           const short = labelWidth - textWidth(label) + (dys[index] === 0 ? 0 : outRank(dys[index]) * LANE_STEP);
           const out = short > 0 ? { shape: "level", extra: { drop: 0, reach: short } } : { shape: "curve", extra: {} };
           const outState = reviewer.state === "changes" ? "loop" : "done";
-          edge(`edge:agent:${reviewer.agentId}>review`, labelOut, { key: reviewKey }, outState, "review", out.shape, { ...nodeBase, ...out.extra });
+          edge(`${edgeKey}>review`, labelOut, { key: reviewKey }, outState, "review", out.shape, { ...nodeBase, ...out.extra });
         }
       });
       if (row2.reviewers.some((reviewer) => isEnded(reviewer.state))) {
@@ -15526,7 +15617,7 @@ ${FOLD_HINT}` : label };
           return;
         }
         const loopBase = { ...base, agentId: reviewer.agentId };
-        const loopKey = `edge:agent:${reviewer.agentId}`;
+        const loopKey = target.edgeKey;
         if (!wrap && arcLoop(plan)) {
           const lift = 24 + 0.12 * Math.abs(fx - target.x);
           edge(loopKey, { key: from.key, dy: -NODE_R }, { key: target.key, dy: -SMALL_R }, "loop", "warm", "arc", { ...loopBase, lift });
@@ -18741,21 +18832,18 @@ var readLine2 = (value2, setup) => {
   const line = typeof value2.role === "string" ? { insight, role: value2.role, verdict } : { insight, verdict };
   return acceptedLine(line, setup);
 };
-var stageOf = (role, setup) => {
+var entryOf2 = (role, setup) => {
   const roles = setup?.roles ?? [];
-  const entry = roles.find((item2) => item2.role === role) ?? roles.find((item2) => item2.role === "*");
-  return entry?.stage ?? "other";
-};
-var isPlanRole = (role, setup) => {
-  const roles = setup?.roles ?? [];
-  const entry = roles.find((item2) => item2.role === role) ?? roles.find((item2) => item2.role === "*");
-  return entry?.stage === "other" && entry.step === "plan";
+  return roles.find((item2) => item2.role === role) ?? roles.find((item2) => item2.role === "*");
 };
 var isMainLine = (line) => line.role === void 0 || line.role === "main";
 var stepOf = (line, setup, planShown) => {
   if (line.insight.signal === "cache-per-output" && !isMainLine(line)) {
-    const role = line.role ?? "";
-    return planShown && isPlanRole(role, setup) ? "plan" : STAGE_STEPS[stageOf(role, setup)];
+    const entry = entryOf2(line.role ?? "", setup);
+    if (isVerifyRole(entry)) {
+      return "verify";
+    }
+    return planShown && isPlanRole(entry) ? "plan" : STAGE_STEPS[entry?.stage ?? "other"];
   }
   if (line.insight.signal === "plan-share" && planShown) {
     return "plan";
@@ -18765,7 +18853,7 @@ var stepOf = (line, setup, planShown) => {
   }
   return AREA_STEPS[line.insight.area];
 };
-var linePhrase = (line, verdict, shortName) => {
+var linePhrase = (id, line, verdict, shortName) => {
   const signal = line.insight.signal;
   if (isInformational(signal)) {
     return NEUTRAL[signal];
@@ -18781,6 +18869,9 @@ var linePhrase = (line, verdict, shortName) => {
     return MAIN_WHOLE_PROBLEM;
   }
   const role = line.role === void 0 ? NO_ROLE : shortName(line.role);
+  if (signal === "cache-per-output" && id === "verify") {
+    return `${role} ${MAIN_CACHE_PROBLEM}`;
+  }
   return problem.replace("<role>", role);
 };
 var stepLineVerdict = (line) => line.verdict === "accepted" ? "ok" : line.verdict;
@@ -18807,7 +18898,7 @@ var stepPhrase = (id, lines, verdict, shortName) => {
   if (first?.verdict === "accepted") {
     return ACCEPTED_PHRASE;
   }
-  return first ? linePhrase(first, verdict, shortName) : "";
+  return first ? linePhrase(id, first, verdict, shortName) : "";
 };
 var modelName = (model) => {
   const family = MODEL_FAMILIES.find((name) => model.toLowerCase().includes(name));
@@ -18856,8 +18947,7 @@ var roleList = (names) => {
   return rest > 0 ? `${shown} +${rest}` : shown;
 };
 var sharedBudget = (roles, setup) => {
-  const entryOf2 = (role) => setup.roles.find((item2) => item2.role === role) ?? setup.roles.find((item2) => item2.role === "*");
-  const budgets = roles.map((role) => entryOf2(role)?.toolCalls);
+  const budgets = roles.map((role) => entryOf2(role, setup)?.toolCalls);
   if (budgets.length === 0 || budgets.some((budget) => budget === void 0)) {
     return void 0;
   }
@@ -18874,12 +18964,19 @@ var budgetText = (roles, setup, turns) => {
   }
   return budget === void 0 ? "" : ` \xB7 ${plural(budget, "call")}`;
 };
+var lineRoles = (lines) => [...new Set(lines.flatMap((line) => line.role ?? []))];
 var listedRoles = (stage, lines, setup) => {
-  const lineRoles = [...new Set(lines.flatMap((line) => line.role ?? []))];
-  if (lineRoles.length > 0 || !setup) {
-    return lineRoles;
+  const named = lineRoles(lines);
+  if (named.length > 0 || !setup) {
+    return named;
   }
-  return setup.roles.filter((item2) => item2.stage === stage && item2.role !== "*" && item2.step !== "plan").map((item2) => item2.role);
+  return setup.roles.filter((item2) => item2.stage === stage && item2.role !== "*" && !isPlanRole(item2) && !isVerifyRole(item2)).map((item2) => item2.role);
+};
+var verifySetup = (lines, source) => {
+  const kinds = source.setup ? source.setup.verification.join(", ") : "";
+  const roles = lineRoles(lines);
+  const listed2 = roles.length > 0 ? `${roleList(roles.map(source.shortName))}${modelText(roles, source)}` : "";
+  return [kinds, listed2].filter((part) => part !== "").join(" \xB7 ");
 };
 var planSetup = (lines, source) => {
   const roles = [.../* @__PURE__ */ new Set([...lines.flatMap((line) => line.role ?? []), ...source.plan.roles])];
@@ -18893,7 +18990,7 @@ var setupLine = (id, lines, source) => {
     return plainSetup(roleModel("main", source) ?? "");
   }
   if (id === "verify") {
-    return plainSetup(setup ? setup.verification.join(", ") : "");
+    return plainSetup(verifySetup(lines, source));
   }
   if (id === "plan") {
     return plainSetup(planSetup(lines, source));
@@ -18922,11 +19019,12 @@ var setupLine = (id, lines, source) => {
   return { text: `${limits} \xB7 ${plural(turns, "turn")}`, title: `${limits} \xB7 at most ${plural(turns, "turn")}` };
 };
 var unbrokenSetup = (text2) => {
-  if (!text2.includes(" \xB7 ")) {
-    return text2;
+  const hyphens = text2.replaceAll("-", "-\u2060");
+  if (!hyphens.includes(" \xB7 ")) {
+    return hyphens;
   }
   const whole = (part) => part.split(", ").map((item2) => item2.replaceAll(" ", "\xA0")).join(", ");
-  return text2.split(" \xB7 ").map(whole).join("\xA0\xB7 ");
+  return hyphens.split(" \xB7 ").map(whole).join("\xA0\xB7 ");
 };
 var implementBudget = (lines, setup) => {
   const budget = setup ? sharedBudget(listedRoles("implement", lines, setup), setup) : void 0;
@@ -19088,6 +19186,10 @@ var cacheChange = (step, role) => {
     const line = `Write the diff to a file once and give ${role} its path and the changed files; it reads those, not the whole repository.`;
     return { fix: `Pass the diff to ${role} as a file.`, lines: [line] };
   }
+  if (step === "verify") {
+    const line = `${role} runs each check with its shortest output and reports only the failing lines with file and line.`;
+    return { fix: `Have ${role} return only the failures.`, lines: [line] };
+  }
   return { fix: `Name the files ${role} needs in its brief.`, lines: [`A brief for ${role} names the files it needs by path and line range.`] };
 };
 var budgetLine = (budget) => {
@@ -19096,25 +19198,54 @@ var budgetLine = (budget) => {
   }
   return `A brief that needs more than about ${plural(budget, "tool call")} is two briefs.`;
 };
-var quietChange = (role, window2) => {
+var namedLines = (setup, role) => setup === null ? { lines: [] } : ownValue(setup.claudeMd, role) ?? { lines: [] };
+var lineNumbers = (entries) => {
+  const numbers = andList(entries.map((entry) => String(entry.line)));
+  return entries.length === 1 ? `line ${numbers}` : `lines ${numbers}`;
+};
+var furtherLines = (role, named) => named.more === true ? `${CHANGE_FILE} names ${role} on further lines too.` : "";
+var sharedLines = (shared) => {
+  if (shared.length === 0) {
+    return "";
+  }
+  if (shared.length > 1) {
+    return `${CHANGE_FILE} ${lineNumbers(shared)} also name other roles: edit them by hand.`;
+  }
+  return `${CHANGE_FILE} ${lineNumbers(shared)} also names ${andList(shared[0].also ?? [])}: edit it by hand.`;
+};
+var sentences = (...parts) => parts.filter((part) => part !== "").join(" ");
+var quietChange = (role, window2, setup) => {
   if (window2?.k === 0) {
-    return { fix: `Stop running ${role} by default.`, lines: [`Run ${role} only when I ask for it.`] };
+    const named = namedLines(setup, role);
+    const own = named.lines.filter((entry) => entry.also === void 0 || entry.also.length === 0);
+    const shared = named.lines.filter((entry) => !own.includes(entry));
+    const fix = sentences(`Stop running ${role} by default.`, sharedLines(shared), furtherLines(role, named));
+    return { fix, removed: own.map((entry) => entry.text), lines: [`Run ${role} only when I ask for it.`] };
   }
   const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
   return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
 };
+var alreadyNamed = (name, named) => {
+  const verb = named.lines.length === 1 ? "names" : "name";
+  return sentences(`${CHANGE_FILE} ${lineNumbers(named.lines)} already ${verb} ${name}.`, furtherLines(name, named));
+};
 var newAgent2 = (setup, agent) => {
   const file = `.claude/agents/${agent.name}.md`;
+  const named = namedLines(setup, agent.name);
   if (setup?.agents.some((entry) => entry.name === agent.name || entry.file === file) === true) {
-    return { fix: agent.runFix, lines: [agent.routing] };
+    const fix = named.lines.length === 0 ? agent.runFix : `${agent.runFix} ${alreadyNamed(agent.name, named)}`;
+    return { fix, lines: [agent.routing] };
+  }
+  if (named.lines.length > 0) {
+    return { fix: `${agent.addFix} ${alreadyNamed(agent.name, named)}`, file, isNew: true, lines: [...agent.lines] };
   }
   const also = { file: CHANGE_FILE, removed: [], lines: [agent.routing] };
   return { fix: agent.addFix, file, isNew: true, lines: [...agent.lines], also };
 };
 var reviewAgents = (setup) => {
   const roles = setup?.roles ?? [];
-  const stageOf2 = (name) => (roles.find((entry) => entry.role === name) ?? roles.find((entry) => entry.role === "*"))?.stage;
-  return (setup?.agents ?? []).filter((agent) => stageOf2(agent.name) === "review").map((agent) => agent.name);
+  const stageOf = (name) => (roles.find((entry) => entry.role === name) ?? roles.find((entry) => entry.role === "*"))?.stage;
+  return (setup?.agents ?? []).filter((agent) => stageOf(agent.name) === "review").map((agent) => agent.name);
 };
 var CHECK_RUNNER = "check-runner";
 var CHECK_RUNNER_FILE = [
@@ -19186,7 +19317,8 @@ var wholeReadsChange = (role, setup) => {
     const line2 = "Search for the lines you need first, and read a file by range when you know where to look.";
     return { fix: "Read files by range instead of whole files.", lines: [line2], effect: FEWER_CHARS };
   }
-  const research = (setup?.roles ?? []).filter((entry) => entry.stage === "other" && entry.role !== "*" && entry.step !== "plan").map((entry) => entry.role);
+  const isResearch2 = (entry) => entry.stage === "other" && entry.role !== "*" && !isPlanRole(entry) && !isVerifyRole(entry);
+  const research = (setup?.roles ?? []).filter(isResearch2).map((entry) => entry.role);
   const agents = research.length === 0 || research.includes("Explore") ? "the Explore agent" : andList(research);
   const line = `Ask ${agents} for file paths and line ranges, and read a file by range when you know where to look.`;
   return { fix: "Ask for paths and line ranges instead of whole files.", lines: [line], effect: FEWER_CHARS };
@@ -19214,7 +19346,7 @@ var changeOf = (source, role) => {
     case "second-round":
       return { fix: "Run the checks before the hand-back.", lines: [checksLine(source.setup)] };
     case "quiet-reviewer":
-      return role === void 0 ? void 0 : quietChange(role, source.window);
+      return role === void 0 ? void 0 : quietChange(role, source.window, source.setup);
     case "question-open-time":
       return QUICK_ANSWERS;
     case "untested-first-stop":
@@ -19287,143 +19419,23 @@ var suggestedChange = (source) => {
   if (change === void 0) {
     return void 0;
   }
-  const { file = CHANGE_FILE, effect, ...parts } = change;
-  return { ...parts, effect: effect ?? effectOf(source, verdict), file, removed: [], lines: [...change.lines] };
-};
-
-// src/ui/health-prompt.ts
-var INTRO = "Below is a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the next changes to the workflow setup that its numbers support.";
-var FINDING_INTRO = "Below is one finding of a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the change to the workflow setup that its numbers support.";
-var READING = [
-  "## How to read the report",
-  "",
-  `- A work session is a finished Claude Code session with at least ${WORK_SESSION_CALLS} main-thread tool calls. "Now" counts the latest work sessions (the window), "before" the work sessions recorded before them (the baseline).`,
-  "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
-  '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before, or half or more of the fix items about one cause. Working well: neither. Accepted: kept as it is on purpose (`insights.accepted` of nurselog.config.json) until it gets worse than before. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
-  "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
-  "- Each finding names its workflow step (Main thread, Plan, Explore, Implement, Review, Verify, PR and merge, Your answers), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.",
-  "- A suggested change adds lines to a file, replaces a line in it, or creates a file with all its lines added, at times in two files: a line starting with - is removed, one starting with + is added. Its effect is a measured target or a direction, never an estimated saving.",
-  "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
-];
-var TASK = [
-  "## What to do",
-  "",
-  "1. If you can read the repository, first read CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so a change fits what is there. `nurselog insights --json` prints the whole report with the value of each work session.",
-  "2. Suggest at most three changes, the Start here finding first unless the evidence argues against it. For each: the finding it answers with its numbers, why the change helps, the change as a diff of the file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json), and the signal that should move over the next five work sessions, with its direction.",
-  "3. Prefer small changes over a rewrite, so the effect of each can be measured. Say so when a finding rests on few work sessions, and never state a number the report does not give.",
-  "4. Name what works well and should stay as it is.",
-  "5. If nothing is worth changing, say so rather than invent a change."
-];
-var FINDING_TASK = [
-  "## What to do",
-  "",
-  "1. If you can read the repository, first read the files the finding's suggested change goes to, when it has one, then CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so the change fits what is there; a file it creates should not exist yet, so if it does, change that file instead. `nurselog insights --json` prints the whole report with the value of each work session.",
-  "2. Make this one change and no other: the suggested change of the finding below, or one of your own when it has none. Give the finding it answers with its numbers, why the change helps, the change as a diff of each file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json; a new file in full), and the signal that should move over the next five work sessions, with its direction.",
-  "3. Keep the change small, so its effect can be measured. Keep the numbers as the report gives them, say so when the finding rests on few work sessions, and never state a number the report does not give.",
-  "4. If the evidence argues against the change, say so rather than make it."
-];
-var unmeasuredState = (finding) => {
-  if (finding.byMain) {
-    return "by the main thread";
-  }
-  return finding.absent ? "not in this workflow" : "not measured";
-};
-var sentence = (text2) => text2.charAt(0).toUpperCase() + text2.slice(1);
-var DIRECTION_PHRASES = { better: "better since then", worse: "worse since then", "no change yet": "the signal shows no change yet" };
-var changedLine = (finding) => {
-  const change = finding.setupChange;
-  if (change === void 0) {
-    return [];
-  }
-  const compared = change.compared;
-  const sides = compared === void 0 ? "" : `: ${plainText(compared.since)} over ${plainText(compared.over)} against ${plainText(compared.before)}`;
-  const files = change.paths.map(plainText).join(", ");
-  const tail = change.paths.length === 1 ? "The changed file may already hold this change: read it first" : "The changed files may already hold this change: read them first";
-  return [`- Changed ${plainText(change.day)}: ${files}, ${DIRECTION_PHRASES[change.direction]}${sides}. ${tail} and do not make it again.`];
-};
-var ACCEPTED_ASK = "The developer keeps these as they are on purpose; do not suggest a change to them.";
-var fileLines = (change) => {
-  const file = plainText(change.file);
-  let heading2 = `Lines to add to ${file}:`;
-  if (change.isNew === true) {
-    heading2 = `Create ${file} with:`;
-  } else if (change.removed.length > 0) {
-    heading2 = `Lines to change in ${file}:`;
-  }
-  return [heading2, ...change.removed.map((line) => `- ${plainText(line)}`), ...change.lines.map((line) => `+ ${plainText(line)}`)];
-};
-var flaggedLines = (finding, startHere) => {
-  const start = finding.id === startHere ? " (Start here)" : "";
-  const facts = [`Step: ${plainText(finding.stepName)}.`, `Impact: ${finding.impact}.`];
-  if (finding.basis !== void 0) {
-    facts.push(`${sentence(plainText(finding.basis))}.`);
-  }
-  if (finding.accepted !== void 0) {
-    facts.push(`Accepted (${reasonText(finding.accepted)}), but worse than before.`);
-  }
-  const lines = ["", `### ${plainText(finding.headline)}${start}`, facts.join(" "), plainText(finding.line)];
-  const evidence = finding.evidence;
-  if (evidence !== void 0) {
-    const numbers = [evidence.now, evidence.before, evidence.guideline].flatMap((number) => number === void 0 ? [] : [number]);
-    lines.push(...numbers.map((number) => `- ${sentence(plainText(number.label))}: ${plainText(number.text)}`));
-    if (evidence.setup !== "") {
-      lines.push(`- Setup: ${plainText(evidence.setup)}`);
-    }
-  }
-  lines.push(...changedLine(finding));
-  const change = finding.change;
-  if (change !== void 0) {
-    lines.push(`Fix: ${plainText(change.fix)}`, `Effect: ${plainText(change.effect)}`, ...changeFiles(change).flatMap(fileLines));
-  }
-  return lines;
-};
-var quietLine = (finding) => {
-  const head = `- ${plainText(finding.headline)} (${plainText(finding.stepName)})`;
-  if (finding.group === "unmeasured") {
-    return `${head}: ${unmeasuredState(finding)}. ${plainText(finding.line)}`;
-  }
-  if (finding.group === "accepted" && finding.accepted !== void 0) {
-    return `${head}: ${plainText(finding.line)} (accepted: ${reasonText(finding.accepted)})`;
-  }
-  return `${head}: ${plainText(finding.line)}`;
-};
-var flaggedGroup = (group) => group.group === "change" || group.group === "consider";
-var groupHeading = (group) => `## ${plainText(group.label)}`;
-var groupLines = (group, startHere) => {
-  const heading2 = groupHeading(group);
-  if (flaggedGroup(group)) {
-    return ["", heading2, ...group.findings.flatMap((finding) => flaggedLines(finding, startHere))];
-  }
-  const ask = group.group === "accepted" ? ["", ACCEPTED_ASK] : [];
-  return ["", heading2, ...ask, "", ...group.findings.map(quietLine)];
-};
-var reportHead = (report) => {
-  const lines = ["---", "", `# ${plainText(report.title)}`, "", `${sentence(plainText(report.count))}.`];
-  if (report.note !== void 0) {
-    lines.push("", `Note: ${plainText(report.note)}`);
-  }
-  return lines;
-};
-var healthPrompt = (report) => {
-  const lines = [INTRO, "", ...READING, "", ...TASK, "", ...reportHead(report)];
-  lines.push(...report.groups.flatMap((group) => groupLines(group, report.startHere)));
-  const closing = plainText(report.closing);
-  if (closing !== "") {
-    lines.push("", closing);
-  }
-  return lines.join("\n");
-};
-var findingPrompt = (report, findingId2) => {
-  const group = report.groups.find((entry) => flaggedGroup(entry) && entry.findings.some((finding2) => finding2.id === findingId2));
-  const finding = group?.findings.find((entry) => entry.id === findingId2);
-  if (group === void 0 || finding === void 0) {
-    return "";
-  }
-  const lines = [FINDING_INTRO, "", ...READING, "", ...FINDING_TASK, "", ...reportHead(report), "", groupHeading(group), ...flaggedLines(finding, report.startHere)];
-  return lines.join("\n");
+  const { file = CHANGE_FILE, effect, removed = [], ...parts } = change;
+  return { ...parts, effect: effect ?? effectOf(source, verdict), file, removed: [...removed], lines: [...change.lines] };
 };
 
 // src/ui/health-report.ts
+var fileKinds = (files) => {
+  return files.paths.map((path) => {
+    if (files.added.includes(path)) {
+      return { path, kind: "added" };
+    }
+    return { path, kind: files.removed.includes(path) ? "removed" : "changed" };
+  });
+};
+var changedFiles2 = (files, clean = (path) => path) => {
+  const named = fileKinds(files).map(({ path, kind }) => kind === "changed" ? clean(path) : `${clean(path)} (${kind})`);
+  return named.join(", ");
+};
 var PR2 = ["PR", "PRs"];
 var RUN2 = ["run", "runs"];
 var STREAM2 = ["stream", "streams"];
@@ -19623,7 +19635,8 @@ var SIGNALS2 = {
     limit: (limit) => `at most ${characters(limit)} per session`,
     scale: true,
     against: "value",
-    median: true
+    median: true,
+    agents: "research agents"
   },
   "main-check-output": {
     impact: "cost",
@@ -19633,7 +19646,8 @@ var SIGNALS2 = {
     limit: (limit) => `at most ${characters(limit)} per session`,
     scale: true,
     against: "value",
-    median: true
+    median: true,
+    agents: "check agents"
   },
   "unchecked-sessions": {
     impact: "quality",
@@ -19740,6 +19754,7 @@ var formatOf = (insight) => {
   return { ...SIGNALS2[trigger], impact: own.impact, headline: own.headline };
 };
 var MAIN_CACHE2 = ["The main thread re-reads a long context", "The main thread's cache reads stay in range"];
+var VERIFY_CACHE = ["<role> re-reads a long context", "<role>'s cache reads stay in range"];
 var MAIN_WHOLE = ["The main thread reads whole files", "The main thread reads files by range"];
 var NO_ROLE2 = "A role";
 var NO_TITLE = "recorded session";
@@ -19806,7 +19821,8 @@ var readPoints = (series) => {
     const k = finite(item2.k) ? item2.k : void 0;
     const n2 = finite(item2.n) ? item2.n : void 0;
     const setupChange = Number.isSafeInteger(item2.setupChange) && Number(item2.setupChange) >= 0 ? Number(item2.setupChange) : void 0;
-    return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2, steps: readSteps(item2.steps), setupChange }];
+    const agentChars = Number.isSafeInteger(item2.agentChars) && Number(item2.agentChars) >= 0 ? Number(item2.agentChars) : void 0;
+    return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2, steps: readSteps(item2.steps), setupChange, agentChars }];
   });
 };
 var localDay2 = (iso) => {
@@ -19822,7 +19838,8 @@ var readSetupChanges = (value2) => {
     }
     const listed2 = entry.paths;
     const paths = listed2.filter((path) => typeof path === "string" && isSetupPath(path));
-    return paths.length === 0 ? void 0 : { day: localDay2(entry.startedAt), paths };
+    const kind = (list) => Array.isArray(list) ? paths.filter((path) => list.includes(path)) : [];
+    return paths.length === 0 ? void 0 : { day: localDay2(entry.startedAt), paths, added: kind(entry.added), removed: kind(entry.removed) };
   });
 };
 var readMainSteps = (mainSteps) => {
@@ -19897,7 +19914,7 @@ var sparkline = (points, limit, unit, plots, ticks = { marks: [], label: "" }) =
 var mergeRuns = (session, runs) => {
   const k = runs.reduce((total, run) => total + (run.k ?? ((run.number ?? 0) >= 1 ? 1 : 0)), 0);
   const n2 = runs.reduce((total, run) => total + (run.n ?? 1), 0);
-  return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2, steps: void 0, setupChange: runs[0]?.setupChange };
+  return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2, steps: void 0, setupChange: runs[0]?.setupChange, agentChars: void 0 };
 };
 var rowPoints = (points, perRun) => {
   const newestFirst4 = [...points].reverse().filter((point2) => point2.window && point2.number !== null);
@@ -19965,6 +19982,24 @@ var directionOf = (since, before2, worse) => {
   }
   return "no change yet";
 };
+var unbroken = (text2) => text2.replaceAll(" ", NO_BREAK);
+var agentReadsOf2 = (since, before2, format, counted) => {
+  const charsOf = (points) => points.flatMap((point2) => point2.number === null || point2.agentChars === void 0 ? [] : [point2.agentChars]);
+  const sinceChars = charsOf(since);
+  const beforeChars = charsOf(before2);
+  const sinceValue = percentile(sinceChars, 50);
+  const beforeValue = percentile(beforeChars, 50);
+  if (format.agents === void 0 || sinceChars.length < SINCE_POINTS || sinceValue === void 0 || beforeValue === void 0 || sinceValue === 0 && beforeValue === 0) {
+    return void 0;
+  }
+  const sinceText = sideText(format, { n: sinceChars.length, value: sinceValue });
+  const beforeText = sideText(format, { n: beforeChars.length, value: beforeValue });
+  if (sinceText === void 0 || beforeText === void 0) {
+    return void 0;
+  }
+  const over = sinceChars.length < counted ? { over: `${sinceChars.length} of ${plural(counted, "session")}` } : {};
+  return { agents: format.agents, since: sinceText, before: beforeText, ...over };
+};
 var setupEvidence = (points, format, worse, facts, suggested) => {
   const target = targetOf2(suggested);
   const before2 = (index) => (point2) => point2.setupChange === void 0 || point2.setupChange < index;
@@ -19977,7 +20012,7 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   const days = [];
   for (const { change, index } of relevant) {
     const at = points.findIndex(after(index));
-    titles.set(at, [...titles.get(at) ?? [], `Setup changed ${change.day}: ${change.paths.join(", ")}`]);
+    titles.set(at, [...titles.get(at) ?? [], `Setup changed ${change.day}: ${changedFiles2(change)}`]);
     if (!days.includes(change.day)) {
       days.push(change.day);
     }
@@ -19990,7 +20025,8 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   if (suggested === void 0 || latest === void 0) {
     return { marks, label };
   }
-  const chip = { day: latest.change.day, paths: latest.change.paths.filter(target), direction: "no change yet" };
+  const { day, paths, added, removed } = latest.change;
+  const chip = { day, paths: paths.filter(target), added: added.filter(target), removed: removed.filter(target), direction: "no change yet" };
   const sinceSide = sideOf(points.filter(after(latest.index)), format);
   const beforeSide = sideOf(points.filter(before2(latest.index)), format);
   const sinceText = sinceSide === void 0 ? void 0 : sideText(format, sinceSide.evidence);
@@ -20001,7 +20037,15 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   const over = plural(sinceSide.points, format.perRun === true ? "run" : "session");
   chip.direction = sinceText === beforeText ? "no change yet" : directionOf(sinceSide, beforeSide, worse);
   chip.compared = { since: sinceText, before: beforeText, over };
-  return { marks, label, since: `since ${chip.day} (${over}): ${sinceText} \xB7 before: ${beforeText}`, latest: chip };
+  const since = `since ${chip.day} (${over}): ${unbroken(sinceText)} \xB7 before: ${unbroken(beforeText)}`;
+  const reads = agentReadsOf2(points.filter(after(latest.index)), points.filter(before2(latest.index)), format, sinceSide.points);
+  if (reads === void 0) {
+    return { marks, label, since, latest: chip };
+  }
+  chip.agentReads = reads;
+  const count2 = reads.over === void 0 ? "" : ` (${reads.over})`;
+  const agents = `${reads.agents} read${count2}: ${unbroken(reads.since)} \xB7 before: ${unbroken(reads.before)}`;
+  return { marks, label, since, agents, latest: chip };
 };
 var groupOf = (verdict) => verdict === "unused" ? "unmeasured" : verdict;
 var lineText = (insight, role) => {
@@ -20013,7 +20057,7 @@ var lineText = (insight, role) => {
   }
   return bare.charAt(0).toUpperCase() + bare.slice(1);
 };
-var headlineOf = (line) => {
+var headlineOf = (line, step) => {
   const signal = line.insight.signal;
   if (signal === "fix-followups") {
     return line.role === void 0 ? SIGNALS2[signal].headline[0] : `${line.role}: fix follow-ups per run`;
@@ -20027,7 +20071,13 @@ var headlineOf = (line) => {
     return top === void 0 ? problem2 : `Fix items cluster on ${causePhrase(top.category)}`;
   }
   const mainThread = signal === "cache-per-output" && (line.role === void 0 || line.role === "main");
-  const headline = mainThread ? MAIN_CACHE2 : SIGNALS2[signal].headline;
+  const checks = signal === "cache-per-output" && !mainThread && step === "verify";
+  let headline = SIGNALS2[signal].headline;
+  if (mainThread) {
+    headline = MAIN_CACHE2;
+  } else if (checks) {
+    headline = VERIFY_CACHE;
+  }
   const [problem, good] = signal === "whole-reads" && line.role === "main" ? MAIN_WHOLE : headline;
   const role = line.role ?? NO_ROLE2;
   if (signal === "quiet-reviewer" && line.verdict !== "ok" && readEvidence(line.insight.window)?.k === 0) {
@@ -20113,6 +20163,9 @@ var measuredFinding = (line, step, facts, changes, insights) => {
   if (setup.since !== void 0) {
     evidence.since = setup.since;
   }
+  if (setup.agents !== void 0) {
+    evidence.agents = setup.agents;
+  }
   const finding = {
     id: findingId(line),
     step: step.id,
@@ -20121,7 +20174,7 @@ var measuredFinding = (line, step, facts, changes, insights) => {
     absent: false,
     byMain: false,
     impact: format.impact,
-    headline: headlineOf(line),
+    headline: headlineOf(line, step.id),
     line: lineText(insight, line.role),
     evidence,
     sessionValues
@@ -20247,6 +20300,155 @@ var sessionChips = (report, sessionId) => {
   return chips.slice(0, MAX_CHIPS);
 };
 
+// src/ui/health-prompt.ts
+var INTRO = "Below is a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the next changes to the workflow setup that its numbers support.";
+var FINDING_INTRO = "Below is one finding of a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the change to the workflow setup that its numbers support.";
+var STEP_NAMES = STEPS.map((step) => step.name).join(", ");
+var READING = [
+  "## How to read the report",
+  "",
+  `- A work session is a finished Claude Code session with at least ${WORK_SESSION_CALLS} main-thread tool calls. "Now" counts the latest work sessions (the window), "before" the work sessions recorded before them (the baseline).`,
+  "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
+  '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before, or half or more of the fix items about one cause. Working well: neither. Accepted: kept as it is on purpose (`insights.accepted` of nurselog.config.json) until it gets worse than before. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
+  "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
+  `- Each finding names its workflow step (${STEP_NAMES}), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.`,
+  "- A suggested change adds lines to a file, removes or replaces lines in it, or creates a file with all its lines added, at times in two files: a line starting with - is removed, one starting with + is added. Its effect is a measured target or a direction, never an estimated saving.",
+  "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
+];
+var TASK = [
+  "## What to do",
+  "",
+  "1. If you can read the repository, first read CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so a change fits what is there. `nurselog insights --json` prints the whole report with the value of each work session.",
+  "2. Suggest at most three changes, the Start here finding first unless the evidence argues against it. For each: the finding it answers with its numbers, why the change helps, the change as a diff of the file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json), and the signal that should move over the next five work sessions, with its direction.",
+  "3. Prefer small changes over a rewrite, so the effect of each can be measured. Say so when a finding rests on few work sessions, and never state a number the report does not give.",
+  "4. Name what works well and should stay as it is.",
+  "5. If nothing is worth changing, say so rather than invent a change."
+];
+var FINDING_TASK = [
+  "## What to do",
+  "",
+  "1. If you can read the repository, first read the files the finding's suggested change goes to, when it has one, then CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so the change fits what is there; a file it creates should not exist yet, so if it does, change that file instead. `nurselog insights --json` prints the whole report with the value of each work session.",
+  "2. Make this one change and no other: the suggested change of the finding below, or one of your own when it has none. Give the finding it answers with its numbers, why the change helps, the change as a diff of each file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json; a new file in full), and the signal that should move over the next five work sessions, with its direction.",
+  "3. Keep the change small, so its effect can be measured. Keep the numbers as the report gives them, say so when the finding rests on few work sessions, and never state a number the report does not give.",
+  "4. If the evidence argues against the change, say so rather than make it."
+];
+var unmeasuredState = (finding) => {
+  if (finding.byMain) {
+    return "by the main thread";
+  }
+  return finding.absent ? "not in this workflow" : "not measured";
+};
+var sentence = (text2) => text2.charAt(0).toUpperCase() + text2.slice(1);
+var DIRECTION_PHRASES = { better: "better since then", worse: "worse since then", "no change yet": "the signal shows no change yet" };
+var readFirst = (change) => {
+  const kinds = fileKinds(change).map(({ kind }) => kind);
+  const present = kinds.filter((kind) => kind !== "removed");
+  if (present.length === 0) {
+    const removed = kinds.length === 1 ? "The removed file" : "The removed files";
+    return `${removed} may have held this change: read the setup as it is now first and make the change only if the setup lacks it.`;
+  }
+  const named = ["changed", "added"].filter((kind) => present.includes(kind)).join(" and ");
+  const ask = present.length === 1 ? `The ${named} file may already hold this change: read it first` : `The ${named} files may already hold this change: read them first`;
+  return `${ask} and do not make it again.`;
+};
+var changedLine = (finding) => {
+  const change = finding.setupChange;
+  if (change === void 0) {
+    return [];
+  }
+  const compared = change.compared;
+  const sides = compared === void 0 ? "" : `: ${plainText(compared.since)} over ${plainText(compared.over)} against ${plainText(compared.before)}`;
+  const files = changedFiles2(change, plainText);
+  const lines = [`- Changed ${plainText(change.day)}: ${files}, ${DIRECTION_PHRASES[change.direction]}${sides}. ${readFirst(change)}`];
+  const reads = change.agentReads;
+  if (compared !== void 0 && reads !== void 0) {
+    const over = reads.over === void 0 ? "" : ` over ${plainText(reads.over)}`;
+    lines.push(`- ${sentence(plainText(reads.agents))} read ${plainText(reads.since)}${over} since then against ${plainText(reads.before)}.`);
+  }
+  return lines;
+};
+var ACCEPTED_ASK = "The developer keeps these as they are on purpose; do not suggest a change to them.";
+var fileLines = (change) => {
+  const file = plainText(change.file);
+  let heading2 = `Lines to add to ${file}:`;
+  if (change.isNew === true) {
+    heading2 = `Create ${file} with:`;
+  } else if (change.removed.length > 0) {
+    heading2 = `Lines to change in ${file}:`;
+  }
+  return [heading2, ...change.removed.map((line) => `- ${plainText(line)}`), ...change.lines.map((line) => `+ ${plainText(line)}`)];
+};
+var flaggedLines = (finding, startHere) => {
+  const start = finding.id === startHere ? " (Start here)" : "";
+  const facts = [`Step: ${plainText(finding.stepName)}.`, `Impact: ${finding.impact}.`];
+  if (finding.basis !== void 0) {
+    facts.push(`${sentence(plainText(finding.basis))}.`);
+  }
+  if (finding.accepted !== void 0) {
+    facts.push(`Accepted (${reasonText(finding.accepted)}), but worse than before.`);
+  }
+  const lines = ["", `### ${plainText(finding.headline)}${start}`, facts.join(" "), plainText(finding.line)];
+  const evidence = finding.evidence;
+  if (evidence !== void 0) {
+    const numbers = [evidence.now, evidence.before, evidence.guideline].flatMap((number) => number === void 0 ? [] : [number]);
+    lines.push(...numbers.map((number) => `- ${sentence(plainText(number.label))}: ${plainText(number.text)}`));
+    if (evidence.setup !== "") {
+      lines.push(`- Setup: ${plainText(evidence.setup)}`);
+    }
+  }
+  lines.push(...changedLine(finding));
+  const change = finding.change;
+  if (change !== void 0) {
+    lines.push(`Fix: ${plainText(change.fix)}`, `Effect: ${plainText(change.effect)}`, ...changeFiles(change).flatMap(fileLines));
+  }
+  return lines;
+};
+var quietLine = (finding) => {
+  const head = `- ${plainText(finding.headline)} (${plainText(finding.stepName)})`;
+  if (finding.group === "unmeasured") {
+    return `${head}: ${unmeasuredState(finding)}. ${plainText(finding.line)}`;
+  }
+  if (finding.group === "accepted" && finding.accepted !== void 0) {
+    return `${head}: ${plainText(finding.line)} (accepted: ${reasonText(finding.accepted)})`;
+  }
+  return `${head}: ${plainText(finding.line)}`;
+};
+var flaggedGroup = (group) => group.group === "change" || group.group === "consider";
+var groupHeading = (group) => `## ${plainText(group.label)}`;
+var groupLines = (group, startHere) => {
+  const heading2 = groupHeading(group);
+  if (flaggedGroup(group)) {
+    return ["", heading2, ...group.findings.flatMap((finding) => flaggedLines(finding, startHere))];
+  }
+  const ask = group.group === "accepted" ? ["", ACCEPTED_ASK] : [];
+  return ["", heading2, ...ask, "", ...group.findings.map(quietLine)];
+};
+var reportHead = (report) => {
+  const lines = ["---", "", `# ${plainText(report.title)}`, "", `${sentence(plainText(report.count))}.`];
+  if (report.note !== void 0) {
+    lines.push("", `Note: ${plainText(report.note)}`);
+  }
+  return lines;
+};
+var healthPrompt = (report) => {
+  const lines = [INTRO, "", ...READING, "", ...TASK, "", ...reportHead(report)];
+  lines.push(...report.groups.flatMap((group) => groupLines(group, report.startHere)));
+  const closing = plainText(report.closing);
+  if (closing !== "") {
+    lines.push("", closing);
+  }
+  return lines.join("\n");
+};
+var findingPrompt = (report, findingId2) => {
+  const group = report.groups.find((entry) => flaggedGroup(entry) && entry.findings.some((finding2) => finding2.id === findingId2));
+  const finding = group?.findings.find((entry) => entry.id === findingId2);
+  if (group === void 0 || finding === void 0) {
+    return "";
+  }
+  const lines = [FINDING_INTRO, "", ...READING, "", ...FINDING_TASK, "", ...reportHead(report), "", groupHeading(group), ...flaggedLines(finding, report.startHere)];
+  return lines.join("\n");
+};
+
 // src/ui/health-report-view.ts
 var SLOT_PX = 8;
 var SPARK_HEIGHT_PX = 34;
@@ -20270,8 +20472,9 @@ var START_REASON = ", furthest from its guideline of the findings with a fix";
 var changedChip = (change) => {
   const tone = change.direction === "no change yet" ? "same" : change.direction;
   const chip = el("span", `hchg ${tone}`, `changed ${change.day} \xB7 `);
-  chip.append(el("b", void 0, change.direction), el("span", "visually-hidden", `, ${change.paths.join(", ")} changed`));
-  chip.title = `Setup changed ${change.day}: ${change.paths.join(", ")}`;
+  const spoken = fileKinds(change).map(({ path, kind }) => `${path} ${kind}`).join(", ");
+  chip.append(el("b", void 0, change.direction), el("span", "visually-hidden", `, ${spoken}`));
+  chip.title = `Setup changed ${change.day}: ${changedFiles2(change)}`;
   return chip;
 };
 var NEW_FILE_TEXT = "new file";
@@ -20549,7 +20752,12 @@ var createHealthReportView = (hooks) => {
       block.append(figures);
     }
     if (evidence.since !== void 0) {
-      block.append(el("p", "evc", evidence.since));
+      const compared = el("div", "evcs");
+      compared.append(el("p", "evc", evidence.since));
+      if (evidence.agents !== void 0) {
+        compared.append(el("p", "evc", evidence.agents));
+      }
+      block.append(compared);
     }
     if (evidence.rows.length > 0) {
       const list = el("ol", keyless ? "hevl keyless" : "hevl");
@@ -24735,7 +24943,7 @@ var createFinishedSessionsPanel = (context, options) => {
   const reveals = /* @__PURE__ */ new Set();
   const fullOf = (id) => latest && Object.hasOwn(latest.sessions, id) ? latest.sessions[id] : void 0;
   const isReady = (id) => fullOf(id) !== void 0 || known.has(id);
-  const entryOf2 = (id) => latest ? finishedEntry(latest, id, summaryIndex) : void 0;
+  const entryOf3 = (id) => latest ? finishedEntry(latest, id, summaryIndex) : void 0;
   const drawCard = (id) => {
     const full = fullOf(id);
     const session = full ?? known.get(id);
@@ -24826,7 +25034,7 @@ var createFinishedSessionsPanel = (context, options) => {
   };
   const clear = (ids) => {
     const now = context.now();
-    const entries = ids.map(entryOf2).filter((entry) => entry !== void 0);
+    const entries = ids.map(entryOf3).filter((entry) => entry !== void 0);
     if (entries.length === 0) {
       return;
     }
@@ -24854,7 +25062,7 @@ var createFinishedSessionsPanel = (context, options) => {
     pageToast().focusUndo();
   };
   const drawRow = (id, row2) => {
-    const entry = entryOf2(id);
+    const entry = entryOf3(id);
     if (entry) {
       shell.guard(id, row2.element, () => row2.update(finishedRowModel(entry, keyless)));
     }
@@ -28213,7 +28421,8 @@ var startOf2 = (session) => parseTime(session.startedAt) ?? parseTime(session.to
 var seriesKey = (session) => {
   const last = session.tokens.points[session.tokens.points.length - 1];
   const total = processedTokens(session.tokens.total);
-  return `${session.startedAt}|${session.tokens.points.length}|${last?.at}|${last?.tokens}|${total}`;
+  const stages = Object.entries(session.tokens.byStage).map(([stage, counts]) => `${stage}:${counts ? processedTokens(counts) : 0}`);
+  return `${session.startedAt}|${session.tokens.points.length}|${last?.at}|${last?.tokens}|${total}|${stages.join(",")}`;
 };
 var inInert = (element) => {
   for (let node = element; node; node = node.parentElement) {
