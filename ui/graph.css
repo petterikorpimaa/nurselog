@@ -1,12 +1,9 @@
 /* The graph of a card (design section 15), ported from the graph styles of reference/demo.html. Items take their
-   colour from `--c` (set by the scene). Continuous motion: the running ring and the flowing edges of work in progress
-   on the run graph; on the session graph the running orbit of a running node and the pulses of things waiting on the
-   developer. board.css turns all motion off for reduced motion. */
+   colour from `--c` (set by the scene). Continuous motion: the running orbit of a running node and the pulses of
+   things waiting on the developer. board.css turns all motion off for reduced motion. */
 
-/* The scene sizes the SVG in pixels (one board-wide scale per layout unit, scene.ts); a wider graph scrolls in its host.
-   The host's top padding keeps the halo of a "?" on the plan gate unclipped. */
+/* The scene sizes the SVG in pixels at the fit's scale (scene.ts, fit.ts). */
 .graph { display: block; overflow: visible; }
-.graph-host { padding-top: 10px; }
 
 /* edges */
 .edge { fill: none; stroke-width: 1.5; }
