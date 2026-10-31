@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.14 (2026-10-31)
+
+- Where the reads moved after a setup change in workflow health
+- The root CLAUDE.md in the workflow health setup
+- Check-runner counts as a check on the Verify step
+- A withdrawn Fix's chart points and a resumed reviewer's earlier node
+- Added and removed setup files in workflow health
+
 ## 0.1.13 (2026-10-31)
 
 - A resumed agent in the live demo and the Plan step in the report prompt

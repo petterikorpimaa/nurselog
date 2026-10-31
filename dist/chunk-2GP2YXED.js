@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-7RCTHUHY.js";
+} from "./chunk-EY6E4WUD.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
@@ -88,7 +88,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-L5UAFSAH.js";
+} from "./chunk-MDIXO4FB.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -1018,13 +1018,19 @@ import { readFileSync as readFileSync5 } from "fs";
 import { join as join4, resolve } from "path";
 
 // src/agent-files.ts
-import { lstatSync, readdirSync } from "fs";
-import { basename, join as join2 } from "path";
+import { lstatSync, readdirSync, realpathSync } from "fs";
+import { basename, isAbsolute, join as join2, relative, sep } from "path";
 var AGENT_NAME = /^[\w.-]{1,64}$/;
 var AGENT_HEAD_BYTES = 4096;
 var MAX_AGENT_FILES = 200;
 var MAX_LINE = 512;
 var AGENT_FILES_MS = 5e3;
+var CLAUDE_MD = "CLAUDE.md";
+var CLAUDE_MD_BYTES = 256 * 1024;
+var MAX_NAMED_ROLES = 64;
+var MAX_NAMED_LINES = 5;
+var MAX_NAMED_TOTAL = 128;
+var MAX_ALSO_NAMES = 3;
 var FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
 var MODEL_LINE = /^model:[ \t]*([\w.:\[\]-]{1,64})[ \t]*$/;
 var MAX_TURNS_LINE = /^maxTurns:[ \t]*(\d{1,5})[ \t]*$/;
@@ -1156,15 +1162,99 @@ var readAgentFiles = (root) => {
   }
   return agents;
 };
-var cachedAgentFiles = (root, ms = AGENT_FILES_MS, now = Date.now) => {
-  let read;
+var claudeMdPath = (root) => {
+  const path = join2(root, CLAUDE_MD);
+  try {
+    if (!lstatSync(path).isSymbolicLink()) {
+      return path;
+    }
+    const target = realpathSync(path);
+    const inside = relative(realpathSync(root), target);
+    const parts = inside.split(sep);
+    const inGit = parts.some((part) => part.toLowerCase() === ".git");
+    return inside === "" || isAbsolute(inside) || parts[0] === ".." || inGit ? void 0 : target;
+  } catch {
+    return void 0;
+  }
+};
+var HIDDEN_CHARS = /[\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFE00-\uFE0F\uFEFF\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+var readClaudeMd = (root) => {
+  const path = claudeMdPath(root);
+  if (path === void 0) {
+    return [];
+  }
+  let text;
+  try {
+    text = readSmallFile(path, CLAUDE_MD_BYTES);
+  } catch {
+    return [];
+  }
+  const lines = [];
+  for (const [index, raw] of text.split(/\r?\n/).entries()) {
+    const line = raw.length > MAX_LINE ? "" : raw.replace(HIDDEN_CHARS, "");
+    if (line.trim() !== "") {
+      lines.push({ line: index + 1, text: line });
+    }
+  }
+  return lines;
+};
+var NAMED_ROLE = /^\w[\w.:-]{0,127}$/;
+var BEFORE_NAME = /[\w:-]/;
+var AFTER_NAME = /[\w-]/;
+var namesAsWord = (text, role) => {
+  for (let at = text.indexOf(role); at >= 0; at = text.indexOf(role, at + 1)) {
+    if (!BEFORE_NAME.test(text.charAt(at - 1)) && !AFTER_NAME.test(text.charAt(at + role.length))) {
+      return true;
+    }
+  }
+  return false;
+};
+var claudeMdNames = (lines, roles) => {
+  const searched = roles.filter((role) => NAMED_ROLE.test(role)).slice(0, MAX_NAMED_ROLES);
+  const named = {};
+  const all = lines.map((entry) => entry.text).join("\n");
+  let total = 0;
+  for (const role of searched) {
+    if (total >= MAX_NAMED_TOTAL) {
+      break;
+    }
+    if (!all.includes(role)) {
+      continue;
+    }
+    const kept = [];
+    let more = false;
+    for (const entry of lines) {
+      if (!namesAsWord(entry.text, role)) {
+        continue;
+      }
+      if (kept.length === MAX_NAMED_LINES || total >= MAX_NAMED_TOTAL) {
+        more = true;
+        break;
+      }
+      const also = searched.filter((other) => other !== role && namesAsWord(entry.text, other)).slice(0, MAX_ALSO_NAMES);
+      kept.push(also.length === 0 ? { ...entry } : { ...entry, also });
+      total += 1;
+    }
+    if (kept.length > 0) {
+      const entry = more ? { lines: kept, more: true } : { lines: kept };
+      ownEntry(named, role, () => entry);
+    }
+  }
+  return named;
+};
+var cachedRead = (read, ms, now) => {
+  let kept;
   return () => {
     const at = now();
-    if (read === void 0 || at - read.at >= ms || at < read.at) {
-      read = { at, agents: readAgentFiles(root) };
+    if (kept === void 0 || at - kept.at >= ms || at < kept.at) {
+      kept = { at, value: read() };
     }
-    return read.agents;
+    return kept.value;
   };
+};
+var cachedAgentFiles = (root, ms = AGENT_FILES_MS, now = Date.now) => cachedRead(() => readAgentFiles(root), ms, now);
+var cachedClaudeMd = (root, roles, ms = AGENT_FILES_MS, now = Date.now) => {
+  return cachedRead(() => claudeMdNames(readClaudeMd(root), roles), ms, now);
 };
 
 // src/spool/activity.ts
@@ -1435,6 +1525,8 @@ var setupHistoryOf = (sessions) => {
   for (let index = 1; index < known.length - 1; index += 1) {
     const current = known[index].hashes;
     const paths = heldPaths(confirmed, current, known[index + 1].hashes);
+    const added = paths.filter((path) => !confirmed.has(path));
+    const removed = paths.filter((path) => !current.has(path));
     for (const path of paths) {
       const hash = current.get(path);
       if (hash === void 0) {
@@ -1444,15 +1536,15 @@ var setupHistoryOf = (sessions) => {
       }
     }
     if (paths.length > 0) {
-      changed.set(known[index].session, paths);
+      changed.set(known[index].session, { paths, added, removed });
     }
   }
   const changes = [];
   const latest = /* @__PURE__ */ new Map();
   for (const session of ordered) {
-    const paths = changed.get(session);
-    if (paths !== void 0) {
-      changes.push({ session: session.id, startedAt: new Date(session.started).toISOString(), paths });
+    const files = changed.get(session);
+    if (files !== void 0) {
+      changes.push({ session: session.id, startedAt: new Date(session.started).toISOString(), ...files });
     }
     if (changes.length > 0) {
       latest.set(session.id, changes.length - 1);
@@ -1550,7 +1642,7 @@ var NO_EDIT = "no work session edited a file";
 var NO_STOP = "no implement run stopped";
 var NO_STOP_UNDER_BUDGET = "no implement run stopped before its tool-call budget";
 var NO_TEST = "no test command matched verification.kinds";
-var NO_RESEARCH = "no research agent ran (a subagent of stage other, plan roles excluded; roles.<role>.stage and step)";
+var NO_RESEARCH = "no research agent ran (a subagent of stage other, plan and verify roles excluded; roles.<role>.stage and step)";
 var NO_MERGE = "no PR merged";
 var NO_CHECKS = "no check state of a PR is known (the gh poll reads it while a PR is open; a repository without checks has none)";
 var NO_READ_CHARS = "no read of the Explore step returned characters";
@@ -1594,15 +1686,25 @@ var implementRun = (entry) => ({
   start: timeOf2(entry.startedAt),
   testsAtFirstStop: testsAt(entry)
 });
-var isResearch = (entry, planRole) => {
-  const planned = typeof entry.role === "string" && planRole(plainText(entry.role));
-  return entry.stage === "other" && !planned;
+var configEntry = (entry, entryOf) => typeof entry.role === "string" ? entryOf(plainText(entry.role)) : void 0;
+var isResearch = (entry, entryOf) => {
+  const role = configEntry(entry, entryOf);
+  return entry.stage === "other" && !isPlanRole(role) && !isVerifyRole(role);
 };
-var researchRuns = (entries, planRole) => {
+var isCheck = (entry, entryOf) => entry.stage === "other" && isVerifyRole(configEntry(entry, entryOf));
+var readChars = (entries, kind) => {
+  if (entries === void 0) {
+    return void 0;
+  }
+  const chars = entries.filter(kind).map((entry) => countOf(entry.outputChars));
+  const counted = chars.filter(isNumber);
+  return counted.length < chars.length ? void 0 : counted.reduce((total, value) => total + value, 0);
+};
+var researchRuns = (entries, entryOf) => {
   if (entries === void 0 || !entries.every((entry) => Object.hasOwn(entry, "endedAt"))) {
     return void 0;
   }
-  const research = entries.filter((entry) => isResearch(entry, planRole));
+  const research = entries.filter((entry) => isResearch(entry, entryOf));
   return research.map((entry) => ({ start: timeOf2(entry.startedAt), end: entry.endedAt === null ? null : timeOf2(entry.endedAt) }));
 };
 var categoriesOf = (value) => {
@@ -1686,8 +1788,8 @@ var agentReads = (entry) => {
   return whole === null || wholeChars === null || chars === null ? void 0 : { whole, wholeChars, chars, reads: null };
 };
 var isReads = (reads) => reads !== void 0;
-var agentReadsOf = (entries, planRole) => {
-  const research = (entries ?? []).filter((entry) => isResearch(entry, planRole)).map(agentReads);
+var agentReadsOf = (entries, entryOf) => {
+  const research = (entries ?? []).filter((entry) => isResearch(entry, entryOf)).map(agentReads);
   const counted = research.filter(isReads);
   return research.length === 0 || counted.length < research.length ? void 0 : pooledReads(counted);
 };
@@ -1745,22 +1847,20 @@ var tokensOf = (metrics) => {
   const plan = byStage === void 0 || !Object.hasOwn(byStage, "plan") ? 0 : countOf(byStage.plan);
   return total === null || plan === null || byStage === void 0 ? void 0 : { plan: Math.min(plan, total), total };
 };
-var planRoleOf = (roles) => (role) => {
-  const entry = ownValue(roles, role) ?? ownValue(roles, "*");
-  return entry?.stage === "other" && entry.step === "plan";
+var isPlanRole = (entry) => entry?.stage === "other" && entry.step === "plan";
+var isVerifyRole = (entry) => entry?.stage === "other" && entry.step === "verify";
+var entryOfRoles = (roles) => (role) => ownValue(roles, role) ?? ownValue(roles, "*");
+var planRolesOf = (entries, entryOf) => {
+  const roles = (entries ?? []).flatMap((entry) => entry.stage === "other" && typeof entry.role === "string" ? [plainText(entry.role)] : []);
+  return [...new Set(roles.filter((role) => role !== "" && isPlanRole(entryOf(role))))];
 };
-var otherRoles = (entries, planRole) => {
-  const others = (entries ?? []).filter((entry) => entry.stage === "other").map((entry) => typeof entry.role === "string" ? plainText(entry.role) : "");
-  return { others, plan: [...new Set(others.filter((role) => role !== "" && planRole(role)))] };
-};
-var readSession = (aggregate, finished, planRole) => {
+var readSession = (aggregate, finished, entryOf) => {
   const main = fieldsOf(aggregate.main);
   const metrics = fieldsOf(aggregate.metrics);
   const roles = entriesOf(metrics.roles);
   const reviews = entriesOf(aggregate.reviews);
   const steps = stepCalls(main.steps);
   const agents = entriesOf(aggregate.agents);
-  const { others, plan } = otherRoles(agents, planRole);
   return {
     id: aggregate.id,
     key: shownText(aggregate.key),
@@ -1779,16 +1879,19 @@ var readSession = (aggregate, finished, planRole) => {
     questions: entriesOf(aggregate.questions)?.map(openTime),
     waitMs: numberOf(fieldsOf(aggregate.developerWait).totalMs),
     steps,
-    otherAgent: others.some((role) => role === "" || !planRole(role)),
+    otherAgent: (agents ?? []).some((entry) => isResearch(entry, entryOf)),
+    verifyAgent: (agents ?? []).some((entry) => isCheck(entry, entryOf)),
     planMode: main.planMode === true,
-    planRoles: plan,
+    planRoles: planRolesOf(agents, entryOf),
     tokens: tokensOf(metrics),
     checks: checksOf(metrics),
     tested: ranTest(metrics),
-    research: researchRuns(agents, planRole),
+    research: researchRuns(agents, entryOf),
     pipelines: countOf(aggregate.pipelines),
-    agentReads: agentReadsOf(agents, planRole),
-    mainReads: mainReadsOf(main, steps, metrics)
+    agentReads: agentReadsOf(agents, entryOf),
+    mainReads: mainReadsOf(main, steps, metrics),
+    researchChars: readChars(agents, (entry) => isResearch(entry, entryOf)),
+    checkChars: readChars(agents, (entry) => isCheck(entry, entryOf))
   };
 };
 var pad = (value) => String(value).padStart(2, "0");
@@ -2083,8 +2186,9 @@ var mainStepsOf = (window) => {
   const shares = stepShares(pooledSteps(window));
   const built = window.some((session) => (session.builds?.length ?? 0) > 0);
   const explored = window.some((session) => session.otherAgent);
+  const checked = window.some((session) => session.verifyAgent);
   const shareOf2 = (step, subagents) => ({ share: shares?.[step] ?? null, subagents });
-  return { explore: shareOf2("explore", explored), implement: shareOf2("implement", built), verify: shareOf2("verify", built) };
+  return { explore: shareOf2("explore", explored), implement: shareOf2("implement", built), verify: shareOf2("verify", built || checked) };
 };
 var planUseOf = (window) => ({
   mode: window.some((session) => session.planMode),
@@ -2639,7 +2743,7 @@ var SIGNALS = [
   { id: "cost-per-pr", area: "delivery", of: costPerPr },
   { id: "time-to-pr", area: "delivery", of: timeToPr },
   { id: "cost-per-100-lines", area: "delivery", of: costPer100Lines },
-  { id: "main-reads", area: "explore", of: mainReads },
+  { id: "main-reads", area: "explore", of: mainReads, agentChars: (session) => session.researchChars },
   { id: "budget-first-stop", area: "implementers", of: budgetFirstStop },
   { id: "second-implementer", area: "implementers", of: secondImplementer },
   { id: "second-round", area: "review", of: secondRound },
@@ -2648,7 +2752,7 @@ var SIGNALS = [
   { id: "quiet-reviewer", area: "review", of: quietReviewer, off: (guidelines) => guidelines.quietReviewer === null },
   { id: "verify-commands", area: "verification", of: verifyCommands },
   { id: "failed-runs", area: "verification", of: failedRuns },
-  { id: "main-check-output", area: "verification", of: mainCheckOutput },
+  { id: "main-check-output", area: "verification", of: mainCheckOutput, agentChars: (session) => session.checkChars },
   { id: "unchecked-sessions", area: "verification", of: uncheckedSessions },
   { id: "cache-per-output", area: "tokens", of: cachePerOutput },
   { id: "main-peak-context", area: "tokens", of: mainPeakContext },
@@ -2680,7 +2784,7 @@ var oldestOf = (sides) => {
 var outcomesAlone = (signal, read, sides) => {
   return read.map((entry) => signal.of({ window: [entry.session], baseline: [], comparable: false, minimum: sides.minimum, guidelines: sides.guidelines }));
 };
-var pointOf = (entry, outcome, role) => {
+var pointOf = (entry, outcome, role, agentChars) => {
   const session = entry.session.id;
   const line = "lines" in outcome ? outcome.lines.find((found) => found.role === role) : void 0;
   const evidence = line?.window;
@@ -2690,7 +2794,9 @@ var pointOf = (entry, outcome, role) => {
   const share = evidence.k !== void 0 && evidence.n > 0 ? evidence.k / evidence.n : null;
   const counted = evidence.k === void 0 ? {} : { k: evidence.k };
   const steps = line?.steps === void 0 ? {} : { steps: line.steps };
-  return { session, value: evidence.value ?? share, ...counted, n: evidence.n, window: entry.window, ...steps };
+  const chars = agentChars?.(entry.session);
+  const agents = chars === void 0 ? {} : { agentChars: chars };
+  return { session, value: evidence.value ?? share, ...counted, n: evidence.n, window: entry.window, ...steps, ...agents };
 };
 var signalLine = (area, signal, line, series) => ({
   area,
@@ -2737,7 +2843,7 @@ var reportLines = (sides, read) => {
       }
       const alone = outcome.lines.every((line) => line.series !== void 0) ? [] : outcomesAlone(signal, read, sides);
       for (const line of outcome.lines) {
-        const series = line.series ?? read.map((entry, index) => pointOf(entry, alone[index], line.role));
+        const series = line.series ?? read.map((entry, index) => pointOf(entry, alone[index], line.role, signal.agentChars));
         const insight = signalLine(area, signal.id, line, series);
         (insight.flag === void 0 ? others : flagged).push(insight);
       }
@@ -2750,13 +2856,13 @@ var reportLines = (sides, read) => {
   return [...flagged, ...others];
 };
 var reportSessionId = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID2 && plainText(id) === id;
-var selectSessions = (aggregates, options, now, planRole) => {
+var selectSessions = (aggregates, options, now, entryOf) => {
   const at = time(now);
   const today = new Date(at);
   const oldest = localDay2(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
   const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay2(new Date(finished)) >= oldest;
   const selected = aggregates.filter((aggregate) => aggregate.work === true && reportSessionId(aggregate.id)).map((aggregate) => ({ aggregate, finished: timeOf2(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
-  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished, planRole));
+  return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished, entryOf));
 };
 var reportSession = (session) => ({
   id: session.id,
@@ -2786,7 +2892,7 @@ var guidelinesOf = (guidelines) => {
   return { budgetFirstStop: budgetFirstStop2, quietReviewer: quietReviewer2, overheadShare: overheadShare2, mainPeakContext: mainPeakContext2, mainLargeOutputs: mainLargeOutputs2, cachePerOutput: cache, ...main, ...steps, ...outcomes, wholeReads: wholeReads2 };
 };
 var insightsOf = (aggregates, options, now, roles = {}) => {
-  const sessions = selectSessions(aggregates, options, now, planRoleOf(roles));
+  const sessions = selectSessions(aggregates, options, now, entryOfRoles(roles));
   const window = sessions.slice(0, options.window);
   const baseline = sessions.slice(options.window, options.window + options.baseline);
   const minimum = Math.min(options.minBaseline, options.baseline);
@@ -3592,6 +3698,7 @@ var createSpoolContext = (options) => {
     queue(() => replayInWorker().finally(finish));
   }
   const agentFiles = cachedAgentFiles(root, options.agentFilesMs);
+  const claudeMd = cachedClaudeMd(root, Object.keys(config.roles), options.agentFilesMs);
   return {
     id: options.id,
     get name() {
@@ -3613,8 +3720,8 @@ var createSpoolContext = (options) => {
       return answer.fixture;
     },
     uiConfig: () => ({ ...uiConfig(config, root), repo: name, sessionFixtures: true }),
-    // Read on a request at most once per window (ADR-0022), so an edited agent file shows on a request after it.
-    setup: () => workflowSetupOf(config, agentFiles()),
+    // Read on a request at most once per window (ADR-0022), so an edited agent file or CLAUDE.md shows on a request after it.
+    setup: () => workflowSetupOf(config, agentFiles(), claudeMd()),
     lastLineAt: () => lastLineAt2,
     typical: () => aggregates.typical(),
     insights: () => aggregates.insights(),
@@ -3681,7 +3788,7 @@ var createReplayContext = (options) => {
 
 // src/server/repositories.ts
 import { closeSync as closeSync2, constants, lstatSync as lstatSync3, openSync, readdirSync as readdirSync3, readSync as readSync2 } from "fs";
-import { join as join5, relative, resolve as resolve2, sep } from "path";
+import { join as join5, relative as relative2, resolve as resolve2, sep as sep2 } from "path";
 var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
 var RECORD_FILE = "repository.json";
 var CONFIG_FILE = "nurselog.config.json";
@@ -3791,7 +3898,7 @@ var withinReadDays = (at, readDays, now) => {
   const first = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (readDays - 1)));
   return localDay(new Date(at)) >= first;
 };
-var segmentsOf = (root) => root.split(sep).filter(Boolean);
+var segmentsOf = (root) => root.split(sep2).filter(Boolean);
 var tabNames = (roots) => {
   const segments = roots.map(segmentsOf);
   const depths = roots.map(() => 1);
@@ -3893,7 +4000,7 @@ var pruneOrphanedSpools = (now, onError) => {
       if (spoolDirExists(orphan.dir)) {
         const onFailure = (path, error) => {
           const code = error.code ?? error.message;
-          onError(`orphaned spool ${shown}: ${relative(orphan.dir, path)} not deleted (${code}), the next prune tries it again`);
+          onError(`orphaned spool ${shown}: ${relative2(orphan.dir, path)} not deleted (${code}), the next prune tries it again`);
         };
         deleted.push(...pruneSpool(orphan.dir, keepDays, now, onFailure));
       }
@@ -3976,7 +4083,7 @@ var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
 };
 
 // src/server/update-check.ts
-import { isAbsolute, join as join6 } from "path";
+import { isAbsolute as isAbsolute2, join as join6 } from "path";
 var UPDATE_COMMAND = "claude plugin update nurselog@nurselog";
 var MARKETPLACE = "nurselog";
 var FIRST_CHECK_MS = 5 * 1e3;
@@ -4080,7 +4187,7 @@ var marketplaceSourceOf = (text) => {
     return { kind: "github", owner, name, ref: source.ref };
   }
   if (source.source === "directory") {
-    if (typeof source.path !== "string" || !isAbsolute(source.path) || stripControl(source.path) !== source.path) {
+    if (typeof source.path !== "string" || !isAbsolute2(source.path) || stripControl(source.path) !== source.path) {
       throw new Error(`the marketplace ${MARKETPLACE} names no absolute directory`);
     }
     return { kind: "directory", path: source.path };
@@ -4988,6 +5095,8 @@ export {
   unquote,
   readAgent,
   readAgentFiles,
+  readClaudeMd,
+  claudeMdNames,
   percentile,
   cost,
   tokens,
@@ -4999,6 +5108,8 @@ export {
   restsOnBaseline,
   isWorseThanBefore,
   reasonText,
+  isPlanRole,
+  isVerifyRole,
   insightsOf,
   readAggregates,
   purgeableAggregates,

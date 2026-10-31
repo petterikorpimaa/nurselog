@@ -7,10 +7,13 @@ import {
   USAGE,
   alreadyRunningMessage,
   boardTab,
+  claudeMdNames,
   cost,
   duration,
   insightsOf,
+  isPlanRole,
   isSetupPath,
+  isVerifyRole,
   isWorseThanBefore,
   listOrphanedSpools,
   listRepositories,
@@ -22,6 +25,7 @@ import {
   readAgent,
   readAgentFiles,
   readAggregates,
+  readClaudeMd,
   reasonText,
   resolveRepository,
   restsOnBaseline,
@@ -31,11 +35,11 @@ import {
   startNurselog,
   tokens,
   unquote
-} from "./chunk-2O6WID74.js";
+} from "./chunk-2GP2YXED.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-JC63PFSV.js";
+} from "./chunk-UFOIZQO2.js";
 import {
   DEFAULT_CONFIG,
   PACKAGE_ROOT,
@@ -45,7 +49,7 @@ import {
   mergeOverDefaults,
   runCommand,
   validateConfig
-} from "./chunk-7RCTHUHY.js";
+} from "./chunk-EY6E4WUD.js";
 import {
   BRANCH_KEY_PATTERN,
   LINUX_APP_BROWSERS,
@@ -104,7 +108,7 @@ import {
   waitForBoard,
   workflowSetupOf,
   writeSignInFile
-} from "./chunk-L5UAFSAH.js";
+} from "./chunk-MDIXO4FB.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
@@ -335,7 +339,7 @@ var roleOf = (name) => {
 };
 var roleOfTools = (name, tools) => {
   const writes = tools?.some((tool) => FILE_WRITING_TOOLS.has(tool)) ?? false;
-  const kept = DEFAULT_CONFIG.docs.roles.includes(name) || ownValue(DEFAULT_CONFIG.roles, name)?.step === "plan";
+  const kept = DEFAULT_CONFIG.docs.roles.includes(name) || ownValue(DEFAULT_CONFIG.roles, name)?.step !== void 0;
   return writes && !kept ? { stage: "implement" } : void 0;
 };
 var roleOfAgent = (agent) => {
@@ -706,21 +710,18 @@ var readLine = (value, setup) => {
   const line = typeof value.role === "string" ? { insight, role: value.role, verdict } : { insight, verdict };
   return acceptedLine(line, setup);
 };
-var stageOf = (role, setup) => {
+var entryOf = (role, setup) => {
   const roles = setup?.roles ?? [];
-  const entry = roles.find((item) => item.role === role) ?? roles.find((item) => item.role === "*");
-  return entry?.stage ?? "other";
-};
-var isPlanRole = (role, setup) => {
-  const roles = setup?.roles ?? [];
-  const entry = roles.find((item) => item.role === role) ?? roles.find((item) => item.role === "*");
-  return entry?.stage === "other" && entry.step === "plan";
+  return roles.find((item) => item.role === role) ?? roles.find((item) => item.role === "*");
 };
 var isMainLine = (line) => line.role === void 0 || line.role === "main";
 var stepOf = (line, setup, planShown) => {
   if (line.insight.signal === "cache-per-output" && !isMainLine(line)) {
-    const role = line.role ?? "";
-    return planShown && isPlanRole(role, setup) ? "plan" : STAGE_STEPS[stageOf(role, setup)];
+    const entry = entryOf(line.role ?? "", setup);
+    if (isVerifyRole(entry)) {
+      return "verify";
+    }
+    return planShown && isPlanRole(entry) ? "plan" : STAGE_STEPS[entry?.stage ?? "other"];
   }
   if (line.insight.signal === "plan-share" && planShown) {
     return "plan";
@@ -730,7 +731,7 @@ var stepOf = (line, setup, planShown) => {
   }
   return AREA_STEPS[line.insight.area];
 };
-var linePhrase = (line, verdict, shortName) => {
+var linePhrase = (id, line, verdict, shortName) => {
   const signal = line.insight.signal;
   if (isInformational(signal)) {
     return NEUTRAL[signal];
@@ -746,6 +747,9 @@ var linePhrase = (line, verdict, shortName) => {
     return MAIN_WHOLE_PROBLEM;
   }
   const role = line.role === void 0 ? NO_ROLE : shortName(line.role);
+  if (signal === "cache-per-output" && id === "verify") {
+    return `${role} ${MAIN_CACHE_PROBLEM}`;
+  }
   return problem.replace("<role>", role);
 };
 var stepLineVerdict = (line) => line.verdict === "accepted" ? "ok" : line.verdict;
@@ -772,7 +776,7 @@ var stepPhrase = (id, lines, verdict, shortName) => {
   if (first?.verdict === "accepted") {
     return ACCEPTED_PHRASE;
   }
-  return first ? linePhrase(first, verdict, shortName) : "";
+  return first ? linePhrase(id, first, verdict, shortName) : "";
 };
 var modelName = (model) => {
   const family = MODEL_FAMILIES.find((name) => model.toLowerCase().includes(name));
@@ -821,8 +825,7 @@ var roleList = (names) => {
   return rest > 0 ? `${shown2} +${rest}` : shown2;
 };
 var sharedBudget = (roles, setup) => {
-  const entryOf = (role) => setup.roles.find((item) => item.role === role) ?? setup.roles.find((item) => item.role === "*");
-  const budgets = roles.map((role) => entryOf(role)?.toolCalls);
+  const budgets = roles.map((role) => entryOf(role, setup)?.toolCalls);
   if (budgets.length === 0 || budgets.some((budget) => budget === void 0)) {
     return void 0;
   }
@@ -839,12 +842,19 @@ var budgetText = (roles, setup, turns) => {
   }
   return budget === void 0 ? "" : ` \xB7 ${plural(budget, "call")}`;
 };
+var lineRoles = (lines) => [...new Set(lines.flatMap((line) => line.role ?? []))];
 var listedRoles = (stage, lines, setup) => {
-  const lineRoles = [...new Set(lines.flatMap((line) => line.role ?? []))];
-  if (lineRoles.length > 0 || !setup) {
-    return lineRoles;
+  const named = lineRoles(lines);
+  if (named.length > 0 || !setup) {
+    return named;
   }
-  return setup.roles.filter((item) => item.stage === stage && item.role !== "*" && item.step !== "plan").map((item) => item.role);
+  return setup.roles.filter((item) => item.stage === stage && item.role !== "*" && !isPlanRole(item) && !isVerifyRole(item)).map((item) => item.role);
+};
+var verifySetup = (lines, source) => {
+  const kinds = source.setup ? source.setup.verification.join(", ") : "";
+  const roles = lineRoles(lines);
+  const listed = roles.length > 0 ? `${roleList(roles.map(source.shortName))}${modelText(roles, source)}` : "";
+  return [kinds, listed].filter((part) => part !== "").join(" \xB7 ");
 };
 var planSetup = (lines, source) => {
   const roles = [.../* @__PURE__ */ new Set([...lines.flatMap((line) => line.role ?? []), ...source.plan.roles])];
@@ -858,7 +868,7 @@ var setupLine = (id, lines, source) => {
     return plainSetup(roleModel("main", source) ?? "");
   }
   if (id === "verify") {
-    return plainSetup(setup ? setup.verification.join(", ") : "");
+    return plainSetup(verifySetup(lines, source));
   }
   if (id === "plan") {
     return plainSetup(planSetup(lines, source));
@@ -1046,6 +1056,10 @@ var cacheChange = (step, role) => {
     const line = `Write the diff to a file once and give ${role} its path and the changed files; it reads those, not the whole repository.`;
     return { fix: `Pass the diff to ${role} as a file.`, lines: [line] };
   }
+  if (step === "verify") {
+    const line = `${role} runs each check with its shortest output and reports only the failing lines with file and line.`;
+    return { fix: `Have ${role} return only the failures.`, lines: [line] };
+  }
   return { fix: `Name the files ${role} needs in its brief.`, lines: [`A brief for ${role} names the files it needs by path and line range.`] };
 };
 var budgetLine = (budget) => {
@@ -1054,25 +1068,54 @@ var budgetLine = (budget) => {
   }
   return `A brief that needs more than about ${plural(budget, "tool call")} is two briefs.`;
 };
-var quietChange = (role, window) => {
+var namedLines = (setup, role) => setup === null ? { lines: [] } : ownValue(setup.claudeMd, role) ?? { lines: [] };
+var lineNumbers = (entries) => {
+  const numbers = andList(entries.map((entry) => String(entry.line)));
+  return entries.length === 1 ? `line ${numbers}` : `lines ${numbers}`;
+};
+var furtherLines = (role, named) => named.more === true ? `${CHANGE_FILE} names ${role} on further lines too.` : "";
+var sharedLines = (shared) => {
+  if (shared.length === 0) {
+    return "";
+  }
+  if (shared.length > 1) {
+    return `${CHANGE_FILE} ${lineNumbers(shared)} also name other roles: edit them by hand.`;
+  }
+  return `${CHANGE_FILE} ${lineNumbers(shared)} also names ${andList(shared[0].also ?? [])}: edit it by hand.`;
+};
+var sentences = (...parts) => parts.filter((part) => part !== "").join(" ");
+var quietChange = (role, window, setup) => {
   if (window?.k === 0) {
-    return { fix: `Stop running ${role} by default.`, lines: [`Run ${role} only when I ask for it.`] };
+    const named = namedLines(setup, role);
+    const own = named.lines.filter((entry) => entry.also === void 0 || entry.also.length === 0);
+    const shared = named.lines.filter((entry) => !own.includes(entry));
+    const fix = sentences(`Stop running ${role} by default.`, sharedLines(shared), furtherLines(role, named));
+    return { fix, removed: own.map((entry) => entry.text), lines: [`Run ${role} only when I ask for it.`] };
   }
   const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
   return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
 };
+var alreadyNamed = (name, named) => {
+  const verb = named.lines.length === 1 ? "names" : "name";
+  return sentences(`${CHANGE_FILE} ${lineNumbers(named.lines)} already ${verb} ${name}.`, furtherLines(name, named));
+};
 var newAgent = (setup, agent) => {
   const file = `.claude/agents/${agent.name}.md`;
+  const named = namedLines(setup, agent.name);
   if (setup?.agents.some((entry) => entry.name === agent.name || entry.file === file) === true) {
-    return { fix: agent.runFix, lines: [agent.routing] };
+    const fix = named.lines.length === 0 ? agent.runFix : `${agent.runFix} ${alreadyNamed(agent.name, named)}`;
+    return { fix, lines: [agent.routing] };
+  }
+  if (named.lines.length > 0) {
+    return { fix: `${agent.addFix} ${alreadyNamed(agent.name, named)}`, file, isNew: true, lines: [...agent.lines] };
   }
   const also = { file: CHANGE_FILE, removed: [], lines: [agent.routing] };
   return { fix: agent.addFix, file, isNew: true, lines: [...agent.lines], also };
 };
 var reviewAgents = (setup) => {
   const roles = setup?.roles ?? [];
-  const stageOf2 = (name) => (roles.find((entry) => entry.role === name) ?? roles.find((entry) => entry.role === "*"))?.stage;
-  return (setup?.agents ?? []).filter((agent) => stageOf2(agent.name) === "review").map((agent) => agent.name);
+  const stageOf = (name) => (roles.find((entry) => entry.role === name) ?? roles.find((entry) => entry.role === "*"))?.stage;
+  return (setup?.agents ?? []).filter((agent) => stageOf(agent.name) === "review").map((agent) => agent.name);
 };
 var CHECK_RUNNER = "check-runner";
 var CHECK_RUNNER_FILE = [
@@ -1144,7 +1187,8 @@ var wholeReadsChange = (role, setup) => {
     const line2 = "Search for the lines you need first, and read a file by range when you know where to look.";
     return { fix: "Read files by range instead of whole files.", lines: [line2], effect: FEWER_CHARS };
   }
-  const research = (setup?.roles ?? []).filter((entry) => entry.stage === "other" && entry.role !== "*" && entry.step !== "plan").map((entry) => entry.role);
+  const isResearch = (entry) => entry.stage === "other" && entry.role !== "*" && !isPlanRole(entry) && !isVerifyRole(entry);
+  const research = (setup?.roles ?? []).filter(isResearch).map((entry) => entry.role);
   const agents = research.length === 0 || research.includes("Explore") ? "the Explore agent" : andList(research);
   const line = `Ask ${agents} for file paths and line ranges, and read a file by range when you know where to look.`;
   return { fix: "Ask for paths and line ranges instead of whole files.", lines: [line], effect: FEWER_CHARS };
@@ -1172,7 +1216,7 @@ var changeOf = (source, role) => {
     case "second-round":
       return { fix: "Run the checks before the hand-back.", lines: [checksLine(source.setup)] };
     case "quiet-reviewer":
-      return role === void 0 ? void 0 : quietChange(role, source.window);
+      return role === void 0 ? void 0 : quietChange(role, source.window, source.setup);
     case "question-open-time":
       return QUICK_ANSWERS;
     case "untested-first-stop":
@@ -1245,144 +1289,23 @@ var suggestedChange = (source) => {
   if (change === void 0) {
     return void 0;
   }
-  const { file = CHANGE_FILE, effect, ...parts } = change;
-  return { ...parts, effect: effect ?? effectOf(source, verdict), file, removed: [], lines: [...change.lines] };
+  const { file = CHANGE_FILE, effect, removed = [], ...parts } = change;
+  return { ...parts, effect: effect ?? effectOf(source, verdict), file, removed: [...removed], lines: [...change.lines] };
 };
-
-// src/ui/health-prompt.ts
-var INTRO = "Below is a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the next changes to the workflow setup that its numbers support.";
-var FINDING_INTRO = "Below is one finding of a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the change to the workflow setup that its numbers support.";
-var READING = [
-  "## How to read the report",
-  "",
-  `- A work session is a finished Claude Code session with at least ${WORK_SESSION_CALLS} main-thread tool calls. "Now" counts the latest work sessions (the window), "before" the work sessions recorded before them (the baseline).`,
-  "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
-  '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before, or half or more of the fix items about one cause. Working well: neither. Accepted: kept as it is on purpose (`insights.accepted` of nurselog.config.json) until it gets worse than before. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
-  "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
-  "- Each finding names its workflow step (Main thread, Plan, Explore, Implement, Review, Verify, PR and merge, Your answers), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.",
-  "- A suggested change adds lines to a file, replaces a line in it, or creates a file with all its lines added, at times in two files: a line starting with - is removed, one starting with + is added. Its effect is a measured target or a direction, never an estimated saving.",
-  "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
-];
-var TASK = [
-  "## What to do",
-  "",
-  "1. If you can read the repository, first read CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so a change fits what is there. `nurselog insights --json` prints the whole report with the value of each work session.",
-  "2. Suggest at most three changes, the Start here finding first unless the evidence argues against it. For each: the finding it answers with its numbers, why the change helps, the change as a diff of the file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json), and the signal that should move over the next five work sessions, with its direction.",
-  "3. Prefer small changes over a rewrite, so the effect of each can be measured. Say so when a finding rests on few work sessions, and never state a number the report does not give.",
-  "4. Name what works well and should stay as it is.",
-  "5. If nothing is worth changing, say so rather than invent a change."
-];
-var FINDING_TASK = [
-  "## What to do",
-  "",
-  "1. If you can read the repository, first read the files the finding's suggested change goes to, when it has one, then CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so the change fits what is there; a file it creates should not exist yet, so if it does, change that file instead. `nurselog insights --json` prints the whole report with the value of each work session.",
-  "2. Make this one change and no other: the suggested change of the finding below, or one of your own when it has none. Give the finding it answers with its numbers, why the change helps, the change as a diff of each file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json; a new file in full), and the signal that should move over the next five work sessions, with its direction.",
-  "3. Keep the change small, so its effect can be measured. Keep the numbers as the report gives them, say so when the finding rests on few work sessions, and never state a number the report does not give.",
-  "4. If the evidence argues against the change, say so rather than make it."
-];
-var unmeasuredState = (finding) => {
-  if (finding.byMain) {
-    return "by the main thread";
-  }
-  return finding.absent ? "not in this workflow" : "not measured";
-};
-var sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
-var DIRECTION_PHRASES = { better: "better since then", worse: "worse since then", "no change yet": "the signal shows no change yet" };
-var changedLine = (finding) => {
-  const change = finding.setupChange;
-  if (change === void 0) {
-    return [];
-  }
-  const compared = change.compared;
-  const sides = compared === void 0 ? "" : `: ${plainText(compared.since)} over ${plainText(compared.over)} against ${plainText(compared.before)}`;
-  const files = change.paths.map(plainText).join(", ");
-  const tail = change.paths.length === 1 ? "The changed file may already hold this change: read it first" : "The changed files may already hold this change: read them first";
-  return [`- Changed ${plainText(change.day)}: ${files}, ${DIRECTION_PHRASES[change.direction]}${sides}. ${tail} and do not make it again.`];
-};
-var ACCEPTED_ASK = "The developer keeps these as they are on purpose; do not suggest a change to them.";
-var fileLines = (change) => {
-  const file = plainText(change.file);
-  let heading = `Lines to add to ${file}:`;
-  if (change.isNew === true) {
-    heading = `Create ${file} with:`;
-  } else if (change.removed.length > 0) {
-    heading = `Lines to change in ${file}:`;
-  }
-  return [heading, ...change.removed.map((line) => `- ${plainText(line)}`), ...change.lines.map((line) => `+ ${plainText(line)}`)];
-};
-var flaggedLines = (finding, startHere) => {
-  const start2 = finding.id === startHere ? " (Start here)" : "";
-  const facts = [`Step: ${plainText(finding.stepName)}.`, `Impact: ${finding.impact}.`];
-  if (finding.basis !== void 0) {
-    facts.push(`${sentence(plainText(finding.basis))}.`);
-  }
-  if (finding.accepted !== void 0) {
-    facts.push(`Accepted (${reasonText(finding.accepted)}), but worse than before.`);
-  }
-  const lines = ["", `### ${plainText(finding.headline)}${start2}`, facts.join(" "), plainText(finding.line)];
-  const evidence = finding.evidence;
-  if (evidence !== void 0) {
-    const numbers = [evidence.now, evidence.before, evidence.guideline].flatMap((number) => number === void 0 ? [] : [number]);
-    lines.push(...numbers.map((number) => `- ${sentence(plainText(number.label))}: ${plainText(number.text)}`));
-    if (evidence.setup !== "") {
-      lines.push(`- Setup: ${plainText(evidence.setup)}`);
-    }
-  }
-  lines.push(...changedLine(finding));
-  const change = finding.change;
-  if (change !== void 0) {
-    lines.push(`Fix: ${plainText(change.fix)}`, `Effect: ${plainText(change.effect)}`, ...changeFiles(change).flatMap(fileLines));
-  }
-  return lines;
-};
-var quietLine = (finding) => {
-  const head = `- ${plainText(finding.headline)} (${plainText(finding.stepName)})`;
-  if (finding.group === "unmeasured") {
-    return `${head}: ${unmeasuredState(finding)}. ${plainText(finding.line)}`;
-  }
-  if (finding.group === "accepted" && finding.accepted !== void 0) {
-    return `${head}: ${plainText(finding.line)} (accepted: ${reasonText(finding.accepted)})`;
-  }
-  return `${head}: ${plainText(finding.line)}`;
-};
-var flaggedGroup = (group) => group.group === "change" || group.group === "consider";
-var groupHeading = (group) => `## ${plainText(group.label)}`;
-var groupLines = (group, startHere) => {
-  const heading = groupHeading(group);
-  if (flaggedGroup(group)) {
-    return ["", heading, ...group.findings.flatMap((finding) => flaggedLines(finding, startHere))];
-  }
-  const ask = group.group === "accepted" ? ["", ACCEPTED_ASK] : [];
-  return ["", heading, ...ask, "", ...group.findings.map(quietLine)];
-};
-var reportHead = (report) => {
-  const lines = ["---", "", `# ${plainText(report.title)}`, "", `${sentence(plainText(report.count))}.`];
-  if (report.note !== void 0) {
-    lines.push("", `Note: ${plainText(report.note)}`);
-  }
-  return lines;
-};
-var healthPrompt = (report) => {
-  const lines = [INTRO, "", ...READING, "", ...TASK, "", ...reportHead(report)];
-  lines.push(...report.groups.flatMap((group) => groupLines(group, report.startHere)));
-  const closing = plainText(report.closing);
-  if (closing !== "") {
-    lines.push("", closing);
-  }
-  return lines.join("\n");
-};
-var findingPrompt = (report, findingId2) => {
-  const group = report.groups.find((entry) => flaggedGroup(entry) && entry.findings.some((finding2) => finding2.id === findingId2));
-  const finding = group?.findings.find((entry) => entry.id === findingId2);
-  if (group === void 0 || finding === void 0) {
-    return "";
-  }
-  const lines = [FINDING_INTRO, "", ...READING, "", ...FINDING_TASK, "", ...reportHead(report), "", groupHeading(group), ...flaggedLines(finding, report.startHere)];
-  return lines.join("\n");
-};
-var flaggedFindingIds = (report) => report.groups.filter(flaggedGroup).flatMap((group) => group.findings.map((finding) => finding.id));
 
 // src/ui/health-report.ts
+var fileKinds = (files) => {
+  return files.paths.map((path) => {
+    if (files.added.includes(path)) {
+      return { path, kind: "added" };
+    }
+    return { path, kind: files.removed.includes(path) ? "removed" : "changed" };
+  });
+};
+var changedFiles = (files, clean = (path) => path) => {
+  const named = fileKinds(files).map(({ path, kind }) => kind === "changed" ? clean(path) : `${clean(path)} (${kind})`);
+  return named.join(", ");
+};
 var PR = ["PR", "PRs"];
 var RUN = ["run", "runs"];
 var STREAM = ["stream", "streams"];
@@ -1581,7 +1504,8 @@ var SIGNALS = {
     limit: (limit) => `at most ${characters(limit)} per session`,
     scale: true,
     against: "value",
-    median: true
+    median: true,
+    agents: "research agents"
   },
   "main-check-output": {
     impact: "cost",
@@ -1591,7 +1515,8 @@ var SIGNALS = {
     limit: (limit) => `at most ${characters(limit)} per session`,
     scale: true,
     against: "value",
-    median: true
+    median: true,
+    agents: "check agents"
   },
   "unchecked-sessions": {
     impact: "quality",
@@ -1698,6 +1623,7 @@ var formatOf = (insight) => {
   return { ...SIGNALS[trigger], impact: own.impact, headline: own.headline };
 };
 var MAIN_CACHE2 = ["The main thread re-reads a long context", "The main thread's cache reads stay in range"];
+var VERIFY_CACHE = ["<role> re-reads a long context", "<role>'s cache reads stay in range"];
 var MAIN_WHOLE = ["The main thread reads whole files", "The main thread reads files by range"];
 var NO_ROLE2 = "A role";
 var NO_TITLE = "recorded session";
@@ -1764,7 +1690,8 @@ var readPoints = (series) => {
     const k = finite(item.k) ? item.k : void 0;
     const n = finite(item.n) ? item.n : void 0;
     const setupChange = Number.isSafeInteger(item.setupChange) && Number(item.setupChange) >= 0 ? Number(item.setupChange) : void 0;
-    return [{ session: item.session, number: pointNumber(item.value, k, n), window: item.window === true, k, n, steps: readSteps(item.steps), setupChange }];
+    const agentChars = Number.isSafeInteger(item.agentChars) && Number(item.agentChars) >= 0 ? Number(item.agentChars) : void 0;
+    return [{ session: item.session, number: pointNumber(item.value, k, n), window: item.window === true, k, n, steps: readSteps(item.steps), setupChange, agentChars }];
   });
 };
 var localDay2 = (iso) => {
@@ -1780,7 +1707,8 @@ var readSetupChanges = (value) => {
     }
     const listed = entry.paths;
     const paths = listed.filter((path) => typeof path === "string" && isSetupPath(path));
-    return paths.length === 0 ? void 0 : { day: localDay2(entry.startedAt), paths };
+    const kind = (list) => Array.isArray(list) ? paths.filter((path) => list.includes(path)) : [];
+    return paths.length === 0 ? void 0 : { day: localDay2(entry.startedAt), paths, added: kind(entry.added), removed: kind(entry.removed) };
   });
 };
 var readMainSteps = (mainSteps) => {
@@ -1855,7 +1783,7 @@ var sparkline = (points, limit, unit, plots, ticks = { marks: [], label: "" }) =
 var mergeRuns = (session, runs) => {
   const k = runs.reduce((total, run) => total + (run.k ?? ((run.number ?? 0) >= 1 ? 1 : 0)), 0);
   const n = runs.reduce((total, run) => total + (run.n ?? 1), 0);
-  return { session, number: n > 0 ? k / n : null, window: true, k, n, steps: void 0, setupChange: runs[0]?.setupChange };
+  return { session, number: n > 0 ? k / n : null, window: true, k, n, steps: void 0, setupChange: runs[0]?.setupChange, agentChars: void 0 };
 };
 var rowPoints = (points, perRun) => {
   const newestFirst = [...points].reverse().filter((point) => point.window && point.number !== null);
@@ -1923,6 +1851,24 @@ var directionOf = (since, before, worse) => {
   }
   return "no change yet";
 };
+var unbroken = (text) => text.replaceAll(" ", NO_BREAK);
+var agentReadsOf = (since, before, format, counted) => {
+  const charsOf = (points) => points.flatMap((point) => point.number === null || point.agentChars === void 0 ? [] : [point.agentChars]);
+  const sinceChars = charsOf(since);
+  const beforeChars = charsOf(before);
+  const sinceValue = percentile(sinceChars, 50);
+  const beforeValue = percentile(beforeChars, 50);
+  if (format.agents === void 0 || sinceChars.length < SINCE_POINTS || sinceValue === void 0 || beforeValue === void 0 || sinceValue === 0 && beforeValue === 0) {
+    return void 0;
+  }
+  const sinceText = sideText(format, { n: sinceChars.length, value: sinceValue });
+  const beforeText = sideText(format, { n: beforeChars.length, value: beforeValue });
+  if (sinceText === void 0 || beforeText === void 0) {
+    return void 0;
+  }
+  const over = sinceChars.length < counted ? { over: `${sinceChars.length} of ${plural(counted, "session")}` } : {};
+  return { agents: format.agents, since: sinceText, before: beforeText, ...over };
+};
 var setupEvidence = (points, format, worse, facts, suggested) => {
   const target = targetOf(suggested);
   const before = (index) => (point) => point.setupChange === void 0 || point.setupChange < index;
@@ -1935,7 +1881,7 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   const days = [];
   for (const { change, index } of relevant) {
     const at = points.findIndex(after(index));
-    titles.set(at, [...titles.get(at) ?? [], `Setup changed ${change.day}: ${change.paths.join(", ")}`]);
+    titles.set(at, [...titles.get(at) ?? [], `Setup changed ${change.day}: ${changedFiles(change)}`]);
     if (!days.includes(change.day)) {
       days.push(change.day);
     }
@@ -1948,7 +1894,8 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   if (suggested === void 0 || latest === void 0) {
     return { marks, label };
   }
-  const chip = { day: latest.change.day, paths: latest.change.paths.filter(target), direction: "no change yet" };
+  const { day, paths, added, removed } = latest.change;
+  const chip = { day, paths: paths.filter(target), added: added.filter(target), removed: removed.filter(target), direction: "no change yet" };
   const sinceSide = sideOf(points.filter(after(latest.index)), format);
   const beforeSide = sideOf(points.filter(before(latest.index)), format);
   const sinceText = sinceSide === void 0 ? void 0 : sideText(format, sinceSide.evidence);
@@ -1959,7 +1906,15 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   const over = plural(sinceSide.points, format.perRun === true ? "run" : "session");
   chip.direction = sinceText === beforeText ? "no change yet" : directionOf(sinceSide, beforeSide, worse);
   chip.compared = { since: sinceText, before: beforeText, over };
-  return { marks, label, since: `since ${chip.day} (${over}): ${sinceText} \xB7 before: ${beforeText}`, latest: chip };
+  const since = `since ${chip.day} (${over}): ${unbroken(sinceText)} \xB7 before: ${unbroken(beforeText)}`;
+  const reads = agentReadsOf(points.filter(after(latest.index)), points.filter(before(latest.index)), format, sinceSide.points);
+  if (reads === void 0) {
+    return { marks, label, since, latest: chip };
+  }
+  chip.agentReads = reads;
+  const count = reads.over === void 0 ? "" : ` (${reads.over})`;
+  const agents = `${reads.agents} read${count}: ${unbroken(reads.since)} \xB7 before: ${unbroken(reads.before)}`;
+  return { marks, label, since, agents, latest: chip };
 };
 var groupOf = (verdict) => verdict === "unused" ? "unmeasured" : verdict;
 var lineText = (insight, role) => {
@@ -1971,7 +1926,7 @@ var lineText = (insight, role) => {
   }
   return bare.charAt(0).toUpperCase() + bare.slice(1);
 };
-var headlineOf = (line) => {
+var headlineOf = (line, step) => {
   const signal = line.insight.signal;
   if (signal === "fix-followups") {
     return line.role === void 0 ? SIGNALS[signal].headline[0] : `${line.role}: fix follow-ups per run`;
@@ -1985,7 +1940,13 @@ var headlineOf = (line) => {
     return top === void 0 ? problem2 : `Fix items cluster on ${causePhrase(top.category)}`;
   }
   const mainThread = signal === "cache-per-output" && (line.role === void 0 || line.role === "main");
-  const headline = mainThread ? MAIN_CACHE2 : SIGNALS[signal].headline;
+  const checks = signal === "cache-per-output" && !mainThread && step === "verify";
+  let headline = SIGNALS[signal].headline;
+  if (mainThread) {
+    headline = MAIN_CACHE2;
+  } else if (checks) {
+    headline = VERIFY_CACHE;
+  }
   const [problem, good] = signal === "whole-reads" && line.role === "main" ? MAIN_WHOLE : headline;
   const role = line.role ?? NO_ROLE2;
   if (signal === "quiet-reviewer" && line.verdict !== "ok" && readEvidence(line.insight.window)?.k === 0) {
@@ -2070,6 +2031,9 @@ var measuredFinding = (line, step, facts, changes, insights) => {
   if (setup.since !== void 0) {
     evidence.since = setup.since;
   }
+  if (setup.agents !== void 0) {
+    evidence.agents = setup.agents;
+  }
   const finding = {
     id: findingId(line),
     step: step.id,
@@ -2078,7 +2042,7 @@ var measuredFinding = (line, step, facts, changes, insights) => {
     absent: false,
     byMain: false,
     impact: format.impact,
-    headline: headlineOf(line),
+    headline: headlineOf(line, step.id),
     line: lineText(insight, line.role),
     evidence,
     sessionValues
@@ -2191,6 +2155,156 @@ var healthReport = (insights, roleShorts, repositoryName) => {
   return report;
 };
 
+// src/ui/health-prompt.ts
+var INTRO = "Below is a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the next changes to the workflow setup that its numbers support.";
+var FINDING_INTRO = "Below is one finding of a workflow health report that Nurselog recorded for a Claude Code workflow. Read it as explained, then suggest the change to the workflow setup that its numbers support.";
+var STEP_NAMES = STEPS.map((step) => step.name).join(", ");
+var READING = [
+  "## How to read the report",
+  "",
+  `- A work session is a finished Claude Code session with at least ${WORK_SESSION_CALLS} main-thread tool calls. "Now" counts the latest work sessions (the window), "before" the work sessions recorded before them (the baseline).`,
+  "- A guideline is a fixed limit per signal, set in `insights.guidelines` of nurselog.config.json.",
+  '- Worth changing: worse than its guideline now. Worth considering: clearly worse than before, or half or more of the fix items about one cause. Working well: neither. Accepted: kept as it is on purpose (`insights.accepted` of nurselog.config.json) until it gets worse than before. For reference: a number without a verdict. Not measured: the data is missing; "not in this workflow" means no role of the setup does the step, "by the main thread" that the main thread does the step itself.',
+  "- Start here marks the finding to change first: of the findings to change with a suggested change, the one furthest from its guideline.",
+  `- Each finding names its workflow step (${STEP_NAMES}), its impact (cost, time or quality) and the setup of that step: models, budgets, review roles, verification kinds and the merge rule.`,
+  "- A suggested change adds lines to a file, removes or replaces lines in it, or creates a file with all its lines added, at times in two files: a line starting with - is removed, one starting with + is added. Its effect is a measured target or a direction, never an estimated saving.",
+  "- The report holds counts, tokens, costs and times only: no prompts, no code and no session titles."
+];
+var TASK = [
+  "## What to do",
+  "",
+  "1. If you can read the repository, first read CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so a change fits what is there. `nurselog insights --json` prints the whole report with the value of each work session.",
+  "2. Suggest at most three changes, the Start here finding first unless the evidence argues against it. For each: the finding it answers with its numbers, why the change helps, the change as a diff of the file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json), and the signal that should move over the next five work sessions, with its direction.",
+  "3. Prefer small changes over a rewrite, so the effect of each can be measured. Say so when a finding rests on few work sessions, and never state a number the report does not give.",
+  "4. Name what works well and should stay as it is.",
+  "5. If nothing is worth changing, say so rather than invent a change."
+];
+var FINDING_TASK = [
+  "## What to do",
+  "",
+  "1. If you can read the repository, first read the files the finding's suggested change goes to, when it has one, then CLAUDE.md, the files in .claude/agents/ and nurselog.config.json, so the change fits what is there; a file it creates should not exist yet, so if it does, change that file instead. `nurselog insights --json` prints the whole report with the value of each work session.",
+  "2. Make this one change and no other: the suggested change of the finding below, or one of your own when it has none. Give the finding it answers with its numbers, why the change helps, the change as a diff of each file it goes to (CLAUDE.md, a file in .claude/agents/ or nurselog.config.json; a new file in full), and the signal that should move over the next five work sessions, with its direction.",
+  "3. Keep the change small, so its effect can be measured. Keep the numbers as the report gives them, say so when the finding rests on few work sessions, and never state a number the report does not give.",
+  "4. If the evidence argues against the change, say so rather than make it."
+];
+var unmeasuredState = (finding) => {
+  if (finding.byMain) {
+    return "by the main thread";
+  }
+  return finding.absent ? "not in this workflow" : "not measured";
+};
+var sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+var DIRECTION_PHRASES = { better: "better since then", worse: "worse since then", "no change yet": "the signal shows no change yet" };
+var readFirst = (change) => {
+  const kinds = fileKinds(change).map(({ kind }) => kind);
+  const present = kinds.filter((kind) => kind !== "removed");
+  if (present.length === 0) {
+    const removed = kinds.length === 1 ? "The removed file" : "The removed files";
+    return `${removed} may have held this change: read the setup as it is now first and make the change only if the setup lacks it.`;
+  }
+  const named = ["changed", "added"].filter((kind) => present.includes(kind)).join(" and ");
+  const ask = present.length === 1 ? `The ${named} file may already hold this change: read it first` : `The ${named} files may already hold this change: read them first`;
+  return `${ask} and do not make it again.`;
+};
+var changedLine = (finding) => {
+  const change = finding.setupChange;
+  if (change === void 0) {
+    return [];
+  }
+  const compared = change.compared;
+  const sides = compared === void 0 ? "" : `: ${plainText(compared.since)} over ${plainText(compared.over)} against ${plainText(compared.before)}`;
+  const files = changedFiles(change, plainText);
+  const lines = [`- Changed ${plainText(change.day)}: ${files}, ${DIRECTION_PHRASES[change.direction]}${sides}. ${readFirst(change)}`];
+  const reads = change.agentReads;
+  if (compared !== void 0 && reads !== void 0) {
+    const over = reads.over === void 0 ? "" : ` over ${plainText(reads.over)}`;
+    lines.push(`- ${sentence(plainText(reads.agents))} read ${plainText(reads.since)}${over} since then against ${plainText(reads.before)}.`);
+  }
+  return lines;
+};
+var ACCEPTED_ASK = "The developer keeps these as they are on purpose; do not suggest a change to them.";
+var fileLines = (change) => {
+  const file = plainText(change.file);
+  let heading = `Lines to add to ${file}:`;
+  if (change.isNew === true) {
+    heading = `Create ${file} with:`;
+  } else if (change.removed.length > 0) {
+    heading = `Lines to change in ${file}:`;
+  }
+  return [heading, ...change.removed.map((line) => `- ${plainText(line)}`), ...change.lines.map((line) => `+ ${plainText(line)}`)];
+};
+var flaggedLines = (finding, startHere) => {
+  const start2 = finding.id === startHere ? " (Start here)" : "";
+  const facts = [`Step: ${plainText(finding.stepName)}.`, `Impact: ${finding.impact}.`];
+  if (finding.basis !== void 0) {
+    facts.push(`${sentence(plainText(finding.basis))}.`);
+  }
+  if (finding.accepted !== void 0) {
+    facts.push(`Accepted (${reasonText(finding.accepted)}), but worse than before.`);
+  }
+  const lines = ["", `### ${plainText(finding.headline)}${start2}`, facts.join(" "), plainText(finding.line)];
+  const evidence = finding.evidence;
+  if (evidence !== void 0) {
+    const numbers = [evidence.now, evidence.before, evidence.guideline].flatMap((number) => number === void 0 ? [] : [number]);
+    lines.push(...numbers.map((number) => `- ${sentence(plainText(number.label))}: ${plainText(number.text)}`));
+    if (evidence.setup !== "") {
+      lines.push(`- Setup: ${plainText(evidence.setup)}`);
+    }
+  }
+  lines.push(...changedLine(finding));
+  const change = finding.change;
+  if (change !== void 0) {
+    lines.push(`Fix: ${plainText(change.fix)}`, `Effect: ${plainText(change.effect)}`, ...changeFiles(change).flatMap(fileLines));
+  }
+  return lines;
+};
+var quietLine = (finding) => {
+  const head = `- ${plainText(finding.headline)} (${plainText(finding.stepName)})`;
+  if (finding.group === "unmeasured") {
+    return `${head}: ${unmeasuredState(finding)}. ${plainText(finding.line)}`;
+  }
+  if (finding.group === "accepted" && finding.accepted !== void 0) {
+    return `${head}: ${plainText(finding.line)} (accepted: ${reasonText(finding.accepted)})`;
+  }
+  return `${head}: ${plainText(finding.line)}`;
+};
+var flaggedGroup = (group) => group.group === "change" || group.group === "consider";
+var groupHeading = (group) => `## ${plainText(group.label)}`;
+var groupLines = (group, startHere) => {
+  const heading = groupHeading(group);
+  if (flaggedGroup(group)) {
+    return ["", heading, ...group.findings.flatMap((finding) => flaggedLines(finding, startHere))];
+  }
+  const ask = group.group === "accepted" ? ["", ACCEPTED_ASK] : [];
+  return ["", heading, ...ask, "", ...group.findings.map(quietLine)];
+};
+var reportHead = (report) => {
+  const lines = ["---", "", `# ${plainText(report.title)}`, "", `${sentence(plainText(report.count))}.`];
+  if (report.note !== void 0) {
+    lines.push("", `Note: ${plainText(report.note)}`);
+  }
+  return lines;
+};
+var healthPrompt = (report) => {
+  const lines = [INTRO, "", ...READING, "", ...TASK, "", ...reportHead(report)];
+  lines.push(...report.groups.flatMap((group) => groupLines(group, report.startHere)));
+  const closing = plainText(report.closing);
+  if (closing !== "") {
+    lines.push("", closing);
+  }
+  return lines.join("\n");
+};
+var findingPrompt = (report, findingId2) => {
+  const group = report.groups.find((entry) => flaggedGroup(entry) && entry.findings.some((finding2) => finding2.id === findingId2));
+  const finding = group?.findings.find((entry) => entry.id === findingId2);
+  if (group === void 0 || finding === void 0) {
+    return "";
+  }
+  const lines = [FINDING_INTRO, "", ...READING, "", ...FINDING_TASK, "", ...reportHead(report), "", groupHeading(group), ...flaggedLines(finding, report.startHere)];
+  return lines.join("\n");
+};
+var flaggedFindingIds = (report) => report.groups.filter(flaggedGroup).flatMap((group) => group.findings.map((finding) => finding.id));
+
 // src/cli/insights.ts
 var SYNOPSIS2 = "nurselog insights [--repo <path>] [--json | --prompt [--finding <id>]]";
 var PREFIX = "nurselog insights: ";
@@ -2257,7 +2371,8 @@ Usage: ${SYNOPSIS2}`);
   }
   if (values.prompt === true && report.basis.window > 0) {
     const ui = uiConfig(config, root);
-    const health = healthReport({ report, setup: workflowSetupOf(config, readAgentFiles(root)) }, ui.roleShorts, ui.repo);
+    const named = claudeMdNames(readClaudeMd(root), Object.keys(config.roles));
+    const health = healthReport({ report, setup: workflowSetupOf(config, readAgentFiles(root), named) }, ui.roleShorts, ui.repo);
     if (values.finding === void 0) {
       io.out(healthPrompt(health));
       return 0;

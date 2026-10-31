@@ -20,6 +20,8 @@ export const DEFAULT_ROLES = {
   architect: { stage: 'other', step: 'plan' },
   // Claude Code's built-in Plan agent type.
   Plan: { stage: 'other', step: 'plan' },
+  // A check runner runs the typecheck and the tests and returns their verdict: a check, no research (decision 190).
+  'check-runner': { stage: 'other', step: 'verify' },
   '*': { stage: 'other' },
 };
 

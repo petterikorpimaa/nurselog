@@ -308,6 +308,8 @@ var DEFAULT_ROLES = {
   architect: { stage: "other", step: "plan" },
   // Claude Code's built-in Plan agent type.
   Plan: { stage: "other", step: "plan" },
+  // A check runner runs the typecheck and the tests and returns their verdict: a check, no research (decision 190).
+  "check-runner": { stage: "other", step: "verify" },
   "*": { stage: "other" }
 };
 var LEGACY_ROLE_STAGE = "build";
@@ -2288,7 +2290,7 @@ var isFraction = (value) => typeof value === "number" && value >= 0 && value <= 
 var isLimit = (value) => value === null || Number.isInteger(value) && value >= 0;
 var isShareLimit = (value) => value === null || isFraction(value);
 var isPositiveLimit = (value) => value === null || isPositive(value);
-var isRoleStep = (value) => value === void 0 || value === "plan";
+var isRoleStep = (value) => value === void 0 || value === "plan" || value === "verify";
 var isRole = (value) => isPlainObject(value) && ROLE_STAGES.includes(value.stage) && (value.short === void 0 || typeof value.short === "string");
 var isRoleBudget = (value) => isPlainObject(value) && [value.toolCalls, value.verifyRounds].every((limit) => limit === void 0 || isLimit(limit));
 var isKeyUrl = (value) => {
@@ -2310,7 +2312,7 @@ var DEFAULTED_KEYS = [
   ["github.mergeBy", "developer or agent", isMergeBy],
   ["roles", OBJECT, isPlainObject],
   ["roles.*", "an object with a stage of implement, review, pr or other and an optional string short", isRole],
-  ["roles.*.step", "plan when present", isRoleStep],
+  ["roles.*.step", "plan or verify when present", isRoleStep],
   ["docs", OBJECT, isPlainObject],
   ["docs.roles", STRING_LIST, isStringList],
   ["docs.tools", STRING_LIST, isStringList],
@@ -2612,12 +2614,12 @@ var uiConfig = (config, root) => {
   };
 };
 var SETUP_KINDS = ["typecheck", "lint", "test"];
-var workflowSetupOf = (config, agents = []) => {
+var workflowSetupOf = (config, agents = [], named = {}) => {
   const roles = Object.entries(config.roles).map(([role, entry]) => {
     const limits = ownValue(config.budgets.roles, role) ?? {};
     const resolved = limits.toolCalls === void 0 ? config.budgets.default.toolCalls : limits.toolCalls;
     const toolCalls = resolved === 0 ? null : resolved;
-    if (entry.stage === "other" && entry.step === "plan") {
+    if (entry.stage === "other" && entry.step !== void 0) {
       return { role, stage: entry.stage, toolCalls, step: entry.step };
     }
     return { role, stage: entry.stage, toolCalls };
@@ -2627,7 +2629,11 @@ var workflowSetupOf = (config, agents = []) => {
   for (const [id, reason] of Object.entries(config.insights.accepted)) {
     ownEntry(accepted, id, () => reason);
   }
-  return { roles, verification, mergeBy: config.github.mergeBy, agents: agents.map((agent) => ({ ...agent })), accepted };
+  const claudeMd = {};
+  for (const [role, lines] of Object.entries(named)) {
+    ownEntry(claudeMd, role, () => structuredClone(lines));
+  }
+  return { roles, verification, mergeBy: config.github.mergeBy, agents: agents.map((agent) => ({ ...agent })), accepted, claudeMd };
 };
 
 // src/linear-flag.ts
@@ -8259,6 +8265,34 @@ var moveSeriesTokens = (series, from, to, count) => {
     delete series.byStage[from];
   }
 };
+var bucketHolding = (points, at, stage, tokens) => {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const item = points[index];
+    if (item.at === at && item.stage === stage && item.tokens >= tokens) {
+      return index;
+    }
+  }
+  return -1;
+};
+var movePoint = (points, at, from, to, share) => {
+  const source = bucketHolding(points, at, from, share.tokens);
+  if (source === -1) {
+    return;
+  }
+  const bucket = points[source];
+  bucket.tokens -= share.tokens;
+  bucket.usd -= share.usd;
+  const target = points.find((item) => item.at === at && item.stage === to);
+  if (target) {
+    target.tokens += share.tokens;
+    target.usd += share.usd;
+  } else {
+    points.splice(source + 1, 0, { at, stage: to, ...share });
+  }
+  if (bucket.tokens === 0) {
+    points.splice(source, 1);
+  }
+};
 var recountWithdrawn = (state, run, agentId, sessionId, config) => {
   const agent = ownValue(run.agents, agentId);
   const stage = agent ? tokenStage(state, run, agent, sessionId, config) : void 0;
@@ -8269,11 +8303,14 @@ var recountWithdrawn = (state, run, agentId, sessionId, config) => {
     if (entry.runId !== run.id || entry.agentKey !== agentId || entry.stage !== "fix") {
       continue;
     }
+    const share = { agentId, tokens: processedTokens(entry.tokens), usd: entry.tokens.usd };
     moveSeriesTokens(run.tokens, "fix", stage, entry.tokens);
+    movePoint(run.tokens.points, entry.pointAt, "fix", stage, share);
     entry.stage = stage;
     const session = entry.sessionId === void 0 ? void 0 : recordOf(state, entry.sessionId);
     if (session && entry.sessionStage === "fix") {
       moveSeriesTokens(session.tokens, "fix", stage, entry.tokens);
+      movePoint(session.tokens.points, entry.pointAt, "fix", stage, share);
       entry.sessionStage = stage;
     }
   }
@@ -8285,8 +8322,9 @@ var noteContext = (agent, data, config) => {
 };
 var MINUTE_MS = 60 * 1e3;
 var BUCKET_LOOKBACK = 30;
+var pointMinute = (at) => new Date(Math.floor(time(at) / MINUTE_MS) * MINUTE_MS).toISOString();
 var addPoint = (points, point) => {
-  const at = new Date(Math.floor(time(point.at) / MINUTE_MS) * MINUTE_MS).toISOString();
+  const at = pointMinute(point.at);
   const recent = points.slice(-BUCKET_LOOKBACK);
   const bucket = recent.find((item) => item.at === at && item.stage === point.stage);
   if (bucket) {
@@ -8325,9 +8363,10 @@ var onUsage = (state, event, config) => {
   }
   apply(counts, 1);
   const tokens = processedTokens(counts) - (previous ? processedTokens(previous.tokens) : 0);
-  addPoint(run.tokens.points, { at: data.at, stage, agentId: agentKey, tokens, usd: counts.usd - (previous?.tokens.usd ?? 0) });
+  const pointAt = previous?.pointAt ?? pointMinute(data.at);
+  addPoint(run.tokens.points, { at: pointAt, stage, agentId: agentKey, tokens, usd: counts.usd - (previous?.tokens.usd ?? 0) });
   const counted = addSessionTokens(state, event, previous, counts, stage, config);
-  const entry = { runId: run.id, agentKey, stage, tokens: counts, at: event.at, atMs: time(event.at) };
+  const entry = { runId: run.id, agentKey, stage, tokens: counts, pointAt, at: event.at, atMs: time(event.at) };
   state.index.requests[data.requestId] = counted ? { ...entry, ...counted } : entry;
   if (!agent.model || isModelAlias(agent.model)) {
     adoptModel(run, agent, data.model);
@@ -8362,7 +8401,8 @@ var addSessionTokens = (state, event, previous, counts, stage, config) => {
   onOverheadRequest(session, event, previous?.sessionStage === void 0);
   const recounted = before === session ? previous : void 0;
   const tokens = processedTokens(counts) - (recounted ? processedTokens(recounted.tokens) : 0);
-  addPoint(session.tokens.points, { at: data.at, stage: key, agentId: event.agentId ?? "main", tokens, usd: counts.usd - (recounted?.tokens.usd ?? 0) });
+  const pointAt = previous?.pointAt ?? pointMinute(data.at);
+  addPoint(session.tokens.points, { at: pointAt, stage: key, agentId: event.agentId ?? "main", tokens, usd: counts.usd - (recounted?.tokens.usd ?? 0) });
   if (!own) {
     return { sessionId, sessionStage: key };
   }
@@ -9720,6 +9760,37 @@ var ownFixes = (ctx, runs) => {
   }
   return [...fixes.values()];
 };
+var lastCallAt = (copy) => copy.now?.startedAt ?? copy.recent.at(-1)?.startedAt;
+var inLeg = (copy, legAt) => {
+  const last = lastCallAt(copy) ?? copy.startedAt;
+  return Math.max(time(copy.startedAt), time(last)) >= time(legAt);
+};
+var currentLegRuns = (ctx, agentId, legAt) => {
+  const working = ctx.runIds.filter((runId) => {
+    const run = ownValue(ctx.state.board.runs, runId);
+    const copy = run === void 0 ? void 0 : ownValue(run.agents, agentId);
+    return copy !== void 0 && inLeg(copy, legAt);
+  });
+  if (working.length > 0) {
+    return working;
+  }
+  const home = ownValue(ctx.state.index.agentRuns, agentId);
+  return home === void 0 ? [] : [home];
+};
+var reviewerNode = (ctx, runs, copy) => {
+  const merged = ownValue(ctx.agents, copy.id);
+  const node = agentNode2(copy, merged);
+  const legAt = (merged ?? copy).resumedAt;
+  if (legAt === void 0 || !ACTIVE_STATES.has(node.state) || inLeg(copy, legAt)) {
+    return node;
+  }
+  const current = currentLegRuns(ctx, copy.id, legAt);
+  const inRow = (runId) => runs.some((run) => run.id === runId);
+  if (current.length > 0 && !current.some(inRow)) {
+    node.state = reviewerVerdict(copy);
+  }
+  return node;
+};
 var rowReviewers = (ctx, runs, fixes) => {
   const seen = /* @__PURE__ */ new Map();
   for (const agent of runs.flatMap((run) => Object.values(run.agents))) {
@@ -9731,7 +9802,7 @@ var rowReviewers = (ctx, runs, fixes) => {
   return all.filter(({ agent }) => ownAgent2(ctx, agent.id)).map((entry) => {
     const round = all.filter((other) => other.reviewerId === entry.reviewerId).indexOf(entry) + 1;
     const afterFix = fixes.filter((fix) => fix.reReview?.agentId === entry.agent.id).at(-1)?.id;
-    return { ...agentNode2(entry.agent, ctx.agents[entry.agent.id]), reviewerId: entry.reviewerId, round, ...afterFix === void 0 ? {} : { afterFix } };
+    return { ...reviewerNode(ctx, runs, entry.agent), reviewerId: entry.reviewerId, round, ...afterFix === void 0 ? {} : { afterFix } };
   });
 };
 var answeredReviewer = (fix, reviewers) => {

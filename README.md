@@ -308,23 +308,24 @@ When a repository's loop differs, the board draws what it can derive and leaves 
 <details>
 <summary>Roles and the report block</summary>
 
-- The config `roles` maps an agent type to `{ "stage": "implement" | "review" | "pr" | "other", "short"?: "<label>", "step"?: "plan" }`;
+- The config `roles` maps an agent type to `{ "stage": "implement" | "review" | "pr" | "other", "short"?: "<label>", "step"?: "plan" | "verify" }`;
   the fallback `*` is required and is `other` by default. A stage `build`, the old name of `implement`, is still
   read as `implement`. An `other` agent appears in the agent table and under the Plan node, until its first file edit
   on a branch makes it an Implement stream there.
 - Default roles: `implementer` implements; `conventions-checker`, `code-reviewer`, `spec-reviewer`,
   `typescript-reviewer`, `security-reviewer`, `design-reviewer`, `database-reviewer`, `silent-failure-hunter` and
   `pr-test-analyzer` review; `pr-shepherd` opens the PR; `planner`, `architect` and the built-in `Plan`
-  agent plan (stage `other`, step `plan`).
+  agent plan (stage `other`, step `plan`); `check-runner` runs the checks and reports their result (stage `other`,
+  step `verify`).
   Any other agent type needs its own entry in `roles`;
   `nurselog init` writes one for each agent in `.claude/agents` whose name is `implementer`, `builder`, `developer`,
   `coder` or `engineer` or ends in `-` plus one of them or in `-dev` (implement), is `reviewer`, `qa` or `tester` or
   ends in `-reviewer`, `-checker`, `-analyzer`, `-hunter`, `-qa` or `-tester` (review) or ends in `shepherd` (pr). An
   implement name whose `tools` list has none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` is read-only
   and gets none. Any other agent gets an implement role when its `tools` key lists `Edit`, `Write`, `MultiEdit` or
-  `NotebookEdit`, except the names in `docs.roles` (default `doc-updater`) and the default plan roles `planner`,
-  `architect` and `Plan`, which keep their default; an agent without a `tools` key inherits
-  every tool and gets no role from them.
+  `NotebookEdit`, except the names in `docs.roles` (default `doc-updater`), the default plan roles `planner`,
+  `architect` and `Plan` and the default verify role `check-runner`, which keep their default; an agent without a
+  `tools` key inherits every tool and gets no role from them.
 - Agents with an implement, review or pr role get an injected instruction to end their report with a fenced `nurselog`
   YAML block: `decisions`, `followups` (`issue`, `improve` or `fix`, with text, an optional file and an optional
   category: `tests`, `types`, `errors`, `security`, `performance`, `style`, `docs` or `ui`), `questions` and `files`.
@@ -602,7 +603,7 @@ Arrays such as `packages` replace the default list whole.
 | `packages` | `[]` | `{ id, color, paths[], label? }`, up to 50. An implementer with no package is in the stream `repo`. |
 | `stageColors` | built in | Hex colour per `plan`, `implement`, `review`, `fix`, `pr`, `docs`, `wait`; the old key `build` is still read as `implement`. |
 | `roles` | see "Roles and the report block" | Agent type to `{ stage, short?, step? }`; `*` required. |
-| `roles.<name>.step` | `plan` for `planner`, `architect` and `Plan` | `plan` puts a role of stage `other` in the Plan step of the workflow health map instead of Explore; another stage ignores it. |
+| `roles.<name>.step` | `plan` for `planner`, `architect` and `Plan`; `verify` for `check-runner` | `plan` puts a role of stage `other` in the Plan step of the workflow health map instead of Explore, `verify` in the Verify step, where its runs count as checks, not as research; another stage ignores it. |
 | `docs.roles` | `["doc-updater"]` | Agents that put a run in Docs. |
 | `docs.tools` | `[]` | Tool names that put a run in Docs. |
 | `modelLetters` | Haiku H, Sonnet S, Opus O, Fable F | Short model label per model prefix; the longest prefix wins. |
@@ -766,11 +767,16 @@ Token economy, Questions and waits): the last 5 work sessions against the up to 
 guideline. It reads only the session aggregates, so it needs no running board. The board shows the same report as a
 folded strip between the Branches and token use bar and the session cards, which opens to a map of seven workflow
 steps, each with its setup and verdict; a Plan step joins them between Main thread and Explore while a recent session
-used plan mode or ran a plan role (`planner`, `architect`, the built-in `Plan` agent, or a role with `"step": "plan"`). A step's setup names the model of its roles and the implementers' turn limit:
+used plan mode or ran a plan role (`planner`, `architect`, the built-in `Plan` agent, or a role with `"step": "plan"`).
+A verify role (`check-runner`, or a role with `"step": "verify"`) counts on the Verify step, not as research. A step's setup names the model of its roles and the implementers' turn limit:
 the board and `nurselog insights --prompt` read the `name`, `model` and `maxTurns` lines of the frontmatter in
 `.claude/agents/*.md` (the first 4096 bytes of at most 200 files, no symbolic links) and no other text of those files,
-and without a `model` line, or with `model: inherit`, a step shows the model its sessions recorded. `CLAUDE.md` is not
-read. A step is a button that opens the workflow health report filtered to that
+and without a `model` line, or with `model: inherit`, a step shows the model its sessions recorded. Of the root
+`CLAUDE.md` they keep only the lines that name a role (at most 5 per role and 128 in all, of the first 64 roles, from
+a file of at most 256 KiB, a symbolic link followed only into the repository), so the fix for a reviewer that finds
+nothing lists the lines to remove (a line that names another role too is left for you to edit) and a suggested agent
+that `CLAUDE.md` names already gets no second line; `.claude/CLAUDE.md` and `@` imports are not read.
+A step is a button that opens the workflow health report filtered to that
 step, and "Open report" in the strip's header opens it whole.
 
 The report groups its findings as Worth changing, Worth considering, Working well, For reference and Not measured, and a
@@ -786,7 +792,8 @@ step would cut what the numbers show, the change adds it: a new agent file, mark
 `CLAUDE.md` line that runs it, each with its own "Copy added lines" (a `check-runner` agent when the main thread reads
 long check output, a `code-reviewer` when no reviewer ran and PRs fail their checks or are sent back). Where the file a finding's fix goes to
 changed within the recorded sessions (and the next session kept the change), its sparkline marks the change, its
-evidence compares the sessions since with the ones before, and the finding reads "changed <date>" with whether it got
+evidence compares the sessions since with the ones before (for the main thread's reads and check output also what
+the research agents, such as Explore, or the check runner read, so you see where the reads moved), and the finding reads "changed <date>" with whether it got
 better, worse or shows no change yet. The board never changes a file. "Copy as
 prompt" copies the whole report with instructions for an AI assistant to read it and suggest changes, and "Show the prompt"
 shows what is copied. A session reads the same prompts itself through the `health` tool ([Markers](#markers)). The token ranking, inside the Branches and token use bar, links to the report with "N workflow
