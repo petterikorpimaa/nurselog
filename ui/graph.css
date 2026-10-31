@@ -182,8 +182,11 @@
    once; the band is an alpha mask, so its stops need only their opacity */
 .session-graph .node-sheen { pointer-events: none; }
 .session-graph .node-sheen-light { fill: var(--fg); }
-/* a node's hit area, 5 wider than the node */
-.session-graph .node .node-hit { fill: transparent; }
+/* a node's hit area, 5 wider than the node; its stroke is the linked ring: the nodes of one agent drawn more than once
+   (its resumed legs, decision 187) ring each other while one is pointed at or focused, fading with the dimming; the
+   ring crosses the typical-length ticks of a running node, and no line joins the nodes */
+.session-graph .node .node-hit { fill: transparent; stroke: var(--fg-2); stroke-width: 1.4; stroke-opacity: 0; transition: stroke-opacity .2s; }
+.session-graph .node.linked .node-hit { stroke-opacity: 1; }
 /* a folded pipeline's compact row: lighter pills with 10 px text */
 .session-graph .pill.compact rect { fill: color-mix(in srgb, var(--c) 8%, var(--card)); }
 .session-graph .pill.compact text { font-size: 10px; }

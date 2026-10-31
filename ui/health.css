@@ -2,8 +2,9 @@
    workflow health styles of reference/demo.html. health-strip.ts draws the strip between the board panels and the card
    stack of a session view. The colours are the tokens of board.css. The header is the toggle, its chevron the keyboard
    control, and "Open report" (.hso, a .button) sits at its right; the body opens with a grid-rows transition and the
-   map fades and rises on the same one. The map: seven steps on one line, each a button that opens the report, four
-   columns without the line at 980 px and narrower, one column on a vertical line at 760 px and narrower. */
+   map fades and rises on the same one. The map: seven steps on one line, or eight with Plan (decision 182), each a
+   button that opens the report, four columns without the line at 980 px and narrower (eight steps from 1100 px), one
+   column on a vertical line at 760 px and narrower. */
 
 .hstrip { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
 .hsh {
@@ -32,18 +33,26 @@
 .hsb > div { overflow: hidden; min-height: 0; }
 .hsb .wmap { opacity: 0; transform: translateY(-10px) scale(.985); transition: opacity .3s ease, transform .5s var(--ease); }
 .hsb.open .wmap { opacity: 1; transform: none; transition: opacity .4s ease .08s, transform .5s var(--ease); }
+/* seven steps, or eight with Plan (decision 182): the strip sets data-steps, the columns and the line's ends follow */
 .wmap {
+  --steps: 7;
   list-style: none; margin: 0; padding: 4px 12px 12px; transform-origin: top center; position: relative;
-  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(var(--steps), minmax(0, 1fr));
 }
+.wmap[data-steps="8"] { --steps: 8; }
 .wmap li { position: relative; min-width: 0; }
+/* above 760 px each step spans four of the map's rows, the dot, the name, the setup line and the verdict, as a subgrid
+   down to its button, so the verdicts of a row line up however many lines a setup line before them takes */
+.wmap li:not(.wline) { display: grid; grid-row: span 4; grid-template-rows: subgrid; }
 /* one line from the first step to the last */
 .wmap .wline {
-  position: absolute; top: 21px; left: calc(12px + (100% - 24px) / 14); right: calc(12px + (100% - 24px) / 14);
+  position: absolute; top: 21px; left: calc(12px + (100% - 24px) / (2 * var(--steps)));
+  right: calc(12px + (100% - 24px) / (2 * var(--steps)));
   height: 1px; background: var(--border-2); transform-origin: left center; pointer-events: none;
 }
 .wn {
-  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; border: 0;
+  position: relative; display: grid; grid-row: span 4; grid-template-rows: subgrid; justify-items: center;
+  align-content: start; row-gap: 2px; width: 100%; border: 0;
   background: transparent; border-radius: 10px; padding: 10px 6px 8px; color: var(--fg-2); text-align: center;
   cursor: pointer; transition: background .2s;
 }
@@ -66,8 +75,9 @@
 }
 .wl { font-size: 12.5px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
 .wn.absent .wl { color: var(--fg-3); }
-/* the setup line wraps in the column layouts, balanced, and keeps one line's height when empty (the main thread's), so
-   the verdicts of a row line up; a role name without a break point wraps anywhere rather than spilling over */
+/* the setup line wraps in the column layouts, balanced, only after a separator (the strip draws the other spaces as
+   no-break spaces), and keeps one line's height when empty (Your answers'); a part without a break point that is
+   wider than its step wraps anywhere rather than spilling over */
 .ws {
   font: 500 10px var(--f-mono); color: var(--fg-3); max-width: 100%; min-height: 1lh; white-space: normal;
   text-wrap: balance; overflow-wrap: anywhere;
@@ -80,8 +90,17 @@
 .wn.bump .wd { animation: health-bump .5s var(--ease); }
 @keyframes health-bump { 35% { transform: scale(1.12); } }
 @media (max-width: 980px) {
-  .wmap { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 6px; }
+  .wmap { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* the space between the two rows of steps, as a margin: a row gap would fall between a step's own rows too */
+  .wmap li:not(.wline) { margin-bottom: 6px; }
   .wmap .wline { display: none; }
+}
+/* eight steps take two rows of four from 1100 px, where eight columns leave a setup line too little room; the row
+   layout below 760 px is the same for seven and eight */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .wmap[data-steps="8"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .wmap[data-steps="8"] li:not(.wline) { margin-bottom: 6px; }
+  .wmap[data-steps="8"] .wline { display: none; }
 }
 @media (max-width: 760px) {
   .hsh h2 { flex: 1 1 auto; }
@@ -89,14 +108,16 @@
   .hsc { order: 3; flex-basis: calc(100% - 30px); margin-left: 30px; }
   .hsu { order: 4; flex-basis: calc(100% - 30px); margin: -4px 0 0 30px; }
   .wmap { grid-template-columns: 1fr; row-gap: 0; }
+  .wmap li:not(.wline) { display: block; grid-row: auto; margin-bottom: 0; }
   .wmap .wline {
-    display: block; top: calc(4px + (100% - 16px) / 14); bottom: calc(12px + (100% - 16px) / 14); left: 30px;
+    display: block; top: calc(4px + (100% - 16px) / (2 * var(--steps))); bottom: calc(12px + (100% - 16px) / (2 * var(--steps))); left: 30px;
     right: auto; width: 1px; height: auto; transform-origin: center top;
   }
   /* each step a row: the dot, the name over the setup line, and the verdict at the right */
   .wn {
-    display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; grid-template-areas: "d l v" "d s v";
-    align-items: center; gap: 0 12px; text-align: left; padding: 8px 8px 8px 11px;
+    display: grid; grid-row: auto; grid-template-columns: 14px minmax(0, 1fr) auto; grid-template-rows: auto auto;
+    grid-template-areas: "d l v" "d s v"; justify-items: normal; align-content: normal; align-items: center; gap: 0 12px;
+    text-align: left; padding: 8px 8px 8px 11px;
   }
   .wd { grid-area: d; margin: 0; }
   .wl { grid-area: l; }
@@ -114,8 +135,13 @@
 .main-box.health-mode .main-empty, .main-box.health-mode .main-latest, .main-box.health-mode .main-earlier { display: none; }
 .main-box:not(.health-mode) .hrep { display: none; }
 .hrep { flex: none; display: flex; flex-direction: column; gap: 16px; }
-/* the filters: two labelled segmented controls, in the toolbar's visual language */
-.hflt { display: flex; flex-direction: column; gap: 8px; }
+/* the filters: two labelled segmented controls, in the toolbar's visual language, and the summary line under them */
+.hflt { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+.hflt > .hfr, .hflt > .hfsum { grid-column: 1; }
+/* the Step control spans the row, as its options vary in number; "Copy report as prompt" sits at the right of the
+   Impact control, a fixed four options */
+.hflt > .hfr:first-child { grid-column: 1 / -1; }
+.hfa { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; display: flex; }
 .hfr { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 12px; }
 .hfk { font: 600 10px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
 .hseg {
@@ -186,6 +212,14 @@
 .imp.time { color: var(--imp-time); }
 .imp.quality { color: var(--imp-quality); }
 .bas { font-size: 11.5px; color: var(--fg-3); }
+/* the changed chip: the date of the latest change of the finding's target and the direction since it (decision 184) */
+.hchg {
+  font: 500 10px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--fg-2);
+  border: 1px solid var(--border-2); border-radius: 999px; padding: 0 7px; white-space: nowrap;
+}
+.hchg b { font-weight: 600; color: var(--fg-3); }
+.hchg.better b { color: var(--gain); }
+.hchg.worse b { color: var(--amber); }
 .fdt { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--fg); line-height: 1.3; }
 .fdl { margin: 0; font-size: 13px; line-height: 1.5; color: var(--fg-2); max-width: 78ch; }
 /* a suggested change: the "Fix" tag, the fix and its effect under it */
@@ -214,10 +248,15 @@
 .xp.open { grid-template-rows: 1fr; }
 .xp > div { overflow: hidden; min-height: 0; }
 .hf.change .xp:not(.open), .hf.consider .xp:not(.open) { margin-top: -8px; }
-/* the change: the file and "Copy added lines" over the lines to add */
+/* the change: the file and "Copy added lines" over the lines it removes and the lines it adds; a long file name wraps */
 .diff { background: var(--page); border: 1px solid var(--border); border-radius: 8px; margin-top: 2px; }
 .dfh { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--border); }
-.dfh .dff { font: 600 11px var(--f-mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dfh .dff { font: 600 11px var(--f-mono); color: var(--fg); min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.dfh .hcp { align-self: flex-start; }
+/* after a new file's name, on the line of its last part (the demo's `.dfh em`) */
+.dff em { font: 500 10px var(--f-mono); color: var(--gain); font-style: normal; white-space: nowrap; }
+/* a change to two files: a new agent file over the line that runs it */
+.dfs { display: grid; gap: 8px; }
 /* as wide as its widest label, "Copy added lines", so its left edge stays put when the label changes */
 .hcp {
   margin-left: auto; min-width: 10em; min-height: 24px; border: 1px solid var(--border-2); background: var(--card-2);
@@ -225,14 +264,24 @@
   white-space: nowrap;
 }
 .hcp:hover { color: var(--fg); }
-/* in an actions row (the report prompt's) it has the toggles' size and radius, and keeps its fill */
-.fda .hcp { padding: 2px 9px; font-size: 12px; border-radius: 7px; }
+/* in an actions row (a finding's, the report prompt's) and at the filters it has the toggles' size and radius, and keeps its fill */
+.fda .hcp, .hfa .hcp { padding: 2px 9px; font-size: 12px; border-radius: 7px; }
+/* packed with the toggles at the row's right edge, so a finding's "Show the prompt", shown before it, grows the row to the left */
+.fda .hcp { margin-left: 0; }
+.fda .hcp:hover, .hfa .hcp:hover { background: var(--card-3); }
+/* as wide as its widest label, "Copy report as prompt", so its left edge stays put when the label changes */
+.hfa .hcp { min-width: 13em; }
 .diff pre { margin: 0; padding: 6px 0; font: 400 11.5px/1.55 var(--f-mono); white-space: pre-wrap; word-break: break-word; }
 /* a line: the mark in its own column, so a wrapped line hangs beside it; the mark stays out of a selection */
 .dl { display: grid; grid-template-columns: 14px minmax(0, 1fr); padding: 0 10px; }
 .dl i { font-style: normal; color: var(--fg-3); -webkit-user-select: none; user-select: none; }
 .dl.add { background: color-mix(in srgb, var(--gain) 8%, transparent); color: color-mix(in srgb, var(--gain) 45%, var(--fg)); }
 .dl.add i { color: var(--gain); }
+.dl.del { background: color-mix(in srgb, var(--red) 8%, transparent); color: color-mix(in srgb, var(--red) 45%, var(--fg)); }
+.dl.del i { color: var(--red); }
+.dla { display: contents; }
+/* "Removed: " and "Added: " for a screen reader, never in a selection */
+.dl .visually-hidden { -webkit-user-select: none; user-select: none; }
 /* the evidence: the setup line, the numbers and the sparkline, then the window's sessions; without a session key in the
    report the rows leave out the key column */
 .evb { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
@@ -252,6 +301,10 @@
 .hsp .hz { fill: var(--fg-3); opacity: .6; }
 .hsp .sep { stroke: var(--border-2); stroke-width: 1; }
 .hsp .hgl { stroke: var(--amber); stroke-width: 1; stroke-dasharray: 3 2; opacity: .75; }
+/* a setup change: a short tick over the bars before the first point of the change, in another token than the split line */
+.hsp .stk line { stroke: var(--focus); stroke-width: 1.5; }
+.hsp .stk rect { fill: transparent; }
+.evc { margin: 0; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
 .hevl { list-style: none; margin: 0; padding: 0 0 4px; }
 .hevr {
   display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; grid-template-areas: "k t go" ". v v"; gap: 1px 10px;
@@ -269,9 +322,9 @@
 /* inside the evidence panel's clip, so the ring sits within the button */
 .hevr .go:focus-visible { outline-offset: -2px; }
 .hevr .go.off { min-height: 0; border: 0; cursor: default; color: var(--fg-3); font: 500 10.5px var(--f-mono); padding: 0; }
-/* working well, for reference and not measured: still there, quieter */
-.hg.okg .hfl, .hg.ifg .hfl, .hg.nmg .hfl { border-top: 1px solid var(--border); }
-.hf.ok, .hf.info, .hf.nm { border-bottom: 1px solid var(--border); }
+/* working well, accepted, for reference and not measured: still there, quieter */
+.hg.okg .hfl, .hg.acg .hfl, .hg.ifg .hfl, .hg.nmg .hfl { border-top: 1px solid var(--border); }
+.hf.ok, .hf.acc, .hf.info, .hf.nm { border-bottom: 1px solid var(--border); }
 .okr {
   display: grid; grid-template-columns: 120px minmax(0, 1fr) auto 12px; gap: 12px; align-items: center; width: 100%;
   padding: 8px 4px; border: 0; background: transparent; text-align: left; color: var(--fg-2); font-size: 12.5px;
@@ -284,11 +337,19 @@ button.okr:focus-visible { outline-offset: -2px; }
 .okr svg { width: 11px; height: 11px; color: var(--fg-3); transform: rotate(90deg); transition: transform .3s var(--ease); }
 .okr[aria-expanded="true"] svg { transform: rotate(180deg); }
 .okv { font: 500 11.5px var(--f-mono); color: var(--fg-2); white-space: nowrap; }
-.hf.ok .xp > div > .evb, .hf.info .xp > div > .evb { padding: 0 4px 12px 136px; }
+.hf.ok .xp > div > .evb, .hf.acc .xp > div > .evb, .hf.info .xp > div > .evb { padding: 0 4px 12px 136px; }
 .hf.nm .okr { grid-template-columns: 120px minmax(0, 1fr) auto; padding-bottom: 2px; }
 .hf.nm .okt { color: var(--fg-3); }
 .hnm { font: 500 10.5px var(--f-mono); color: var(--fg-3); border: 1px dashed var(--border-2); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
 .hreason { margin: 0; padding: 0 4px 9px 136px; font-size: 12px; color: var(--fg-3); line-height: 1.45; }
+/* an accepted finding back in its group, worse than before (decision 180) */
+.hacw {
+  font: 500 10.5px var(--f-mono); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: 999px; padding: 0 8px; white-space: nowrap;
+}
+/* the accept entry in a finding's evidence: one line in the change's box (its padding the prompt's, below); the button as
+   wide as its widest label, "Copy accept entry" */
+.hae .hcp { min-width: 10.5em; }
 /* a finding whose group changed between two reports */
 .hf.hflash { animation: health-flash 1.4s ease; }
 @keyframes health-flash { 0%, 30% { background-color: rgba(255, 255, 255, .12); } }
@@ -296,8 +357,10 @@ button.okr:focus-visible { outline-offset: -2px; }
 /* the footer: the line, then the report prompt's actions row (a finding's .fda) and its panel; a closed panel takes the gap above it back */
 .hfooter { display: flex; flex-direction: column; gap: 8px; }
 .hfooter .xp:not(.open) { margin-top: -8px; }
-/* the prompt: the .diff box, its text wrapped and scrolling within 320 px, reachable by the keyboard */
-.hpr pre { padding: 6px 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; }
+/* the prompt: the .diff box, its text wrapped and scrolling within 320 px, reachable by the keyboard; the accept entry's
+   box pads its line as the prompt does */
+.hpr pre, .hae pre { padding: 6px 10px; }
+.hpr pre { max-height: 320px; overflow: auto; white-space: pre-wrap; }
 .hpr pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* the token ranking's link to the report: an amber dot, the text and a chevron turned right */
 .hlink {
@@ -316,6 +379,12 @@ button.okr:focus-visible { outline-offset: -2px; }
 .hsum .hchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; }
 .hsum i { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
 @media (max-width: 760px) {
+  /* the filters' "Copy report as prompt" wraps under the summary line, left aligned */
+  .hflt { grid-template-columns: minmax(0, 1fr); }
+  .hfa { grid-column: 1; grid-row: auto; justify-self: start; }
+  /* a finding's "Copy as prompt" as wide as its label: its row holds one line from about a 450 px window; narrower,
+     "Evidence" wraps under it */
+  .fda .hcp { min-width: 0; }
   /* minmax(0, 1fr), so a control wider than the modal scrolls with its faded edge instead of widening the column */
   .hfr { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .hfsum { margin-left: 0; }
@@ -328,7 +397,7 @@ button.okr:focus-visible { outline-offset: -2px; }
   .okr .okt { grid-area: t; }
   .okr .okv, .hf.nm .hnm { grid-area: v; }
   .okr svg { grid-area: c; }
-  .hf.ok .xp > div > .evb, .hf.info .xp > div > .evb, .hreason { padding-left: 4px; }
+  .hf.ok .xp > div > .evb, .hf.acc .xp > div > .evb, .hf.info .xp > div > .evb, .hreason { padding-left: 4px; }
   .hsp { margin-left: 0; width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
