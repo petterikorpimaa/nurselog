@@ -9980,7 +9980,35 @@ var shortDuration = (ms) => {
   return hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 };
 var reviewerLabel = (reviewer) => reviewer.afterFix !== void 0 || reviewer.round > 1 ? `${reviewer.reviewerId} \xB7 re-review` : reviewer.reviewerId;
-var isReReviewOnly = (row2) => row2.reviewers.length > 0 && row2.reviewers.every((reviewer) => reviewer.afterFix !== void 0);
+var answeredHere = (row2, reviewer) => row2.fixes.some((fix) => fix.id === reviewer.afterFix && fix.reviewerAgentId === reviewer.agentId);
+var isReReviewOnly = (row2) => row2.reviewers.length > 0 && row2.reviewers.every((reviewer) => reviewer.afterFix !== void 0 && !answeredHere(row2, reviewer));
+var startMs = (node) => node.startedAt === void 0 ? 0 : time(node.startedAt);
+var homeRow = (agent, nodes) => nodes.find((node) => node.branch === agent?.branch)?.branch ?? nodes[0].branch;
+var legRow = (agent, nodes) => {
+  const current = nodes.filter((node) => node.earlierLeg === void 0);
+  return [...current].sort((a, b) => startMs(a) - startMs(b)).pop()?.branch ?? homeRow(agent, nodes);
+};
+var legRows = (session, rows, pick, fixes) => {
+  const nodes = /* @__PURE__ */ new Map();
+  const add = (agentId, node) => {
+    nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
+  };
+  for (const row2 of rows) {
+    for (const node of [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]) {
+      add(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
+    }
+    for (const fix of fixes ? row2.fixes : []) {
+      add(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
+    }
+  }
+  const picked = /* @__PURE__ */ new Map();
+  for (const [agentId, list] of nodes) {
+    if (new Set(list.map((node) => node.branch)).size > 1) {
+      picked.set(agentId, pick(ownValue(session.agents, agentId), list));
+    }
+  }
+  return picked;
+};
 var prDrawn = (row2) => row2.pr !== void 0 && (row2.owner || row2.pr.agentId !== void 0 || row2.pr.pr?.openedHere === true);
 var mergeDrawn = (row2) => row2.owner && row2.merge !== void 0 && row2.merge.state !== "closed";
 var rowColor = (row2) => row2.package === void 0 ? "shared" : `package:${row2.package}`;
@@ -10310,7 +10338,10 @@ var placeSession = (session, options, room) => {
   add({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R2, agentId: "main", ...idle, ...slide2("plan", planAt) });
   add({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R2 + LABEL_GAP), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
   const agentKeys = /* @__PURE__ */ new Map([["main", sessionKeys.plan]]);
-  const reviewerRows = /* @__PURE__ */ new Set();
+  const keyRows = legRows(session, session.rows, homeRow, false);
+  const targetRows = legRows(session, rows, legRow, true);
+  const nodeToken = (agentId, branch) => (keyRows.get(agentId) ?? branch) === branch ? agentId : `${branch}:${agentId}`;
+  const targetHere = (agentId, branch) => (targetRows.get(agentId) ?? branch) === branch;
   const labelledRight = /* @__PURE__ */ new Set();
   if (multi) {
     for (const group of groups2) {
@@ -10364,7 +10395,7 @@ ${FOLD_HINT}` : label };
   const forkRunKey = (plan) => {
     const lanes = plan.multi ? [...plan.lanes].reverse() : plan.lanes;
     const run = lanes.find((stream) => stream.runs.length > 0)?.runs[0];
-    return run === void 0 ? void 0 : sessionKeys.agent(run.agentId);
+    return run === void 0 ? void 0 : sessionKeys.agent(nodeToken(run.agentId, plan.row.branch));
   };
   const lineBStarted = /* @__PURE__ */ new Set();
   const intoLineB = (plan, fromY) => wrap ? { shape: "wrap", extra: { drop: plan.split - fromY } } : { shape: "curve", extra: {} };
@@ -10435,13 +10466,16 @@ ${FOLD_HINT}` : label };
       let previous = start;
       let previousKey = startKey;
       stream.runs.forEach((run, index) => {
-        const key = sessionKeys.agent(run.agentId);
+        const token = nodeToken(run.agentId, branch);
+        const key = sessionKeys.agent(token);
         const handed = index > 0 && stream.runs[index - 1].state === "handed";
         const nodeBase = { ...base, agentId: run.agentId };
         const at = { x: x0 + index * runStep(stream.runs.length), y: laneY };
-        agentKeys.set(run.agentId, key);
+        if (targetHere(run.agentId, branch)) {
+          agentKeys.set(run.agentId, key);
+        }
         placedY.set(key, laneY);
-        const inKey = `edge:agent:${run.agentId}`;
+        const inKey = `edge:agent:${token}`;
         edge(inKey, previous, { key, dx: -NODE_R2 }, handed ? "handed" : flowOf(run), laneColor, "curve", nodeBase);
         const mark = markOf(run.model, options);
         const last = index === stream.runs.length - 1 && row2.join !== void 0 && column("join") !== void 0;
@@ -10449,7 +10483,7 @@ ${FOLD_HINT}` : label };
         const dot = { edges: [inKey], when: "start", color: laneColor, ...last ? { out: [joinEdge] } : {} };
         add({ kind: "node", key, at, state: run.state, color: laneColor, mark, radius: NODE_R2, stale: run.stale, ...nodeBase, from: { key: previousKey }, dot });
         if (index > 0) {
-          add({ kind: "text", key: `text:run:${run.agentId}`, at: { key, dy: -(NODE_R2 + LABEL_GAP) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
+          add({ kind: "text", key: `text:run:${token}`, at: { key, dy: -(NODE_R2 + LABEL_GAP) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
         }
         previous = { key, dx: NODE_R2 };
         previousKey = key;
@@ -10465,7 +10499,7 @@ ${FOLD_HINT}` : label };
         const depth = plan.depths.get(stream.id) ?? 0;
         const parentStream = plan.parents.get(stream.id);
         const parentRun = plan.lanes.find((candidate) => candidate.id === parentStream)?.runs[0];
-        const laneOrigin = parentRun === void 0 ? pillExit : { key: sessionKeys.agent(parentRun.agentId), dx: NODE_R2 };
+        const laneOrigin = parentRun === void 0 ? pillExit : { key: sessionKeys.agent(nodeToken(parentRun.agentId, branch)), dx: NODE_R2 };
         const laneColor = `package:${stream.package}`;
         const width2 = pillWidth(stream.package);
         const laneKey = sessionKeys.lanePill(branch, stream.id);
@@ -10535,36 +10569,39 @@ ${FOLD_HINT}` : label };
       const feed = exit;
       row2.reviewers.forEach((reviewer, index) => {
         const ry = y + dys[index];
-        const token = reviewerRows.has(reviewer.agentId) ? `${branch}:${reviewer.agentId}` : reviewer.agentId;
-        reviewerRows.add(reviewer.agentId);
+        const token = nodeToken(reviewer.agentId, branch);
         const key = sessionKeys.agent(token);
         const edgeKey = `edge:agent:${token}`;
         const label = reviewerLabel(reviewer);
         const nodeBase = { ...base, agentId: reviewer.agentId };
-        agentKeys.set(reviewer.agentId, key);
-        reviewerAt.set(reviewer.agentId, { key, x: rx, edgeKey });
-        if (reviewer.afterFix === void 0) {
-          edge(edgeKey, feed, { key, dx: -SMALL_R }, flowOf(reviewer), "review", "curve", nodeBase);
+        const answered = answeredHere(row2, reviewer);
+        const loopKey = answered && reviewer.afterFix !== void 0 ? `${edgeKey}<fix` : edgeKey;
+        if (targetHere(reviewer.agentId, branch)) {
+          agentKeys.set(reviewer.agentId, key);
+        }
+        reviewerAt.set(reviewer.agentId, { key, x: rx, edgeKey: loopKey });
+        if (reviewer.afterFix === void 0 || answered) {
+          edge(edgeKey, feed, { key, dx: -SMALL_R }, answered && reviewer.afterFix !== void 0 ? "done" : flowOf(reviewer), "review", "curve", nodeBase);
         }
         const nodeAt = { x: rx, y: ry };
         const mark = markOf(reviewer.model, options);
         const enter = slide2("review", { x: rx - 20, y });
         const firstRound = reviewer.afterFix === void 0 ? { fan: branch } : {};
-        const dot = { edges: [edgeKey], when: "start", color: "review", out: [`${edgeKey}>review`], ...firstRound };
+        const dot = { edges: [loopKey], when: "start", color: "review", out: [`${edgeKey}>review`], ...firstRound };
         const fixCount = fixCountOf(session, reviewer);
         add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...fixCount, ...nodeBase, ...enter, dot });
         const tone2 = isEnded(reviewer.state) ? "reviewer-dim" : "reviewer";
         add({ kind: "text", key: `text:agent:${token}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
         labelledRight.add(key);
-        if (isEnded(reviewer.state)) {
+        if (isEnded(reviewer.state) || answered) {
           const labelOut = { xKey: key, dx: SMALL_R + LABEL_GAP + 1 + textWidth(label), yKey: key };
           const short = labelWidth - textWidth(label) + (dys[index] === 0 ? 0 : outRank(dys[index]) * LANE_STEP);
           const out = short > 0 ? { shape: "level", extra: { drop: 0, reach: short } } : { shape: "curve", extra: {} };
-          const outState = reviewer.state === "changes" ? "loop" : "done";
+          const outState = reviewer.state === "changes" || !isEnded(reviewer.state) ? "loop" : "done";
           edge(`${edgeKey}>review`, labelOut, { key: reviewKey }, outState, "review", out.shape, { ...nodeBase, ...out.extra });
         }
       });
-      if (row2.reviewers.some((reviewer) => isEnded(reviewer.state))) {
+      if (row2.reviewers.some((reviewer) => isEnded(reviewer.state) || answeredHere(row2, reviewer))) {
         exit = { key: reviewKey };
         exitY = y;
       }
@@ -10588,7 +10625,7 @@ ${FOLD_HINT}` : label };
         const nodeBase = { ...base, agentId: fix.agentId };
         const mark = byMain ? planMark : markOf(fix.model ?? session.agents[fix.agentId]?.model, options);
         fixKeys.set(fix.id, { key, y: fy });
-        if (!byMain) {
+        if (!byMain && targetHere(fix.agentId, branch)) {
           agentKeys.set(fix.agentId, key);
         }
         const fedByReview = fix.reviewerAgentId !== void 0;
@@ -15378,10 +15415,10 @@ var GRID_SHARES = [0.5, 1];
 var SETTLED = 1 / 1e3;
 var tokensBarText = (total) => `${tokens(total)} tokens`;
 var tokensBarLabel = (total, open2) => `${tokensBarText(total)}, ${open2 ? "hide" : "show"} tokens by stage`;
-var cumulativeSeries = (points, startMs, packages) => {
+var cumulativeSeries = (points, startMs2, packages) => {
   const keys2 = stageOrder(points.map((point2) => point2.stage), packages);
   const index = new Map(keys2.map((key, position) => [key, position]));
-  const sinceStart2 = (point2) => Math.max(0, (parseTime(point2.at) ?? startMs) - startMs);
+  const sinceStart2 = (point2) => Math.max(0, (parseTime(point2.at) ?? startMs2) - startMs2);
   const timed = points.map((point2) => ({ at: sinceStart2(point2), key: index.get(point2.stage), tokens: point2.tokens }));
   timed.sort((a, b) => a.at - b.at);
   const times = [0];

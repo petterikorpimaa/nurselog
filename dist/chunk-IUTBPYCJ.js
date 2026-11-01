@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-73HFVODL.js";
+} from "./chunk-56YFWDRO.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
@@ -92,7 +92,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-UTPB24LM.js";
+} from "./chunk-5ZNMGXDF.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -148,11 +148,14 @@ var trimAgent = (agent) => {
   }
   return trimmed;
 };
+var withoutSetupHashes = (session) => {
+  const copy = { ...session };
+  delete copy.setupHashes;
+  return copy;
+};
 var trimSession = (session) => {
   const agents = Object.fromEntries(Object.entries(session.agents).map(([id, agent]) => [id, trimAgent(agent)]));
-  const trimmed = { ...session, agents };
-  delete trimmed.setupHashes;
-  return trimmed;
+  return { ...withoutSetupHashes(session), agents };
 };
 var sessionView = (view, now) => {
   const nowMs = Date.parse(now ?? "");
@@ -193,7 +196,7 @@ var sessionBody = (store, id, agentId = null) => {
   const unknownSession = { error: "unknown-session", message: "This repository has no session with this id." };
   if (agentId === null) {
     const session = store.session(id);
-    return session === void 0 ? { status: 404, body: unknownSession } : { status: 200, body: session };
+    return session === void 0 ? { status: 404, body: unknownSession } : { status: 200, body: withoutSetupHashes(session) };
   }
   const found = store.sessionAgent(id, agentId);
   if ("agent" in found) {

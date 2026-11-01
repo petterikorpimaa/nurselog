@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.16 (2026-11-01)
+
+- Resumed agents draw on the row of their current leg
+- Own markers keep to their session
+- An unknown-branch row links only continued sessions
+
 ## 0.1.15 (2026-10-31)
 
 - Tab counts and the gh poll from the sessions
