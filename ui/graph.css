@@ -154,7 +154,7 @@
    arc's end eases to its new angle in 300 ms. The light, a dash of 34 of 100 at .55, fainter than the done parts so it
    does not read as progress, travels its arc at one angular speed (its duration and phase are inline); a full ring
    dims its parts to .45 under it. Held still (reduced motion) the light is the current part drawn whole at the same
-   .55, and none on one arc or a full ring. The typical ticks are still */
+   .55, and none on one arc or a full ring */
 .session-graph .node-progress { animation: graph-orbit-in .55s ease-out; }
 .session-graph .node-progress path, .session-graph .node-progress circle { fill: none; stroke-linecap: butt; }
 .session-graph .progress-part, .session-graph .progress-track, .session-graph .progress-done, .session-graph .progress-light { stroke: var(--c); stroke-width: 1.8; }
@@ -165,7 +165,6 @@
 .session-graph .node-progress.full:not(.still) .progress-part.done, .session-graph .node-progress.full:not(.still) .progress-done { stroke-opacity: .45; }
 .session-graph .progress-light { stroke-opacity: .55; stroke-dasharray: 34 100; animation: graph-progress-light 1.4s cubic-bezier(.4, 0, .2, 1) infinite; }
 .session-graph .node-progress.still .progress-light { stroke-dasharray: none; animation: none; }
-.session-graph .progress-tick { stroke: var(--fg-3); stroke-width: 1.2; }
 @keyframes graph-progress-light { from { stroke-dashoffset: 34; } to { stroke-dashoffset: -100; } }
 /* the fill at the stop (decision 169, stop-motion.ts): the scene holds a stopping node in its running look while its
    ring fills in 300 ms (FILL_MS of effects.ts): the parts not done turn solid one after another clockwise (their
@@ -181,7 +180,7 @@
 .session-graph .node-sheen-light { fill: var(--fg); }
 /* a node's hit area, 5 wider than the node; its stroke is the linked ring: the nodes of one agent drawn more than once
    (its resumed legs, decision 187) ring each other while one is pointed at or focused, fading with the dimming; the
-   ring crosses the typical-length ticks of a running node, and no line joins the nodes */
+   ring lies just outside a running node's progress ring, and no line joins the nodes */
 .session-graph .node .node-hit { fill: transparent; stroke: var(--fg-2); stroke-width: 1.4; stroke-opacity: 0; transition: stroke-opacity .2s; }
 .session-graph .node.linked .node-hit { stroke-opacity: 1; }
 /* a folded pipeline's compact row: lighter pills with 10 px text */

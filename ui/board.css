@@ -281,6 +281,10 @@ p { margin: 0; }
 .run-row.finished.keyless .run-row-line { grid-template-areas: "d t t o f a s"; }
 /* the board link (decision 104, D10) lights a session's conversation or Finished sessions row as a ranking row's .hl */
 .run-row.hl > .run-row-line { background: var(--card-2); }
+/* under reduced motion a revealed row's line takes the lit colour of the motion flash it stands in for (the demo's
+   lflash, flash.ts) for 1.4 s, as a class apart from .hl, which the rows rewrite on every render; the selector
+   outweighs the hover look of the conversation line (messages.css) so the mark shows under the pointer too (decision 214) */
+.run-row > .run-row-line.revealed { background: rgba(255, 255, 255, .12); }
 /* positioned, for the waiting dot's ring and so the hidden tone label in a finished row's dot (session-row.ts) is
    clipped with its row: placed from an ancestor above the Finished sessions list, the labels of a closed list kept the
    page as tall as the open list */
