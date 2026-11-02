@@ -2655,7 +2655,6 @@ var agentPrompt = (prompt) => {
 var ABSOLUTE_PATH = /(?<![\w.~/-])(?:~\/|\/)(?:[\w.@-]+\/)+[\w.@-]*/g;
 var findAbsolutePaths = (text2) => [...new Set(text2.match(ABSOLUTE_PATH) ?? [])];
 var FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
-var PATH_TOOLS = /* @__PURE__ */ new Set(["Bash", ...FILE_TOOLS, "Grep", "Glob", "Agent", "Task"]);
 var summarizeToolInput = (tool, input) => {
   if (tool === "Bash") {
     return { command: cap(input.command, 2e3), description: str(input.description), runInBackground: input.run_in_background === true || void 0 };
@@ -4191,11 +4190,11 @@ var diffPathRun = (state, event) => {
   const live = (run) => !ownValue(state.index.worktrees, run.worktree)?.removedAt && runIdFor(state, run.worktree) === run.id;
   return candidates.find((candidate) => live(candidate.run))?.run;
 };
-var hookRun = (state, event, config) => {
+var findHookRun = (state, event, config) => {
   const session = ensureSession(state, event);
   const reviewed = diffPathRun(state, event);
   if (reviewed) {
-    return ensureRun(state, reviewed.worktree, event, config);
+    return { run: ensureRun(state, reviewed.worktree, event, config), byPath: true };
   }
   const agentKey = event.agentId ?? "main";
   const fromPaths = worktreeFromPaths(state, eventPaths(session, event), config);
@@ -4204,12 +4203,13 @@ var hookRun = (state, event, config) => {
   const fromPathsBranch = fromPaths ? ownValue(state.index.worktrees, fromPaths)?.branch : void 0;
   const staysInFeature = fromPathsBranch !== void 0 && isTrunkLike(fromPathsBranch, config) && lastBranch !== void 0 && !isTrunkLike(lastBranch, config);
   let worktree = staysInFeature ? last : fromPaths;
+  const byPath = worktree !== void 0;
   if (!worktree && event.agentId) {
     const runId = state.index.agentRuns[event.agentId];
     const run = runId ? state.branchStates[runId] : void 0;
     if (run) {
       ensureRun(state, run.worktree, event, config);
-      return run;
+      return { run, byPath: false };
     }
   }
   worktree = worktree ?? session.agentWorktrees[agentKey] ?? (event.agentId ? session.agentWorktrees.main : void 0);
@@ -4219,8 +4219,9 @@ var hookRun = (state, event, config) => {
     ownEntry(state.index.worktrees, worktree, () => ({ path: session.startCwd }));
   }
   session.agentWorktrees[agentKey] = worktree;
-  return ensureRun(state, worktree, event, config);
+  return { run: ensureRun(state, worktree, event, config), byPath };
 };
+var hookRun = (state, event, config) => findHookRun(state, event, config).run;
 var isOwnMarker = (event) => event.src === "hook" && event.data.run === void 0 && !event.agentId;
 var markerRun = (state, event, config) => {
   const ref = event.data.run;
@@ -5239,6 +5240,54 @@ var onGhFact = (state, event, config) => {
   return heads;
 };
 
+// src/model/leg-row.ts
+var agentLegNodes = (rows, fixes) => {
+  const nodes = /* @__PURE__ */ new Map();
+  const add = (agentId, node) => {
+    nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
+  };
+  for (const row2 of rows) {
+    for (const node of [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]) {
+      add(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
+    }
+    for (const fix of fixes ? row2.fixes : []) {
+      add(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
+    }
+  }
+  return nodes;
+};
+var startMs = (node) => node.startedAt === void 0 ? 0 : time(node.startedAt);
+var homeRow = (branch, nodes) => {
+  const own = nodes.find((node) => node.branch === branch)?.branch;
+  const first = nodes[0]?.branch;
+  return own ?? first ?? branch;
+};
+var legRow = (branch, nodes) => {
+  const current = nodes.filter((node) => node.earlierLeg === void 0);
+  return current.sort((a, b) => startMs(a) - startMs(b)).pop()?.branch ?? homeRow(branch, nodes);
+};
+var agentColumnOn = (row2, agentId) => {
+  if (row2.pr?.agentId === agentId) {
+    return "pr";
+  }
+  if (row2.fixes.some((fix) => fix.agentId === agentId)) {
+    return "fix";
+  }
+  if (row2.reviewers.some((reviewer) => reviewer.agentId === agentId)) {
+    return "review";
+  }
+  return row2.streams.some((stream) => stream.runs.some((node) => node.agentId === agentId)) ? "implement" : void 0;
+};
+var agentColumn = (rows, agentId, branch, docsAgentId) => {
+  if (docsAgentId === agentId) {
+    return "docs";
+  }
+  const own = rows.find((row2) => row2.branch === branch);
+  const onOwn = own === void 0 ? void 0 : agentColumnOn(own, agentId);
+  const onRows = onOwn ?? rows.map((row2) => agentColumnOn(row2, agentId)).find((column) => column !== void 0);
+  return onRows ?? "plan";
+};
+
 // src/model/delegation.ts
 var FALLBACK_STREAM = { id: "repo", package: "repo" };
 var agentSession = (sessions, agentId, sessionId) => ownValue(sessions, agentId) ?? sessionId;
@@ -6102,12 +6151,8 @@ var fixAgentsOf = (ctx) => {
   const fixes = Object.values(ctx.state.branchStates).flatMap((run) => run.fixes);
   return new Set(fixes.filter((fix) => fix.agentId !== MAIN_AGENT && ownFix(ctx, fix)).map((fix) => fix.agentId));
 };
-var lastPathCallAt = (copy) => {
-  const calls = copy.now === void 0 ? copy.recent : [...copy.recent, copy.now];
-  return calls.filter((call) => PATH_TOOLS.has(call.tool)).at(-1)?.startedAt;
-};
 var inLeg = (copy, legAt) => {
-  const last = lastPathCallAt(copy) ?? copy.startedAt;
+  const last = copy.pathCallAt ?? copy.startedAt;
   return Math.max(time(copy.startedAt), time(last)) >= time(legAt);
 };
 var currentLegRuns = (ctx, agentId, legAt) => {
@@ -6130,7 +6175,7 @@ var newestStreamRun = (ctx, agentId) => {
   let found;
   for (const runId of ctx.runIds.filter((id) => streamsAgent(ctx, id, agentId))) {
     const copy = ownValue(ownValue(ctx.state.branchStates, runId)?.agents ?? {}, agentId);
-    const at = copy === void 0 ? void 0 : time(lastPathCallAt(copy) ?? copy.startedAt);
+    const at = copy === void 0 ? void 0 : time(copy.pathCallAt ?? copy.startedAt);
     if (at !== void 0 && (found === void 0 || at >= found.at)) {
       found = { runId, at };
     }
@@ -6635,7 +6680,7 @@ var idPlace = (node, own, rows) => {
   }
   return void 0;
 };
-var placeOf = (ctx, question, runId, rows, nodes) => {
+var placeOf = (ctx, question, runId, rows, nodes, legs) => {
   const own = runId === void 0 ? void 0 : rows.find((row2) => row2.runIds.includes(runId));
   const node = question.node;
   const asker = question.source.agentId;
@@ -6651,7 +6696,7 @@ var placeOf = (ctx, question, runId, rows, nodes) => {
     return node.kind === "gate" && byGate ? byGate : { place: { kind: "plan" } };
   }
   if (asker !== "" && Object.hasOwn(ctx.agents, asker)) {
-    const branch = ctx.agents[asker].branch;
+    const branch = legRow(ctx.agents[asker].branch, legs.get(asker) ?? []);
     return { place: { kind: "agent", agentId: asker }, ...branch === void 0 ? {} : { branch } };
   }
   if (byGate) {
@@ -6666,7 +6711,13 @@ var sessionQuestions = (ctx, rows, nodes) => {
   const byCreation = (a, b) => time(a.question.createdAt) - time(b.question.createdAt);
   const ordered = found.sort((a, b) => byCreation(a, b) || compareText(a.question.id, b.question.id) || compareRunIds(a.runId, b.runId));
   const start = (id) => id !== void 0 && ownValue(ctx.state.branchStates, id) ? id : void 0;
-  return ordered.map(({ question, runId, startRunId }) => ({ ...structuredClone(question), ...placeOf(ctx, question, runId ?? start(startRunId), rows, nodes) }));
+  const askers = ordered.map(({ question }) => question.source.agentId);
+  const askedByAgent = askers.some((asker) => asker !== MAIN_AGENT && Object.hasOwn(ctx.agents, asker));
+  const legs = askedByAgent ? agentLegNodes(rows, true) : /* @__PURE__ */ new Map();
+  return ordered.map(({ question, runId, startRunId }) => {
+    const placed = placeOf(ctx, question, runId ?? start(startRunId), rows, nodes, legs);
+    return { ...structuredClone(question), ...placed };
+  });
 };
 var markQuestionRows = (rows, questions) => {
   for (const question of questions) {
@@ -6872,6 +6923,7 @@ var mergeRecent = (agents) => {
 };
 var mergeAgent = (lead, rest, config) => {
   const merged = structuredClone(lead.agent);
+  delete merged.pathCallAt;
   if (rest.length === 0) {
     return merged;
   }
@@ -7234,29 +7286,15 @@ var isExplorer = (agent) => {
   const unattached = agent.branch === void 0 && agent.stage === "other";
   return unattached && ACTIVE_STATES.has(agent.state);
 };
-var agentColumn = (agentId, rows, docs) => {
-  if (rows.some((row2) => row2.streams.some((stream) => stream.runs.some((node) => node.agentId === agentId)))) {
-    return "implement";
-  }
-  if (rows.some((row2) => row2.reviewers.some((node) => node.agentId === agentId))) {
-    return "review";
-  }
-  if (rows.some((row2) => row2.fixes.some((fix) => fix.agentId === agentId))) {
-    return "fix";
-  }
-  if (rows.some((row2) => row2.pr?.agentId === agentId)) {
-    return "pr";
-  }
-  return docs?.agentId === agentId ? "docs" : "plan";
-};
-var placeColumn = (place2, rows, docs) => {
+var placeColumn = (question, rows, docs) => {
+  const place2 = question.place;
   switch (place2.kind) {
     case "plan":
       return "plan";
     case "gate":
       return place2.gate;
     case "agent":
-      return agentColumn(place2.agentId, rows, docs);
+      return agentColumn(rows, place2.agentId, question.branch, docs?.agentId);
     default:
       return place2.kind;
   }
@@ -7301,7 +7339,7 @@ var mainThreadChip = (main) => {
 var baseChip = (input) => {
   const question = input.questions.find(blockingForYou);
   if (question) {
-    return { text: `${STAGE_LABELS[placeColumn(question.place, input.rows, input.docs)]} \xB7 question for you`, tone: "you" };
+    return { text: `${STAGE_LABELS[placeColumn(question, input.rows, input.docs)]} \xB7 question for you`, tone: "you" };
   }
   if (input.waitingGate) {
     return { text: `${STAGE_LABELS[input.waitingGate]} \xB7 waiting for you`, tone: "you" };
@@ -8856,7 +8894,7 @@ var workOnEdit = (state, run, agent, edit, line, config, touched) => {
   }
 };
 var onToolPre2 = (state, event, config, touched) => {
-  const run = hookRun(state, event, config);
+  const { run, byPath } = findHookRun(state, event, config);
   const agentKey = event.agentId ?? "main";
   const agent = ensureAgent(run, agentKey, event, config);
   const addsWorktree = event.data.tool === "Bash" && worktreeAddOf(ensureSession(state, event), event) !== void 0;
@@ -8876,6 +8914,10 @@ var onToolPre2 = (state, event, config, touched) => {
   agent.recent.push(call);
   if (agent.recent.length > RECENT_CAP) {
     agent.recent.shift();
+  }
+  const newer = agent.pathCallAt === void 0 || time(event.at) > time(agent.pathCallAt);
+  if (byPath && agentKey !== "main" && newer) {
+    agent.pathCallAt = event.at;
   }
   const own = agentKey === "main" ? mainOf(state, event.sessionId) : void 0;
   if (own) {
@@ -21896,29 +21938,12 @@ var shortDuration = (ms) => {
 var reviewerLabel = (reviewer) => reviewer.afterFix !== void 0 || reviewer.round > 1 ? `${reviewer.reviewerId} \xB7 re-review` : reviewer.reviewerId;
 var answeredHere = (row2, reviewer) => row2.fixes.some((fix) => fix.id === reviewer.afterFix && fix.reviewerAgentId === reviewer.agentId);
 var isReReviewOnly = (row2) => row2.reviewers.length > 0 && row2.reviewers.every((reviewer) => reviewer.afterFix !== void 0 && !answeredHere(row2, reviewer));
-var startMs = (node) => node.startedAt === void 0 ? 0 : time(node.startedAt);
-var homeRow = (agent, nodes) => nodes.find((node) => node.branch === agent?.branch)?.branch ?? nodes[0].branch;
-var legRow = (agent, nodes) => {
-  const current = nodes.filter((node) => node.earlierLeg === void 0);
-  return [...current].sort((a, b) => startMs(a) - startMs(b)).pop()?.branch ?? homeRow(agent, nodes);
-};
 var legRows = (session, rows, pick, fixes) => {
-  const nodes = /* @__PURE__ */ new Map();
-  const add = (agentId, node) => {
-    nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
-  };
-  for (const row2 of rows) {
-    for (const node of [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]) {
-      add(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
-    }
-    for (const fix of fixes ? row2.fixes : []) {
-      add(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
-    }
-  }
   const picked = /* @__PURE__ */ new Map();
-  for (const [agentId, list] of nodes) {
-    if (new Set(list.map((node) => node.branch)).size > 1) {
-      picked.set(agentId, pick(ownValue(session.agents, agentId), list));
+  for (const [agentId, list] of agentLegNodes(rows, fixes)) {
+    const row2 = new Set(list.map((node) => node.branch)).size > 1 ? pick(ownValue(session.agents, agentId)?.branch, list) : void 0;
+    if (row2 !== void 0) {
+      picked.set(agentId, row2);
     }
   }
   return picked;
@@ -22385,7 +22410,7 @@ ${FOLD_HINT}` : label };
         const handed = index > 0 && stream.runs[index - 1].state === "handed";
         const nodeBase = { ...base, agentId: run.agentId };
         const at = { x: x0 + index * runStep(stream.runs.length), y: laneY };
-        if (targetHere(run.agentId, branch)) {
+        if (targetHere(run.agentId, branch) && agentColumnOn(row2, run.agentId) === "implement") {
           agentKeys.set(run.agentId, key);
         }
         placedY.set(key, laneY);
@@ -22490,7 +22515,7 @@ ${FOLD_HINT}` : label };
         const nodeBase = { ...base, agentId: reviewer.agentId };
         const answered = answeredHere(row2, reviewer);
         const loopKey = answered && reviewer.afterFix !== void 0 ? `${edgeKey}<fix` : edgeKey;
-        if (targetHere(reviewer.agentId, branch)) {
+        if (targetHere(reviewer.agentId, branch) && agentColumnOn(row2, reviewer.agentId) === "review") {
           agentKeys.set(reviewer.agentId, key);
         }
         reviewerAt.set(reviewer.agentId, { key, x: rx, edgeKey: loopKey });
@@ -22539,7 +22564,7 @@ ${FOLD_HINT}` : label };
         const nodeBase = { ...base, agentId: fix.agentId };
         const mark = byMain ? planMark : markOf(fix.model ?? session.agents[fix.agentId]?.model, options);
         fixKeys.set(fix.id, { key, y: fy });
-        if (!byMain && targetHere(fix.agentId, branch)) {
+        if (!byMain && targetHere(fix.agentId, branch) && agentColumnOn(row2, fix.agentId) === "fix") {
           agentKeys.set(fix.agentId, key);
         }
         const fedByReview = fix.reviewerAgentId !== void 0;
@@ -22608,7 +22633,7 @@ ${FOLD_HINT}` : label };
       const agentId = row2.pr.agentId;
       const nodeBase = agentId === void 0 ? base : { ...base, agentId };
       const mark = agentId === void 0 ? "" : markOf(session.agents[agentId]?.model, options);
-      if (agentId !== void 0) {
+      if (agentId !== void 0 && agentColumnOn(row2, agentId) === "pr") {
         agentKeys.set(agentId, key);
       }
       prX = prColumn.center;
@@ -24693,33 +24718,16 @@ var sessionQuestionName = (session, question) => {
   const agentId = question.source.agentId;
   return Object.hasOwn(session.agents, agentId) ? agentName(session, session.agents[agentId]) : question.source.role;
 };
-var agentColumn2 = (session, agentId) => {
-  for (const row2 of session.rows) {
-    if (row2.streams.some((stream) => stream.runs.some((run) => run.agentId === agentId))) {
-      return "implement";
-    }
-    if (row2.reviewers.some((reviewer) => reviewer.agentId === agentId)) {
-      return "review";
-    }
-    if (row2.fixes.some((fix) => fix.agentId === agentId)) {
-      return "fix";
-    }
-    if (row2.pr?.agentId === agentId) {
-      return "pr";
-    }
-  }
-  return session.docs?.agentId === agentId ? "docs" : "plan";
-};
-var placeLabel = (session, place2) => {
+var placeLabel = (session, place2, branch) => {
   if (place2.kind === "agent") {
-    return `${agentColumn2(session, place2.agentId)} stage`;
+    return `${agentColumn(session.rows, place2.agentId, branch, session.docs?.agentId)} stage`;
   }
   return `${place2.kind === "gate" ? place2.gate : place2.kind} stage`;
 };
 var sessionQuestionWords = (session) => ({
   sourceLine: sessionSourceLine,
   nonBlocking: "Non-blocking",
-  quietSource: (question) => placeLabel(session, question.place),
+  quietSource: (question) => placeLabel(session, question.place, question.branch),
   relayName: (source) => sessionQuestionName(session, { source })
 });
 var keysOf2 = (questions) => {
@@ -27939,6 +27947,7 @@ var layoutTop = (element) => {
   }
   return top;
 };
+var FOLLOW_JUMP_MS = 1e4;
 var createSessionCardStack = (host, context, repositoryId, options) => {
   const local = !options.replay;
   const empty = el("p", "board-empty", repositoryId === "" ? NO_REPOSITORY_TEXT : EMPTY_SESSIONS_TEXT);
@@ -27954,6 +27963,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   let split = { stack: [], conversations: [], finished: [] };
   let firstUpdate = true;
   const inFlight = /* @__PURE__ */ new Set();
+  let retired = false;
   let boardLink;
   const linkCard = (sessionId, card) => {
     const on = boardLink?.sessions.has(sessionId) === true;
@@ -28064,9 +28074,15 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       }
       const session = sessionOf(view.sessions, id);
       const text2 = session?.key ?? (session ? sessionHeading(session) : id);
-      flights.push({ from: source.getBoundingClientRect(), text: text2, land: panel.expect(id) });
+      flights.push({ sessionId: id, from: source.getBoundingClientRect(), text: text2, land: panel.expect(id) });
     }
     return flights;
+  };
+  const countTopAfter = (countTop, folded) => {
+    const scrolled = window.scrollY;
+    const reachable = document.documentElement.scrollHeight - folded - window.innerHeight;
+    const scrolledAfter = Math.min(scrolled, Math.max(0, reachable));
+    return countTop - folded + (scrolled - scrolledAfter);
   };
   const play2 = ({ before: before2, change, rowRects, flights, emptyWasHidden }) => {
     const morphing = /* @__PURE__ */ new Set();
@@ -28082,8 +28098,9 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     glide(before2, measure(), morphing);
     const folded = change.folded.reduce((sum2, card) => sum2 + card.element.offsetHeight + flowGap(card.element), 0);
     const count2 = panel.count.getBoundingClientRect();
+    const top = countTopAfter(count2.top, folded);
     for (const flight of flights) {
-      const animation = fly(flight.from, { left: count2.left, top: count2.top - folded }, flight.text, flight.land);
+      const animation = fly(flight.from, { left: count2.left, top }, flight.text, flight.land);
       inFlight.add(animation);
       const done = () => inFlight.delete(animation);
       animation.finished.then(done, done);
@@ -28092,6 +28109,31 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       const delay = change.left + change.folded.length > 0 ? FADE_MS : 0;
       empty.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE_MS, delay, easing: "ease", fill: "backwards" });
     }
+  };
+  let followed;
+  const stopFollow = () => {
+    window.clearTimeout(followed?.timer);
+    followed = void 0;
+  };
+  const followedFold = (folding) => {
+    const card = followed ? stack.cards.get(followed.sessionId) : void 0;
+    if (!followed || !card || !folding.has(followed.sessionId)) {
+      return void 0;
+    }
+    const { sessionId } = followed;
+    const kept = card.element.contains(document.activeElement) && onScreen(card.element);
+    stopFollow();
+    return kept ? sessionId : void 0;
+  };
+  const focusOnBody = () => document.activeElement === null || document.activeElement === document.body;
+  const revealAtLand = (flight) => {
+    const land = () => {
+      flight.land();
+      if (!retired && focusOnBody()) {
+        panel.reveal(flight.sessionId, options.topOffset());
+      }
+    };
+    return { ...flight, land };
   };
   const render = (view, now) => {
     latest = view;
@@ -28107,7 +28149,10 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     const moved = new Set(conversations.ids().filter((id) => split.stack.includes(id)));
     const rowRects = motion ? movedRows(moved) : /* @__PURE__ */ new Map();
     const finished = new Set(split.finished);
-    const flights = motion ? flightsTo(view, finished) : [];
+    const following = followedFold(finished);
+    const keys2 = motion ? flightsTo(view, finished) : [];
+    const followedKey = following === void 0 ? void 0 : keys2.find((flight) => flight.sessionId === following);
+    const flights = keys2.map((flight) => flight === followedKey ? revealAtLand(flight) : flight);
     const change = stack.sync(split.stack, tops, motion ? finished : /* @__PURE__ */ new Set());
     conversations.sync(split.conversations, moved, motion, view);
     panel.sync(split.finished, motion, view);
@@ -28130,6 +28175,9 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     if (motion) {
       play2({ before: before2, change, rowRects, flights, emptyWasHidden });
     }
+    if (following !== void 0 && !followedKey) {
+      panel.reveal(following, options.topOffset());
+    }
     firstUpdate = false;
     prune();
   };
@@ -28144,6 +28192,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     updateFootnote();
   };
   const jump = (sessionId) => {
+    stopFollow();
     const session = latest ? sessionOf(latest.sessions, sessionId) : void 0;
     const card = stack.cards.get(sessionId);
     if (!session || !card) {
@@ -28159,6 +28208,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     window.scrollTo({ top: Math.max(0, top), behavior: context.reducedMotion() ? "auto" : "smooth" });
     card.flash();
     card.focusHeading();
+    followed = { sessionId, timer: window.setTimeout(stopFollow, FOLLOW_JUMP_MS) };
   };
   const onLink = (event) => {
     const detail = event.detail;
@@ -28199,7 +28249,9 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       prune();
     },
     destroy() {
+      retired = true;
       host.removeEventListener(SESSION_LINK, onLink);
+      stopFollow();
       for (const animation of [...inFlight]) {
         animation.cancel();
       }
