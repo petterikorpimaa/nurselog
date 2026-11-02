@@ -3113,7 +3113,6 @@ var agentPrompt = (prompt) => {
 var ABSOLUTE_PATH = /(?<![\w.~/-])(?:~\/|\/)(?:[\w.@-]+\/)+[\w.@-]*/g;
 var findAbsolutePaths = (text) => [...new Set(text.match(ABSOLUTE_PATH) ?? [])];
 var FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
-var PATH_TOOLS = /* @__PURE__ */ new Set(["Bash", ...FILE_TOOLS, "Grep", "Glob", "Agent", "Task"]);
 var summarizeToolInput = (tool, input) => {
   if (tool === "Bash") {
     return { command: cap(input.command, 2e3), description: str(input.description), runInBackground: input.run_in_background === true || void 0 };
@@ -6050,11 +6049,11 @@ var diffPathRun = (state, event) => {
   const live = (run) => !ownValue(state.index.worktrees, run.worktree)?.removedAt && runIdFor(state, run.worktree) === run.id;
   return candidates.find((candidate) => live(candidate.run))?.run;
 };
-var hookRun = (state, event, config) => {
+var findHookRun = (state, event, config) => {
   const session = ensureSession(state, event);
   const reviewed = diffPathRun(state, event);
   if (reviewed) {
-    return ensureRun(state, reviewed.worktree, event, config);
+    return { run: ensureRun(state, reviewed.worktree, event, config), byPath: true };
   }
   const agentKey = event.agentId ?? "main";
   const fromPaths = worktreeFromPaths(state, eventPaths(session, event), config);
@@ -6063,12 +6062,13 @@ var hookRun = (state, event, config) => {
   const fromPathsBranch = fromPaths ? ownValue(state.index.worktrees, fromPaths)?.branch : void 0;
   const staysInFeature = fromPathsBranch !== void 0 && isTrunkLike(fromPathsBranch, config) && lastBranch !== void 0 && !isTrunkLike(lastBranch, config);
   let worktree = staysInFeature ? last : fromPaths;
+  const byPath = worktree !== void 0;
   if (!worktree && event.agentId) {
     const runId = state.index.agentRuns[event.agentId];
     const run = runId ? state.branchStates[runId] : void 0;
     if (run) {
       ensureRun(state, run.worktree, event, config);
-      return run;
+      return { run, byPath: false };
     }
   }
   worktree = worktree ?? session.agentWorktrees[agentKey] ?? (event.agentId ? session.agentWorktrees.main : void 0);
@@ -6078,8 +6078,9 @@ var hookRun = (state, event, config) => {
     ownEntry(state.index.worktrees, worktree, () => ({ path: session.startCwd }));
   }
   session.agentWorktrees[agentKey] = worktree;
-  return ensureRun(state, worktree, event, config);
+  return { run: ensureRun(state, worktree, event, config), byPath };
 };
+var hookRun = (state, event, config) => findHookRun(state, event, config).run;
 var isOwnMarker = (event) => event.src === "hook" && event.data.run === void 0 && !event.agentId;
 var markerRun = (state, event, config) => {
   const ref = event.data.run;
@@ -9249,7 +9250,7 @@ var workOnEdit = (state, run, agent, edit, line, config, touched) => {
   }
 };
 var onToolPre2 = (state, event, config, touched) => {
-  const run = hookRun(state, event, config);
+  const { run, byPath } = findHookRun(state, event, config);
   const agentKey = event.agentId ?? "main";
   const agent = ensureAgent(run, agentKey, event, config);
   const addsWorktree = event.data.tool === "Bash" && worktreeAddOf(ensureSession(state, event), event) !== void 0;
@@ -9269,6 +9270,10 @@ var onToolPre2 = (state, event, config, touched) => {
   agent.recent.push(call);
   if (agent.recent.length > RECENT_CAP) {
     agent.recent.shift();
+  }
+  const newer = agent.pathCallAt === void 0 || time(event.at) > time(agent.pathCallAt);
+  if (byPath && agentKey !== "main" && newer) {
+    agent.pathCallAt = event.at;
   }
   const own = agentKey === "main" ? mainOf(state, event.sessionId) : void 0;
   if (own) {
@@ -10038,6 +10043,7 @@ var mergeRecent = (agents) => {
 };
 var mergeAgent = (lead, rest, config) => {
   const merged = structuredClone(lead.agent);
+  delete merged.pathCallAt;
   if (rest.length === 0) {
     return merged;
   }
@@ -10101,6 +10107,54 @@ var sessionAgents = (state, session, runIds, config) => {
   return agents;
 };
 
+// src/model/leg-row.ts
+var agentLegNodes = (rows, fixes) => {
+  const nodes = /* @__PURE__ */ new Map();
+  const add = (agentId, node) => {
+    nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
+  };
+  for (const row of rows) {
+    for (const node of [...row.streams.flatMap((stream) => stream.runs), ...row.reviewers]) {
+      add(node.agentId, { branch: row.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
+    }
+    for (const fix of fixes ? row.fixes : []) {
+      add(fix.agentId, { branch: row.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
+    }
+  }
+  return nodes;
+};
+var startMs = (node) => node.startedAt === void 0 ? 0 : time(node.startedAt);
+var homeRow = (branch, nodes) => {
+  const own = nodes.find((node) => node.branch === branch)?.branch;
+  const first = nodes[0]?.branch;
+  return own ?? first ?? branch;
+};
+var legRow = (branch, nodes) => {
+  const current = nodes.filter((node) => node.earlierLeg === void 0);
+  return current.sort((a, b) => startMs(a) - startMs(b)).pop()?.branch ?? homeRow(branch, nodes);
+};
+var agentColumnOn = (row, agentId) => {
+  if (row.pr?.agentId === agentId) {
+    return "pr";
+  }
+  if (row.fixes.some((fix) => fix.agentId === agentId)) {
+    return "fix";
+  }
+  if (row.reviewers.some((reviewer) => reviewer.agentId === agentId)) {
+    return "review";
+  }
+  return row.streams.some((stream) => stream.runs.some((node) => node.agentId === agentId)) ? "implement" : void 0;
+};
+var agentColumn = (rows, agentId, branch, docsAgentId) => {
+  if (docsAgentId === agentId) {
+    return "docs";
+  }
+  const own = rows.find((row) => row.branch === branch);
+  const onOwn = own === void 0 ? void 0 : agentColumnOn(own, agentId);
+  const onRows = onOwn ?? rows.map((row) => agentColumnOn(row, agentId)).find((column) => column !== void 0);
+  return onRows ?? "plan";
+};
+
 // src/model/session-rows.ts
 var byNodeStart = (a, b) => time(a.startedAt) - time(b.startedAt) || compareText(a.agentId, b.agentId);
 var byAgentStart = (a, b) => time(a.startedAt) - time(b.startedAt) || compareText(a.id, b.id);
@@ -10155,12 +10209,8 @@ var fixAgentsOf = (ctx) => {
   const fixes = Object.values(ctx.state.branchStates).flatMap((run) => run.fixes);
   return new Set(fixes.filter((fix) => fix.agentId !== MAIN_AGENT && ownFix(ctx, fix)).map((fix) => fix.agentId));
 };
-var lastPathCallAt = (copy) => {
-  const calls = copy.now === void 0 ? copy.recent : [...copy.recent, copy.now];
-  return calls.filter((call) => PATH_TOOLS.has(call.tool)).at(-1)?.startedAt;
-};
 var inLeg = (copy, legAt) => {
-  const last = lastPathCallAt(copy) ?? copy.startedAt;
+  const last = copy.pathCallAt ?? copy.startedAt;
   return Math.max(time(copy.startedAt), time(last)) >= time(legAt);
 };
 var currentLegRuns = (ctx, agentId, legAt) => {
@@ -10183,7 +10233,7 @@ var newestStreamRun = (ctx, agentId) => {
   let found;
   for (const runId of ctx.runIds.filter((id) => streamsAgent(ctx, id, agentId))) {
     const copy = ownValue(ownValue(ctx.state.branchStates, runId)?.agents ?? {}, agentId);
-    const at = copy === void 0 ? void 0 : time(lastPathCallAt(copy) ?? copy.startedAt);
+    const at = copy === void 0 ? void 0 : time(copy.pathCallAt ?? copy.startedAt);
     if (at !== void 0 && (found === void 0 || at >= found.at)) {
       found = { runId, at };
     }
@@ -10688,7 +10738,7 @@ var idPlace = (node, own, rows) => {
   }
   return void 0;
 };
-var placeOf = (ctx, question, runId, rows, nodes) => {
+var placeOf = (ctx, question, runId, rows, nodes, legs) => {
   const own = runId === void 0 ? void 0 : rows.find((row) => row.runIds.includes(runId));
   const node = question.node;
   const asker = question.source.agentId;
@@ -10704,7 +10754,7 @@ var placeOf = (ctx, question, runId, rows, nodes) => {
     return node.kind === "gate" && byGate ? byGate : { place: { kind: "plan" } };
   }
   if (asker !== "" && Object.hasOwn(ctx.agents, asker)) {
-    const branch = ctx.agents[asker].branch;
+    const branch = legRow(ctx.agents[asker].branch, legs.get(asker) ?? []);
     return { place: { kind: "agent", agentId: asker }, ...branch === void 0 ? {} : { branch } };
   }
   if (byGate) {
@@ -10719,7 +10769,13 @@ var sessionQuestions = (ctx, rows, nodes) => {
   const byCreation = (a, b) => time(a.question.createdAt) - time(b.question.createdAt);
   const ordered = found.sort((a, b) => byCreation(a, b) || compareText(a.question.id, b.question.id) || compareRunIds(a.runId, b.runId));
   const start = (id) => id !== void 0 && ownValue(ctx.state.branchStates, id) ? id : void 0;
-  return ordered.map(({ question, runId, startRunId }) => ({ ...structuredClone(question), ...placeOf(ctx, question, runId ?? start(startRunId), rows, nodes) }));
+  const askers = ordered.map(({ question }) => question.source.agentId);
+  const askedByAgent = askers.some((asker) => asker !== MAIN_AGENT && Object.hasOwn(ctx.agents, asker));
+  const legs = askedByAgent ? agentLegNodes(rows, true) : /* @__PURE__ */ new Map();
+  return ordered.map(({ question, runId, startRunId }) => {
+    const placed = placeOf(ctx, question, runId ?? start(startRunId), rows, nodes, legs);
+    return { ...structuredClone(question), ...placed };
+  });
 };
 var markQuestionRows = (rows, questions) => {
   for (const question of questions) {
@@ -11029,29 +11085,15 @@ var isExplorer = (agent) => {
   const unattached = agent.branch === void 0 && agent.stage === "other";
   return unattached && ACTIVE_STATES.has(agent.state);
 };
-var agentColumn = (agentId, rows, docs) => {
-  if (rows.some((row) => row.streams.some((stream) => stream.runs.some((node) => node.agentId === agentId)))) {
-    return "implement";
-  }
-  if (rows.some((row) => row.reviewers.some((node) => node.agentId === agentId))) {
-    return "review";
-  }
-  if (rows.some((row) => row.fixes.some((fix) => fix.agentId === agentId))) {
-    return "fix";
-  }
-  if (rows.some((row) => row.pr?.agentId === agentId)) {
-    return "pr";
-  }
-  return docs?.agentId === agentId ? "docs" : "plan";
-};
-var placeColumn = (place, rows, docs) => {
+var placeColumn = (question, rows, docs) => {
+  const place = question.place;
   switch (place.kind) {
     case "plan":
       return "plan";
     case "gate":
       return place.gate;
     case "agent":
-      return agentColumn(place.agentId, rows, docs);
+      return agentColumn(rows, place.agentId, question.branch, docs?.agentId);
     default:
       return place.kind;
   }
@@ -11096,7 +11138,7 @@ var mainThreadChip = (main) => {
 var baseChip = (input) => {
   const question = input.questions.find(blockingForYou);
   if (question) {
-    return { text: `${STAGE_LABELS[placeColumn(question.place, input.rows, input.docs)]} \xB7 question for you`, tone: "you" };
+    return { text: `${STAGE_LABELS[placeColumn(question, input.rows, input.docs)]} \xB7 question for you`, tone: "you" };
   }
   if (input.waitingGate) {
     return { text: `${STAGE_LABELS[input.waitingGate]} \xB7 waiting for you`, tone: "you" };

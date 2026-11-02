@@ -9700,6 +9700,54 @@ var popsAtArrival = (keys2, dots) => {
   return keys2.map((key) => ({ key, delay: arrivals.get(key) ?? 0 }));
 };
 
+// src/model/leg-row.ts
+var agentLegNodes = (rows, fixes) => {
+  const nodes = /* @__PURE__ */ new Map();
+  const add = (agentId, node) => {
+    nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
+  };
+  for (const row2 of rows) {
+    for (const node of [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]) {
+      add(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
+    }
+    for (const fix of fixes ? row2.fixes : []) {
+      add(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
+    }
+  }
+  return nodes;
+};
+var startMs = (node) => node.startedAt === void 0 ? 0 : time(node.startedAt);
+var homeRow = (branch, nodes) => {
+  const own = nodes.find((node) => node.branch === branch)?.branch;
+  const first = nodes[0]?.branch;
+  return own ?? first ?? branch;
+};
+var legRow = (branch, nodes) => {
+  const current = nodes.filter((node) => node.earlierLeg === void 0);
+  return current.sort((a, b) => startMs(a) - startMs(b)).pop()?.branch ?? homeRow(branch, nodes);
+};
+var agentColumnOn = (row2, agentId) => {
+  if (row2.pr?.agentId === agentId) {
+    return "pr";
+  }
+  if (row2.fixes.some((fix) => fix.agentId === agentId)) {
+    return "fix";
+  }
+  if (row2.reviewers.some((reviewer) => reviewer.agentId === agentId)) {
+    return "review";
+  }
+  return row2.streams.some((stream) => stream.runs.some((node) => node.agentId === agentId)) ? "implement" : void 0;
+};
+var agentColumn = (rows, agentId, branch, docsAgentId) => {
+  if (docsAgentId === agentId) {
+    return "docs";
+  }
+  const own = rows.find((row2) => row2.branch === branch);
+  const onOwn = own === void 0 ? void 0 : agentColumnOn(own, agentId);
+  const onRows = onOwn ?? rows.map((row2) => agentColumnOn(row2, agentId)).find((column) => column !== void 0);
+  return onRows ?? "plan";
+};
+
 // src/ui/graph/columns.ts
 var buildColumns = (shown, natural, x0, room = {}) => {
   const ids = STAGE_IDS.filter((id) => shown[id]);
@@ -9982,29 +10030,12 @@ var shortDuration = (ms) => {
 var reviewerLabel = (reviewer) => reviewer.afterFix !== void 0 || reviewer.round > 1 ? `${reviewer.reviewerId} \xB7 re-review` : reviewer.reviewerId;
 var answeredHere = (row2, reviewer) => row2.fixes.some((fix) => fix.id === reviewer.afterFix && fix.reviewerAgentId === reviewer.agentId);
 var isReReviewOnly = (row2) => row2.reviewers.length > 0 && row2.reviewers.every((reviewer) => reviewer.afterFix !== void 0 && !answeredHere(row2, reviewer));
-var startMs = (node) => node.startedAt === void 0 ? 0 : time(node.startedAt);
-var homeRow = (agent, nodes) => nodes.find((node) => node.branch === agent?.branch)?.branch ?? nodes[0].branch;
-var legRow = (agent, nodes) => {
-  const current = nodes.filter((node) => node.earlierLeg === void 0);
-  return [...current].sort((a, b) => startMs(a) - startMs(b)).pop()?.branch ?? homeRow(agent, nodes);
-};
 var legRows = (session, rows, pick, fixes) => {
-  const nodes = /* @__PURE__ */ new Map();
-  const add = (agentId, node) => {
-    nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
-  };
-  for (const row2 of rows) {
-    for (const node of [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]) {
-      add(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
-    }
-    for (const fix of fixes ? row2.fixes : []) {
-      add(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
-    }
-  }
   const picked = /* @__PURE__ */ new Map();
-  for (const [agentId, list] of nodes) {
-    if (new Set(list.map((node) => node.branch)).size > 1) {
-      picked.set(agentId, pick(ownValue(session.agents, agentId), list));
+  for (const [agentId, list] of agentLegNodes(rows, fixes)) {
+    const row2 = new Set(list.map((node) => node.branch)).size > 1 ? pick(ownValue(session.agents, agentId)?.branch, list) : void 0;
+    if (row2 !== void 0) {
+      picked.set(agentId, row2);
     }
   }
   return picked;
@@ -10471,7 +10502,7 @@ ${FOLD_HINT}` : label };
         const handed = index > 0 && stream.runs[index - 1].state === "handed";
         const nodeBase = { ...base, agentId: run.agentId };
         const at = { x: x0 + index * runStep(stream.runs.length), y: laneY };
-        if (targetHere(run.agentId, branch)) {
+        if (targetHere(run.agentId, branch) && agentColumnOn(row2, run.agentId) === "implement") {
           agentKeys.set(run.agentId, key);
         }
         placedY.set(key, laneY);
@@ -10576,7 +10607,7 @@ ${FOLD_HINT}` : label };
         const nodeBase = { ...base, agentId: reviewer.agentId };
         const answered = answeredHere(row2, reviewer);
         const loopKey = answered && reviewer.afterFix !== void 0 ? `${edgeKey}<fix` : edgeKey;
-        if (targetHere(reviewer.agentId, branch)) {
+        if (targetHere(reviewer.agentId, branch) && agentColumnOn(row2, reviewer.agentId) === "review") {
           agentKeys.set(reviewer.agentId, key);
         }
         reviewerAt.set(reviewer.agentId, { key, x: rx, edgeKey: loopKey });
@@ -10625,7 +10656,7 @@ ${FOLD_HINT}` : label };
         const nodeBase = { ...base, agentId: fix.agentId };
         const mark = byMain ? planMark : markOf(fix.model ?? session.agents[fix.agentId]?.model, options);
         fixKeys.set(fix.id, { key, y: fy });
-        if (!byMain && targetHere(fix.agentId, branch)) {
+        if (!byMain && targetHere(fix.agentId, branch) && agentColumnOn(row2, fix.agentId) === "fix") {
           agentKeys.set(fix.agentId, key);
         }
         const fedByReview = fix.reviewerAgentId !== void 0;
@@ -10694,7 +10725,7 @@ ${FOLD_HINT}` : label };
       const agentId = row2.pr.agentId;
       const nodeBase = agentId === void 0 ? base : { ...base, agentId };
       const mark = agentId === void 0 ? "" : markOf(session.agents[agentId]?.model, options);
-      if (agentId !== void 0) {
+      if (agentId !== void 0 && agentColumnOn(row2, agentId) === "pr") {
         agentKeys.set(agentId, key);
       }
       prX = prColumn.center;
@@ -12779,33 +12810,16 @@ var sessionQuestionName = (session, question) => {
   const agentId = question.source.agentId;
   return Object.hasOwn(session.agents, agentId) ? agentName(session, session.agents[agentId]) : question.source.role;
 };
-var agentColumn = (session, agentId) => {
-  for (const row2 of session.rows) {
-    if (row2.streams.some((stream) => stream.runs.some((run) => run.agentId === agentId))) {
-      return "implement";
-    }
-    if (row2.reviewers.some((reviewer) => reviewer.agentId === agentId)) {
-      return "review";
-    }
-    if (row2.fixes.some((fix) => fix.agentId === agentId)) {
-      return "fix";
-    }
-    if (row2.pr?.agentId === agentId) {
-      return "pr";
-    }
-  }
-  return session.docs?.agentId === agentId ? "docs" : "plan";
-};
-var placeLabel = (session, place2) => {
+var placeLabel = (session, place2, branch) => {
   if (place2.kind === "agent") {
-    return `${agentColumn(session, place2.agentId)} stage`;
+    return `${agentColumn(session.rows, place2.agentId, branch, session.docs?.agentId)} stage`;
   }
   return `${place2.kind === "gate" ? place2.gate : place2.kind} stage`;
 };
 var sessionQuestionWords = (session) => ({
   sourceLine: sessionSourceLine,
   nonBlocking: "Non-blocking",
-  quietSource: (question) => placeLabel(session, question.place),
+  quietSource: (question) => placeLabel(session, question.place, question.branch),
   relayName: (source) => sessionQuestionName(session, { source })
 });
 var keysOf2 = (questions) => {
@@ -16025,6 +16039,7 @@ var layoutTop = (element) => {
   }
   return top;
 };
+var FOLLOW_JUMP_MS = 1e4;
 var createSessionCardStack = (host, context, repositoryId, options) => {
   const local = !options.replay;
   const empty = el("p", "board-empty", repositoryId === "" ? NO_REPOSITORY_TEXT : EMPTY_SESSIONS_TEXT);
@@ -16040,6 +16055,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   let split = { stack: [], conversations: [], finished: [] };
   let firstUpdate = true;
   const inFlight = /* @__PURE__ */ new Set();
+  let retired = false;
   let boardLink;
   const linkCard = (sessionId, card) => {
     const on = boardLink?.sessions.has(sessionId) === true;
@@ -16150,9 +16166,15 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       }
       const session = sessionOf(view.sessions, id);
       const text2 = session?.key ?? (session ? sessionHeading(session) : id);
-      flights.push({ from: source.getBoundingClientRect(), text: text2, land: panel.expect(id) });
+      flights.push({ sessionId: id, from: source.getBoundingClientRect(), text: text2, land: panel.expect(id) });
     }
     return flights;
+  };
+  const countTopAfter = (countTop, folded) => {
+    const scrolled = window.scrollY;
+    const reachable = document.documentElement.scrollHeight - folded - window.innerHeight;
+    const scrolledAfter = Math.min(scrolled, Math.max(0, reachable));
+    return countTop - folded + (scrolled - scrolledAfter);
   };
   const play2 = ({ before, change, rowRects, flights, emptyWasHidden }) => {
     const morphing = /* @__PURE__ */ new Set();
@@ -16168,8 +16190,9 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     glide(before, measure(), morphing);
     const folded = change.folded.reduce((sum, card) => sum + card.element.offsetHeight + flowGap(card.element), 0);
     const count = panel.count.getBoundingClientRect();
+    const top = countTopAfter(count.top, folded);
     for (const flight of flights) {
-      const animation = fly(flight.from, { left: count.left, top: count.top - folded }, flight.text, flight.land);
+      const animation = fly(flight.from, { left: count.left, top }, flight.text, flight.land);
       inFlight.add(animation);
       const done = () => inFlight.delete(animation);
       animation.finished.then(done, done);
@@ -16178,6 +16201,31 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       const delay = change.left + change.folded.length > 0 ? FADE_MS : 0;
       empty.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE_MS, delay, easing: "ease", fill: "backwards" });
     }
+  };
+  let followed;
+  const stopFollow = () => {
+    window.clearTimeout(followed?.timer);
+    followed = void 0;
+  };
+  const followedFold = (folding) => {
+    const card = followed ? stack.cards.get(followed.sessionId) : void 0;
+    if (!followed || !card || !folding.has(followed.sessionId)) {
+      return void 0;
+    }
+    const { sessionId } = followed;
+    const kept = card.element.contains(document.activeElement) && onScreen(card.element);
+    stopFollow();
+    return kept ? sessionId : void 0;
+  };
+  const focusOnBody = () => document.activeElement === null || document.activeElement === document.body;
+  const revealAtLand = (flight) => {
+    const land = () => {
+      flight.land();
+      if (!retired && focusOnBody()) {
+        panel.reveal(flight.sessionId, options.topOffset());
+      }
+    };
+    return { ...flight, land };
   };
   const render = (view, now) => {
     latest = view;
@@ -16193,7 +16241,10 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     const moved = new Set(conversations.ids().filter((id) => split.stack.includes(id)));
     const rowRects = motion ? movedRows(moved) : /* @__PURE__ */ new Map();
     const finished = new Set(split.finished);
-    const flights = motion ? flightsTo(view, finished) : [];
+    const following = followedFold(finished);
+    const keys2 = motion ? flightsTo(view, finished) : [];
+    const followedKey = following === void 0 ? void 0 : keys2.find((flight) => flight.sessionId === following);
+    const flights = keys2.map((flight) => flight === followedKey ? revealAtLand(flight) : flight);
     const change = stack.sync(split.stack, tops, motion ? finished : /* @__PURE__ */ new Set());
     conversations.sync(split.conversations, moved, motion, view);
     panel.sync(split.finished, motion, view);
@@ -16216,6 +16267,9 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     if (motion) {
       play2({ before, change, rowRects, flights, emptyWasHidden });
     }
+    if (following !== void 0 && !followedKey) {
+      panel.reveal(following, options.topOffset());
+    }
     firstUpdate = false;
     prune();
   };
@@ -16230,6 +16284,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     updateFootnote();
   };
   const jump = (sessionId) => {
+    stopFollow();
     const session = latest ? sessionOf(latest.sessions, sessionId) : void 0;
     const card = stack.cards.get(sessionId);
     if (!session || !card) {
@@ -16245,6 +16300,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     window.scrollTo({ top: Math.max(0, top), behavior: context.reducedMotion() ? "auto" : "smooth" });
     card.flash();
     card.focusHeading();
+    followed = { sessionId, timer: window.setTimeout(stopFollow, FOLLOW_JUMP_MS) };
   };
   const onLink = (event) => {
     const detail = event.detail;
@@ -16285,7 +16341,9 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       prune();
     },
     destroy() {
+      retired = true;
       host.removeEventListener(SESSION_LINK, onLink);
+      stopFollow();
       for (const animation of [...inFlight]) {
         animation.cancel();
       }

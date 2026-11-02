@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17 (2026-11-02)
+
+- Questions name the current leg's row, path-less calls stay out of a leg
+- Follow a jumped card into Finished sessions
+- An interrupt at the push question exits 130
+
 ## 0.1.16 (2026-11-01)
 
 - Resumed agents draw on the row of their current leg
