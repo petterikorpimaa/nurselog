@@ -21,7 +21,7 @@ var BUN_PRELOAD = /^-[A-Za-z]*r/;
 var PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
 var URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 var NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
-var SAFE_ASSIGNMENT = /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|DEBUG|LANG|LC_ALL)=[A-Za-z0-9_.:,/-]*$/;
+var SAFE_ASSIGNMENT = /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|DEBUG|LANG|LC_ALL)=(?:[A-Za-z0-9_.:,/-]*|\[redacted\])$/;
 var REDIRECTIONS = /* @__PURE__ */ new Set(["2>&1", ">&2", "1>&2"]);
 var UNSAFE = /* @__PURE__ */ new Set(["\\", "$", "`", "<", "(", ")", "{", "}", "#"]);
 var GLOB = /* @__PURE__ */ new Set(["*", "?", "["]);
@@ -3281,6 +3281,7 @@ var hookPayloadToEvent = (payload, options) => {
     case "PostToolUse": {
       const result = typeof response === "object" && response !== null ? response : {};
       const command = str(input.command) ?? "";
+      const stdout = str(result.stdout);
       const agentTool = tool === "Agent" || tool === "Task";
       const data = {
         ...base,
@@ -3291,7 +3292,7 @@ var hookPayloadToEvent = (payload, options) => {
         responseChars: num(result.responseChars) ?? JSON.stringify(response ?? null).length,
         exitCode: tool === "Bash" ? num(result.exitCode ?? result.exit_code) : void 0,
         interrupted: tool === "Bash" ? result.interrupted === true : void 0,
-        stdoutTail: tool === "Bash" ? keptStdout(command, str(result.stdout) ?? "") : void 0,
+        stdoutTail: tool === "Bash" && stdout !== void 0 ? keptStdout(command, stdout) : void 0,
         agentId: agentTool ? str(result.agentId) : void 0,
         isAsync: agentTool ? result.isAsync === true : void 0,
         status: agentTool ? str(result.status) : void 0,
@@ -4131,7 +4132,7 @@ var moveRecordRun = (session, oldId, newId, holder) => {
     }
   }
   for (const entry of session.questions) {
-    if (entry.startRunId === oldId) {
+    if (entry.runId === void 0 && entry.startRunId === oldId) {
       entry.startRunId = newId;
     }
   }
@@ -4213,9 +4214,13 @@ var setGate = (run, id, state, line, source, note) => updateGate(run.gates[id], 
 var countOwnWaiting = (session, by) => {
   session.ownWaiting = (session.ownWaiting ?? 0) + by;
 };
-var setOwnGate = (session, id, state, line, note) => {
+var setOwnGate = (session, id, state, line, startRunId, note) => {
   const gates = session.gates ?? {};
-  const gate = ownValue(gates, id) ?? { id, state: "pending", source: "marker" };
+  const existing = ownValue(gates, id);
+  if (existing) {
+    existing.startRunId = startRunId;
+  }
+  const gate = existing ?? { id, state: "pending", source: "marker", startRunId };
   gates[id] = gate;
   session.gates = gates;
   const waited = gate.state === "waiting";
@@ -4335,13 +4340,13 @@ var syncWaits = (run, at, trunkLike, own = { gates: [], questions: [] }) => {
 var closeOwnGates = (session, line) => {
   const waiting = Object.values(session.gates ?? {}).filter((gate) => gate.state === "waiting");
   for (const gate of waiting) {
-    setOwnGate(session, gate.id, "done", line);
+    setOwnGate(session, gate.id, "done", line, gate.startRunId);
   }
-  return [...new Set(waiting.flatMap((gate) => gate.startRunId === void 0 ? [] : [gate.startRunId]))];
+  return [...new Set(waiting.map((gate) => gate.startRunId))];
 };
 var waitingOwnGates = (state, sessionId) => Object.values(sessionRecord(state, sessionId)?.gates ?? {}).filter((gate) => gate.state === "waiting");
 var leftOwnWaits = (state, gates) => {
-  const left = gates.flatMap((gate) => gate.state !== "waiting" && gate.startRunId !== void 0 ? [gate.startRunId] : []);
+  const left = gates.flatMap((gate) => gate.state !== "waiting" ? [gate.startRunId] : []);
   return left.flatMap((id) => ownValue(state.branchStates, id) ?? []);
 };
 var endPlan = (state, run, line) => {
@@ -4352,8 +4357,9 @@ var endPlan = (state, run, line) => {
     setGate(run, "plan", "done", line, run.gates.plan.source);
   }
   const session = sessionRecord(state, line.sessionId);
-  if (session?.gates?.plan?.state === "waiting") {
-    setOwnGate(session, "plan", "done", line);
+  const plan = session?.gates?.plan;
+  if (session && plan?.state === "waiting") {
+    setOwnGate(session, "plan", "done", line, plan.startRunId);
   }
 };
 var pastImplement = (run) => PAST_IMPLEMENT.some((id) => run.stages[id].startedAt !== void 0);
@@ -4436,9 +4442,17 @@ var closeQuestion = (state, run, question, to, line, via) => {
   close(question, to, line, via, (text, tone, agentId, origin) => logRun(state, run, line, text, tone, agentId, origin));
 };
 var waitsOnYou = (question) => question.state === "open" && question.blocking && question.audience === "user";
-var closeOwnQuestion = (state, record, question, to, line, via) => {
+var countOwnOpen = (session, by) => {
+  session.ownOpen = (session.ownOpen ?? 0) + by;
+};
+var isOwnQuestion = (entry) => entry.runId === void 0;
+var closeOwnQuestion = (state, record, own, to, line, via) => {
+  const { question } = own;
   if (waitsOnYou(question)) {
     countOwnWaiting(record, -1);
+  }
+  if (question.state === "open") {
+    countOwnOpen(record, -1);
   }
   close(question, to, line, via, ownLog(state, question, line));
 };
@@ -4465,11 +4479,12 @@ var addQuestion = (state, run, question) => {
   logAsked(state, run, question);
 };
 var addOwnQuestion = (state, session, question, startRunId) => {
-  if (session.questions.some((entry) => entry.runId === void 0 && entry.question.id === question.id)) {
+  if (session.questions.some((entry) => isOwnQuestion(entry) && entry.question.id === question.id)) {
     return;
   }
   const added = { ...question, audience: audienceOf(question.origin), state: "open" };
   session.questions.push({ startRunId, question: added });
+  countOwnOpen(session, 1);
   if (waitsOnYou(added)) {
     countOwnWaiting(session, 1);
   }
@@ -4661,11 +4676,14 @@ var expireOwnQuestions = (state, now) => {
   const touched = [];
   const line = factStamp(now);
   for (const session of Object.values(state.index.sessions)) {
-    const expired = session.questions.filter((entry) => entry.runId === void 0 && dayOld(entry.question, now));
-    for (const { question, startRunId } of expired) {
-      closeOwnQuestion(state, session, question, "expired", line);
-      logSession(session, line, `Question expired after 24 h: ${question.text}`, "normal");
-      const start = startRunId === void 0 ? void 0 : ownValue(state.branchStates, startRunId);
+    if ((session.ownOpen ?? 0) === 0) {
+      continue;
+    }
+    const expired = session.questions.filter(isOwnQuestion).filter((entry) => dayOld(entry.question, now));
+    for (const entry of expired) {
+      closeOwnQuestion(state, session, entry, "expired", line);
+      logSession(session, line, `Question expired after 24 h: ${entry.question.text}`, "normal");
+      const start = ownValue(state.branchStates, entry.startRunId);
       if (start && !touched.includes(start)) {
         touched.push(start);
       }
@@ -5598,6 +5616,11 @@ var renameRun = (state, oldId, newId, config) => {
   for (const [agentId, runId] of Object.entries(state.index.agentRuns)) {
     state.index.agentRuns[agentId] = remap(runId);
   }
+  for (const entry of Object.values(state.index.agentProgress)) {
+    if (entry.fixRunId !== void 0) {
+      entry.fixRunId = remap(entry.fixRunId);
+    }
+  }
   for (const call of Object.values(state.index.calls)) {
     call.runId = remap(call.runId);
     if (call.join !== void 0) {
@@ -6400,6 +6423,7 @@ var clearItems = (entry) => {
   delete entry.worktree;
   delete entry.items;
   delete entry.matched;
+  delete entry.fixRunId;
 };
 var markWhere = (entry, hit) => {
   const { worktree, items, matched } = entry;
@@ -6447,6 +6471,19 @@ var pathWords = (command, cwd, aliases) => segmentDirectories(command, cwd).flat
   const words = segment.text.split(WORD_BREAK).filter((word) => word !== "");
   return words.map((word) => wordPath(word, aliases, dir));
 });
+var HEREDOC_WORD = /<<-?\s*(['"]?)[A-Za-z_][\w-]*\1/g;
+var packageWords = (command, cwd, aliases) => {
+  const segmentWords = ({ segment, dir }) => {
+    const [name] = commandWords(shellWords(segment));
+    if (name !== void 0 && DIRECTORY_COMMANDS.has(name)) {
+      return [];
+    }
+    const words = segment.text.replace(HEREDOC_WORD, " ").split(WORD_BREAK).filter((word) => word !== "");
+    const args = name === void 0 ? words : words.slice(words.indexOf(name) + 1);
+    return args.filter((word) => !word.startsWith("-")).map((word) => wordPath(word, aliases, dir));
+  };
+  return segmentDirectories(command, cwd).flatMap(segmentWords);
+};
 var INTERPRETER = /^(?:python[0-9.]*|node|ruby|perl|bash|sh)$/;
 var NO_FILE_REDIRECT = /[0-9&]*>>?\s*\/dev\/\S*|[0-9]*>&[0-9-]+/g;
 var commandWords = (words) => {
@@ -6489,7 +6526,7 @@ var fixPackage = (run, plan, fix, config) => {
   const pkg = config.packages.find((item) => item.id === id);
   return pkg && pkg.paths.length > 0 ? pkg.id : void 0;
 };
-var fixItems = (state, run, fix, config) => {
+var fixItems = (state, run, fix, config, legPackage) => {
   const aliases = state.index.worktreeAliases;
   const sessions = state.index.agentSessions;
   const sessionId = ownValue(sessions, fix.agentId) ?? fix.sessionId;
@@ -6497,15 +6534,46 @@ var fixItems = (state, run, fix, config) => {
   const followups = reviewers.flatMap((reviewer) => ownValue(run.agents, reviewer.agentId)?.report?.block?.followups ?? []);
   const files = followups.flatMap((item) => item.type === "fix" && item.file ? [fixItemFile(item.file, run.worktree, aliases)] : []).filter((file) => file !== "");
   const plan = planIn(run, sessionId === void 0 ? void 0 : ownValue(state.index.sessions, sessionId)?.plan);
-  const pkg = fixPackage(run, plan, fix, config);
-  const inPackage = pkg === void 0 ? [] : files.filter((file) => packageOf(file, config) === pkg);
-  return (inPackage.length > 0 ? inPackage : files).slice(0, PROGRESS_ITEMS_CAP);
+  const pkg = fixPackage(run, plan, fix, config) ?? splitPackage(state, run, fix, sessionId, legPackage);
+  return packageItems(files, pkg, config).slice(0, PROGRESS_ITEMS_CAP);
+};
+var splitPackage = (state, run, fix, sessionId, legPackage) => {
+  if (legPackage === void 0) {
+    return void 0;
+  }
+  const sessions = state.index.agentSessions;
+  const running = (other) => other.state === "running" && other.reviewerId === fix.reviewerId;
+  const otherFixer = (other) => other.agentId !== fix.agentId && other.agentId !== "main";
+  const sameSession2 = (other) => (ownValue(sessions, other.agentId) ?? other.sessionId) === sessionId;
+  return run.fixes.some((other) => running(other) && otherFixer(other) && sameSession2(other)) ? legPackage : void 0;
+};
+var packageItems = (files, pkg, config) => {
+  if (pkg === void 0) {
+    return files;
+  }
+  const packages = files.map((file) => packageOf(file, config));
+  if (!packages.includes(pkg)) {
+    return files;
+  }
+  return files.filter((_, index) => packages[index] === pkg || packages[index] === void 0);
 };
 var fixTarget = (state, run, home, agentId, config) => {
   const fixRun = agentFix(run, agentId) ? run : home;
   const fix = agentFix(fixRun, agentId);
-  const items = fix ? fixItems(state, fixRun, fix, config) : [];
-  return items.length > 0 ? { worktree: fixRun.worktree, items } : void 0;
+  const legPackage = ownValue(state.index.agentProgress, agentId)?.package;
+  const items = fix ? fixItems(state, fixRun, fix, config, legPackage) : [];
+  return items.length > 0 ? { worktree: fixRun.worktree, items, runId: fixRun.id } : void 0;
+};
+var itemsRun = (state, agentId, entry) => {
+  const { items, worktree, fixRunId } = entry;
+  if (!items || worktree === void 0 || fixRunId === void 0) {
+    return void 0;
+  }
+  const stored = ownValue(state.branchStates, fixRunId);
+  if (stored && agentFix(stored, agentId)) {
+    return stored;
+  }
+  return Object.values(state.branchStates).find((run) => run.worktree === worktree && agentFix(run, agentId) !== void 0);
 };
 var matchedPaths = (entry, aliases) => {
   const paths = /* @__PURE__ */ new Set();
@@ -6524,18 +6592,29 @@ var matchesOf = (worktree, items, paths, aliases) => {
   return items.map((item) => real.has(itemPath(worktree, item, aliases) ?? ""));
 };
 var setFixItems = (entry, agent, target, aliases) => {
+  const before = /* @__PURE__ */ new Set([...matchedPaths(entry, aliases), ...entry.droppedMatches ?? []]);
   if (!target) {
     clearItems(entry);
+    keepDropped(entry, before, /* @__PURE__ */ new Set());
     if (agent.progress?.kind !== "implement") {
       agent.progress = phaseProgress("implement", entry.phase ?? READ);
     }
     return;
   }
-  const before = matchedPaths(entry, aliases);
   entry.worktree = target.worktree;
   entry.items = target.items;
+  entry.fixRunId = target.runId;
   entry.matched = matchesOf(target.worktree, target.items, before, aliases);
+  keepDropped(entry, before, matchedPaths(entry, aliases));
   agent.progress = fixesProgress(entry, entry.matched);
+};
+var keepDropped = (entry, before, kept) => {
+  const dropped = [...before].filter((path) => !kept.has(path)).slice(0, PROGRESS_ITEMS_CAP);
+  if (dropped.length > 0) {
+    entry.droppedMatches = dropped;
+  } else {
+    delete entry.droppedMatches;
+  }
 };
 var beginLeg = (state, run, agentId, at, config) => {
   const home = agentId === "main" ? void 0 : homeOf(state, agentId);
@@ -6557,6 +6636,10 @@ var beginLeg = (state, run, agentId, at, config) => {
   if (agent.stage === "implement") {
     const aliases = state.index.worktreeAliases;
     setFixItems(entry, agent, fixTarget(state, run, home.run, agentId, config), aliases);
+    const fixRun = agentFix(run, agentId) ? run : home.run;
+    if (agentFix(fixRun, agentId)) {
+      refreshFixers(state, fixRun, agentId, config);
+    }
   } else if (agent.stage === "pr") {
     const known = Object.values(state.branchStates).some((item) => item.pr !== void 0 && knowsPr(item, agentId, config));
     agent.progress = phaseProgress("pr", known ? FINISHING : PUSH);
@@ -6570,6 +6653,50 @@ var refreshFixItems = (state, run, agentId, at, config) => {
   const aliases = state.index.worktreeAliases;
   setFixItems(found.entry, found.agent, fixTarget(state, run, found.run, agentId, config), aliases);
   touch(found.entry, at);
+  const fixRun = itemsRun(state, agentId, found.entry);
+  if (fixRun) {
+    refreshFixers(state, fixRun, agentId, config);
+  }
+};
+var refreshFixers = (state, run, except, config) => {
+  const aliases = state.index.worktreeAliases;
+  for (const fix of run.fixes) {
+    const found = fix.agentId === except ? void 0 : runningEntry(state, fix.agentId, "implement");
+    if (found && agentFix(run, fix.agentId) === fix && itemsRun(state, fix.agentId, found.entry) === run) {
+      setFixItems(found.entry, found.agent, fixTarget(state, run, found.run, fix.agentId, config), aliases);
+    }
+  }
+};
+var editPackage = (state, path, config) => {
+  if (!isAbsolute2(path)) {
+    return packageOf(path, config);
+  }
+  const real = resolveAlias(normalizePath(path), state.index.worktreeAliases);
+  for (let end = real.lastIndexOf("/"); end > 0; end = real.lastIndexOf("/", end - 1)) {
+    if (Object.hasOwn(state.index.worktrees, real.slice(0, end))) {
+      return packageOf(real.slice(end + 1), config);
+    }
+  }
+  return void 0;
+};
+var takesPackage = (entry) => entry.items !== void 0 && entry.package === void 0;
+var notePackage = (state, found, paths, config) => {
+  const { entry, agent } = found;
+  if (!takesPackage(entry)) {
+    return;
+  }
+  for (const path of paths) {
+    const pkg = editPackage(state, path, config);
+    if (pkg === void 0) {
+      continue;
+    }
+    entry.package = pkg;
+    const fixRun = itemsRun(state, agent.id, entry);
+    if (fixRun) {
+      setFixItems(entry, agent, fixTarget(state, fixRun, found.run, agent.id, config), state.index.worktreeAliases);
+    }
+    return;
+  }
 };
 var lookAt = (found, paths, at, aliases) => {
   const { entry, agent } = found;
@@ -6613,17 +6740,19 @@ var noteGrepPath = (state, agentId, path, at) => {
   const aliases = state.index.worktreeAliases;
   lookAt(found, [wordPath(word, aliases)], at, aliases);
 };
-var noteEdit = (state, agentId, filePath, at) => {
+var noteEdit = (state, agentId, filePath, at, config) => {
   const found = runningEntry(state, agentId, "implement");
   if (!found || !isAbsolute2(filePath)) {
     return;
   }
   const { entry, agent } = found;
   const aliases = state.index.worktreeAliases;
+  const path = resolveAlias(normalizePath(filePath), aliases);
   touch(entry, at);
+  notePackage(state, found, [path], config);
   const moved = reachPhase(entry, EDIT);
   if (entry.items && entry.matched) {
-    const marked = markPathItems(entry, [resolveAlias(normalizePath(filePath), aliases)], aliases);
+    const marked = markPathItems(entry, [path], aliases);
     if (marked || moved) {
       agent.progress = fixesProgress(entry, entry.matched);
     }
@@ -6633,17 +6762,19 @@ var noteEdit = (state, agentId, filePath, at) => {
     agent.progress = phaseProgress("implement", EDIT);
   }
 };
-var noteBashEdit = (state, agentId, command, cwd, at) => {
+var noteBashEdit = (state, agentId, command, cwd, at, config) => {
   const found = runningEntry(state, agentId, "implement");
   if (!found || !writesFiles(command)) {
     return;
   }
   const { entry, agent } = found;
   const aliases = state.index.worktreeAliases;
+  const words = entry.items ? pathWords(command, cwd, aliases) : [];
   touch(entry, at);
+  notePackage(state, found, takesPackage(entry) ? packageWords(command, cwd, aliases) : [], config);
   const moved = reachPhase(entry, EDIT);
   if (entry.items && entry.matched) {
-    const marked = markPathItems(entry, pathWords(command, cwd, aliases), aliases);
+    const marked = markPathItems(entry, words, aliases);
     if (marked || moved) {
       agent.progress = fixesProgress(entry, entry.matched);
     }
@@ -6716,13 +6847,18 @@ var applyDiff = (state, data, at, truncated) => {
   agent.progress = itemsProgress("files", entry.matched);
   return run;
 };
-var endProgress = (state, agentId) => {
-  if (Object.hasOwn(state.index.agentProgress, agentId)) {
+var endProgress = (state, agentId, config) => {
+  const entry = ownValue(state.index.agentProgress, agentId);
+  const home = homeOf(state, agentId);
+  const fixRun = entry && home?.agent.stage === "implement" ? itemsRun(state, agentId, entry) : void 0;
+  if (entry) {
     delete state.index.agentProgress[agentId];
   }
-  const home = homeOf(state, agentId);
   if (home) {
     delete home.agent.progress;
+  }
+  if (fixRun) {
+    refreshFixers(state, fixRun, agentId, config);
   }
 };
 
@@ -6824,7 +6960,7 @@ var ownWaits = (session, runId) => {
   const gates = Object.values(session.gates ?? {}).filter((gate) => gate.state === "waiting" && gate.startRunId === runId);
   const questions = [];
   for (const entry of session.questions) {
-    if (entry.runId === void 0 && entry.startRunId === runId && waitsOnYou(entry.question)) {
+    if (entry.startRunId === runId && waitsOnYou(entry.question)) {
       questions.push(entry.question);
     }
   }
@@ -7162,7 +7298,7 @@ var renameStream = (state, run, stream, id) => {
     question.node = { kind: "stream", id };
   }
   for (const sessionId of run.sessionIds) {
-    const own = (sessionRecord(state, sessionId)?.questions ?? []).filter((entry) => entry.runId === void 0 && entry.startRunId === run.id && named(entry.question));
+    const own = (sessionRecord(state, sessionId)?.questions ?? []).filter((entry) => entry.startRunId === run.id && named(entry.question));
     for (const entry of own) {
       entry.question.node = { kind: "stream", id };
     }
@@ -7268,11 +7404,10 @@ var onOwnGate = (state, event, gate, config, touched) => {
   }
   noteMarker(state, event, event);
   const previous = ownValue(session.gates ?? {}, gate);
-  const held = previous?.state === "waiting" && previous.startRunId !== void 0 ? ownValue(state.branchStates, previous.startRunId) : void 0;
-  const left = previous?.startRunId === void 0 ? void 0 : ownValue(state.branchStates, previous.startRunId);
+  const left = previous === void 0 ? void 0 : ownValue(state.branchStates, previous.startRunId);
+  const held = previous?.state === "waiting" ? left : void 0;
   const run = held ?? start;
-  const own = setOwnGate(session, gate, gateState, event, note);
-  own.startRunId = run.id;
+  setOwnGate(session, gate, gateState, event, run.id, note);
   gateStage(run, gate, gateState, event.at);
   logSession(session, event, gateText(gate, gateState, note), gateState === "waiting" ? "you" : "normal");
   touched.push(...[run, left].filter((other) => other !== void 0 && other !== start));
@@ -7331,11 +7466,11 @@ var markerSession = (state, event, run) => {
 var recordQuestion2 = (state, session, id, ownOnly = false) => {
   const found = [];
   for (const entry of session?.questions ?? []) {
-    const holder = entry.runId === void 0 || ownOnly ? void 0 : ownValue(state.branchStates, entry.runId);
+    const holder = isOwnQuestion(entry) || ownOnly ? void 0 : ownValue(state.branchStates, entry.runId);
     if (entry.question.id === id && holder) {
       found.push({ run: holder, question: entry.question });
-    } else if (session && entry.question.id === id && entry.runId === void 0) {
-      found.push(entry.startRunId === void 0 ? { record: session, question: entry.question } : { record: session, startRunId: entry.startRunId, question: entry.question });
+    } else if (session && entry.question.id === id && isOwnQuestion(entry)) {
+      found.push({ record: session, own: entry, question: entry.question });
     }
   }
   const newest2 = found.sort((a, b) => time(b.question.createdAt) - time(a.question.createdAt));
@@ -7352,13 +7487,13 @@ var answeredQuestion = (state, event, run, id) => {
   return recordQuestion2(state, sessionRecord(state, markerStamp(state, event, run, true).sessionId), id, true);
 };
 var answerFound = (state, found, line) => {
-  if (found.run) {
+  if ("run" in found) {
     closeQuestion(state, found.run, found.question, "answered", line, "terminal");
-  } else if (found.record) {
-    closeOwnQuestion(state, found.record, found.question, "answered", line, "terminal");
+  } else {
+    closeOwnQuestion(state, found.record, found.own, "answered", line, "terminal");
   }
 };
-var waitRun = (state, found) => found.run ?? (found.startRunId === void 0 ? void 0 : ownValue(state.branchStates, found.startRunId));
+var waitRun = (state, found) => "run" in found ? found.run : ownValue(state.branchStates, found.own.startRunId);
 var onOwnQuestion = (state, event, config, touched) => {
   const start = ensureStartRun(state, event, config);
   const session = ensureSession(state, event);
@@ -7384,7 +7519,7 @@ var onOwnQuestion = (state, event, config, touched) => {
     warn(state, event.at, `question marker for ${start.id}: id and text are required`);
     return void 0;
   }
-  if (session.questions.some((entry) => entry.runId === void 0 && entry.question.id === data.id)) {
+  if (session.questions.some((entry) => isOwnQuestion(entry) && entry.question.id === data.id)) {
     return start;
   }
   noteMarker(state, event, event);
@@ -8323,14 +8458,14 @@ var answeredByPrompt = (state, question, prompt) => {
 var ownAnswered = (state, session, prompt) => {
   const found = [];
   for (const [askerId, asker] of Object.entries(state.index.sessions)) {
-    const open = asker.questions.filter((entry) => entry.runId === void 0 && answeredByPrompt(state, entry.question, prompt));
-    if (open.length === 0 || askerId !== prompt.sessionId && asker.endedAt === void 0) {
+    if ((asker.ownWaiting ?? 0) === 0 || askerId !== prompt.sessionId && asker.endedAt === void 0) {
       continue;
     }
-    for (const entry of open) {
-      const start = entry.startRunId === void 0 ? void 0 : ownValue(state.branchStates, entry.startRunId);
+    const open = asker.questions.filter(isOwnQuestion).filter((entry) => answeredByPrompt(state, entry.question, prompt));
+    for (const own of open) {
+      const start = ownValue(state.branchStates, own.startRunId);
       if (askerId === prompt.sessionId || start && session.runIds.includes(start.id)) {
-        found.push(start ? { asker, question: entry.question, start } : { asker, question: entry.question });
+        found.push(start ? { asker, own, start } : { asker, own });
       }
     }
   }
@@ -8357,7 +8492,7 @@ var onPrompt = (state, event, config, answered) => {
     startRoleStageAtEnd(state, run2, agent, event, config);
     finalizeAgent(state, run2, agent, event, config);
     endCopies(state, run2, agent, event, config);
-    endProgress(state, agent.id);
+    endProgress(state, agent.id, config);
     return run2;
   }
   if (data.kind === "handback") {
@@ -8377,9 +8512,9 @@ var onPrompt = (state, event, config, answered) => {
       answered.push(other);
     }
   }
-  for (const { asker, question, start } of ownAnswered(state, session, event)) {
-    closeOwnQuestion(state, asker, question, "answered", event, "terminal");
-    closed.push(question);
+  for (const { asker, own, start } of ownAnswered(state, session, event)) {
+    closeOwnQuestion(state, asker, own, "answered", event, "terminal");
+    closed.push(own.question);
     if (start && start !== run && !answered.includes(start)) {
       answered.push(start);
     }
@@ -8417,7 +8552,7 @@ var onAgentStop = (state, event, config) => {
   startRoleStageAtEnd(state, run, agent, event, config);
   finalizeAgent(state, run, agent, event, config);
   endCopies(state, run, agent, event, config);
-  endProgress(state, agentId);
+  endProgress(state, agentId, config);
   return run;
 };
 
@@ -8653,7 +8788,7 @@ var onAgentStart = (state, event, config) => {
     const stopped = { at: stoppedAt, sessionId: event.sessionId };
     startRoleStageAtEnd(state, run, agent, stopped, config);
     finalizeAgent(state, run, agent, stopped, config);
-    endProgress(state, agentId);
+    endProgress(state, agentId, config);
   }
   const parentAgent = spawn2 ? state.branchStates[spawn2.runId]?.agents[spawn2.parentAgent] : void 0;
   const parentCall = parentAgent?.recent.find((call) => call.toolUseId === spawn2?.toolUseId);
@@ -8697,10 +8832,10 @@ var pruneOlder = (entries, floor) => {
     }
   }
 };
-var pruneProgress = (state, floor) => {
+var pruneProgress = (state, floor, config) => {
   for (const [agentId, entry] of Object.entries(state.index.agentProgress)) {
     if (entry.atMs < floor) {
-      endProgress(state, agentId);
+      endProgress(state, agentId, config);
     }
   }
 };
@@ -8739,7 +8874,7 @@ var pruneIndex = (state, at, config) => {
   pruneOlder(state.index.pendingStops, floor);
   pruneOlder(state.index.agentStreams, floor);
   pruneOlder(state.index.prOpeners, floor);
-  pruneProgress(state, floor);
+  pruneProgress(state, floor, config);
   pruneBranches(state.board.branches, now);
 };
 
@@ -9233,6 +9368,7 @@ var leaveStrayNodes = (state, run, agent, line, config, touched, editedFile) => 
   const withdrawn = withdrawStrayNodes(state, run, agent, line, keepFix);
   for (const other of withdrawn) {
     recountWithdrawn(state, other, agent.id, line.sessionId, config);
+    refreshFixers(state, other, agent.id, config);
     touched.push(other);
   }
   if (withdrawn.length > 0) {
@@ -9292,7 +9428,7 @@ var onToolPre2 = (state, event, config, touched) => {
     const started = roleStageStarted(run, agent);
     onEditPre(state, run, agent, input.filePath, event, config);
     workOnEdit(state, run, agent, { filePath: input.filePath, started }, event, config, touched);
-    noteEdit(state, agentKey, input.filePath, event.at);
+    noteEdit(state, agentKey, input.filePath, event.at, config);
   }
   if (tool === "Read" && input.filePath) {
     noteRead(state, agentKey, input.filePath, event.at);
@@ -9365,7 +9501,7 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   if (match && match.kinds.length > 0) {
     noteVerification(state, agent.id, event.at);
   } else if (agent.id !== "main") {
-    noteBashEdit(state, agent.id, command, event.cwd, event.at);
+    noteBashEdit(state, agent.id, command, event.cwd, event.at, config);
   }
   if (agent.id !== "main") {
     noteBashRead(state, agent.id, command, event.cwd, event.at);
@@ -9530,7 +9666,7 @@ var onToolEnd = (state, event, config, touched) => {
       startRoleStageAtEnd(state, run, spawned, event, config);
       finalizeAgent(state, run, spawned, event, config);
       endCopies(state, run, spawned, event, config);
-      endProgress(state, spawned.id);
+      endProgress(state, spawned.id, config);
     }
     if (spawn3) {
       retireSpawn(state, spawn3.toolUseId);
@@ -10768,7 +10904,7 @@ var sessionQuestions = (ctx, rows, nodes) => {
   const found = ctx.session.questions.filter((entry) => entry.runId === void 0 || reached.has(entry.runId));
   const byCreation = (a, b) => time(a.question.createdAt) - time(b.question.createdAt);
   const ordered = found.sort((a, b) => byCreation(a, b) || compareText(a.question.id, b.question.id) || compareRunIds(a.runId, b.runId));
-  const start = (id) => id !== void 0 && ownValue(ctx.state.branchStates, id) ? id : void 0;
+  const start = (id) => ownValue(ctx.state.branchStates, id) ? id : void 0;
   const askers = ordered.map(({ question }) => question.source.agentId);
   const askedByAgent = askers.some((asker) => asker !== MAIN_AGENT && Object.hasOwn(ctx.agents, asker));
   const legs = askedByAgent ? agentLegNodes(rows, true) : /* @__PURE__ */ new Map();

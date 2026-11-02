@@ -2001,10 +2001,16 @@ var createCollapsingRegion = (id, host) => {
 var FLASH_DELAY_MS = 450;
 var FLASH = [{ backgroundColor: "rgba(255, 255, 255, .12)", offset: 0 }, { backgroundColor: "rgba(255, 255, 255, .12)", offset: 0.3 }];
 var FLASH_MS = 1400;
+var REVEALED_CLASS = "revealed";
+var revealTimers = /* @__PURE__ */ new WeakMap();
 var flashLine = (context, line) => {
   if (!context.reducedMotion()) {
     line.animate(FLASH, { duration: FLASH_MS, easing: "ease" });
+    return;
   }
+  window.clearTimeout(revealTimers.get(line));
+  line.classList.add(REVEALED_CLASS);
+  revealTimers.set(line, window.setTimeout(() => line.classList.remove(REVEALED_CLASS), FLASH_MS));
 };
 
 // src/ui/ticket-link.ts
@@ -2157,7 +2163,9 @@ var createSessionConversationRow = (context, parts) => {
     },
     flash() {
       window.clearTimeout(flashTimer);
-      if (!context.reducedMotion()) {
+      if (context.reducedMotion()) {
+        flashLine(context, line);
+      } else {
         flashTimer = window.setTimeout(() => flashLine(context, line), FLASH_DELAY_MS);
       }
     },
@@ -2681,9 +2689,9 @@ var createCardList = (list, context, item2, make) => {
     }
   };
 };
-var onScreen = (element) => {
+var onScreen = (element, top = 0) => {
   const rect = element.getBoundingClientRect();
-  return element.getClientRects().length > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+  return element.getClientRects().length > 0 && rect.bottom > top && rect.top < window.innerHeight;
 };
 var keySource = (card) => {
   const key = card.element.querySelector(".card-key");
@@ -6347,13 +6355,21 @@ var createAnswerer = (deps) => {
   };
 };
 
+// src/model/keys.ts
+var KEY_BEFORE = String.raw`(?:^|[^\w\\./-])`;
+var KEY_AFTER = String.raw`(?:$|[^\w/.]|\.(?:$|[^A-Za-z0-9]))`;
+var BRANCH_KEY_BEFORE = String.raw`(?:^|[^A-Za-z0-9\\./])`;
+var BRANCH_KEY_AFTER = String.raw`(?:$|[^A-Za-z0-9/.]|\.(?:$|[^A-Za-z0-9]))`;
+var KEY_FOLLOWER = new RegExp(`^${KEY_AFTER}`);
+
+// src/insights/typical.ts
+var TYPICAL_RUNS = 50;
+
 // src/ui/graph/progress-ring.ts
 var RING_PARTS = 8;
 var PHASE_NAMES = { implement: ["read", "edit", "verify"], pr: ["push", "open the PR", "finish"] };
-var LONGEST_RUNS = 9;
+var TYPICAL_HOLD = 0.95;
 var RING_GAP = 3;
-var TICK_FROM = 4.5;
-var TICK_TO = 6;
 var PART_GAP = 9.6 / 360;
 var LIGHT_SECONDS_PER_TURN = 1.4 * (360 / 72);
 var LIGHT_MIN_SECONDS = 1.4;
@@ -6409,37 +6425,70 @@ var fromProgress = (progress) => {
   const parts = files ? flags.map((part, index) => ({ share: part.share, done: index < done })) : flags;
   return current !== void 0 && current < parts.length ? { kind: "parts", parts, current, text: text2 } : { kind: "parts", parts, text: text2 };
 };
+var isAscendingCount = (value2, index, counts) => {
+  const count = Number.isInteger(value2) ? value2 : -1;
+  const previous = index === 0 ? 0 : counts[index - 1];
+  return count >= previous;
+};
 var isTypicalLength = (value2) => {
   if (typeof value2 !== "object" || value2 === null) {
     return false;
   }
-  const { runs, p25, p75, p90 } = value2;
-  return isCount3(runs) && isCount3(p25) && isCount3(p75) && isCount3(p90) && p90 >= 1;
+  const { runs, calls } = value2;
+  if (!Array.isArray(calls) || calls.length === 0 || calls.length > TYPICAL_RUNS || runs !== calls.length) {
+    return false;
+  }
+  const counts = calls;
+  return counts.every(isAscendingCount) && counts[counts.length - 1] >= 1;
 };
-var typicalText = (used, length) => {
+var typicalText = (used, length, share2) => {
   const calls = `${used} tool call${used === 1 ? "" : "s"}`;
-  if (used > length.p90 && length.runs <= LONGEST_RUNS) {
-    return `${calls}, longer than all ${length.runs} earlier runs (the longest ${length.p90})`;
+  const longest = length.calls[length.calls.length - 1];
+  if (used > longest) {
+    return `${calls}, longer than all ${length.runs} earlier runs (the longest ${longest})`;
   }
-  if (used > length.p90) {
-    return `${calls}, longer than usual: at least 90% of ${length.runs} earlier runs stopped by ${length.p90} tool calls`;
+  const p25 = percentile(length.calls, 25);
+  const p75 = percentile(length.calls, 75);
+  const range = p25 === p75 ? `${p25}` : `${p25} to ${p75}`;
+  const shorter = length.calls.filter((count) => count < used).length;
+  if (share2 >= TYPICAL_HOLD && shorter > 0) {
+    return `${calls}, longer than ${shorter} of ${length.runs} earlier runs (usually ${range})`;
   }
-  const range = length.p25 === length.p75 ? `${length.p25}` : `${length.p25} to ${length.p75}`;
   return `${calls}, usually ${range} (${length.runs} earlier runs)`;
 };
 var typicalOf = (agent, typical) => {
   const firstLeg = agent.resumedAt === void 0 && agent.budget.toolCallsAtFirstStop === void 0;
   const length = typical !== void 0 && firstLeg ? ownValue(typical, agent.role) : void 0;
-  if (!isTypicalLength(length)) {
-    return void 0;
-  }
-  return { length, used: isCount3(agent.budget.toolCalls.used) ? agent.budget.toolCalls.used : 0 };
+  const used = isCount3(agent.budget.toolCalls.used) ? agent.budget.toolCalls.used : 0;
+  return isTypicalLength(length) && used >= 1 ? { length, used } : void 0;
 };
-var typicalShare = ({ length, used }) => Math.min(used / length.p90, 1);
+var medianFrom = (calls, from) => {
+  const middle = from + Math.floor((calls.length - from) / 2);
+  return (calls.length - from) % 2 === 1 ? calls[middle] : (calls[middle - 1] + calls[middle]) / 2;
+};
+var expectedShare = (calls, used) => {
+  const from = calls.findIndex((count) => count >= used);
+  return from < 0 ? TYPICAL_HOLD : Math.min(used / medianFrom(calls, from), TYPICAL_HOLD);
+};
+var typicalShare = ({ length, used }) => {
+  let share2 = expectedShare(length.calls, used);
+  for (const count of length.calls) {
+    if (count >= used) {
+      break;
+    }
+    if (count >= 1) {
+      share2 = Math.max(share2, expectedShare(length.calls, count));
+    }
+  }
+  return share2;
+};
+var typicalArc = (share2, typicalLeads, text2) => {
+  const atHold = typicalLeads && share2 >= TYPICAL_HOLD;
+  return atHold ? { kind: "arc", done: share2, atHold, text: text2 } : { kind: "arc", done: share2, text: text2 };
+};
 var fromTypical = (typical) => {
-  const { length, used } = typical;
-  const ticks = [...new Set([length.p25, length.p75].map((calls) => Math.min(calls / length.p90, 1)))];
-  return { kind: "arc", done: typicalShare(typical), ticks, text: typicalText(used, length) };
+  const share2 = typicalShare(typical);
+  return typicalArc(share2, true, typicalText(typical.used, typical.length, share2));
 };
 var legStart = (agent) => agent.resumedAt ?? agent.startedAt;
 var pruneRingForms = (forms, agents) => {
@@ -6455,11 +6504,11 @@ var fromFiles = (agent, progress, typical, forms) => {
   const { length, used } = typical;
   const share2 = typicalShare(typical);
   const filesLead = done > 0 && share2 <= done / total;
-  const lead = `${typicalText(used, length)}; changed files: ${done} of ${total} looked at`;
+  const lead = `${typicalText(used, length, share2)}; changed files: ${done} of ${total} looked at`;
   const text2 = filesLead ? progressText(progress, void 0) : lead;
   const parts = partsOf(progress);
   if (parts === void 0) {
-    return { kind: "arc", done: Math.max(done / total, share2), text: text2 };
+    return typicalArc(Math.max(done / total, share2), !filesLead, text2);
   }
   if (filesLead) {
     forms?.set(agent.id, legStart(agent));
@@ -6467,7 +6516,7 @@ var fromFiles = (agent, progress, typical, forms) => {
   if (!filesLead && forms?.get(agent.id) !== legStart(agent)) {
     return { ...fromTypical(typical), text: text2 };
   }
-  const shown = Math.max(done, Math.floor(Math.min(used, length.p90) * total / length.p90));
+  const shown = Math.max(done, Math.floor(share2 * total));
   const lit = parts.map((part, index) => ({ share: part.share, done: index < shown }));
   if (shown < lit.length) {
     return { kind: "parts", parts: lit, current: shown, text: text2 };
@@ -6539,7 +6588,6 @@ var arcPath = (r, from, to) => {
   const large = to - from > 0.5 ? 1 : 0;
   return `M${pointAt(r, from)} A${radii} 0 ${large} 1 ${pointAt(r, to)}`;
 };
-var tickPath = (radius, share2) => `M${pointAt(radius + TICK_FROM, share2)} L${pointAt(radius + TICK_TO, share2)}`;
 var partArcs = (parts) => {
   if (parts.length === 1) {
     return [{ from: 0, to: 1 }];
@@ -6556,9 +6604,9 @@ var lightArc = (ring) => {
   if (ring.kind === "parts") {
     return ring.current === void 0 ? { from: 0, to: 1 } : partArcs(ring.parts)[ring.current];
   }
-  return ring.done > 0 && ring.done < 1 ? { from: ring.done, to: 1 } : { from: 0, to: 1 };
+  return ring.done > 0 && ring.done < 1 && ring.atHold !== true ? { from: ring.done, to: 1 } : { from: 0, to: 1 };
 };
-var isFull = (ring) => ring.kind === "parts" ? ring.parts.every((part) => part.done) : ring.done >= 1;
+var isFull = (ring) => ring.kind === "parts" ? ring.parts.every((part) => part.done) : ring.done >= 1 || ring.atHold === true;
 var lightSeconds = (arc) => Math.min(LIGHT_MAX_SECONDS, Math.max(LIGHT_MIN_SECONDS, (arc.to - arc.from) * LIGHT_SECONDS_PER_TURN));
 var keyPhase = (key) => {
   let hash = 0;
@@ -6571,18 +6619,13 @@ var shapeOf = (ring, radius) => {
   if (ring.kind === "parts") {
     return `parts|${radius}|${ring.parts.map((part) => round3(part.share)).join(" ")}`;
   }
-  return `arc|${radius}|${ring.ticks?.length ?? 0}`;
+  return `arc|${radius}`;
 };
 var childrenOf = (group, name) => [...group.children].filter((child) => child.classList.contains(name));
 var pendingArcs = /* @__PURE__ */ new WeakMap();
 var setStyle = (element, name, value2) => {
   if (element.style.getPropertyValue(name) !== value2) {
     element.style.setProperty(name, value2);
-  }
-};
-var setAttribute = (element, name, value2) => {
-  if (element.getAttribute(name) !== value2) {
-    element.setAttribute(name, value2);
   }
 };
 var drawLight = (arc, r, phase) => {
@@ -6604,8 +6647,7 @@ var drawShape = (ring, radius) => {
   if (ring.kind === "parts") {
     return partArcs(ring.parts).map((arc) => svgEl("path", { class: "progress-part", d: arcPath(r, arc.from, arc.to) }));
   }
-  const ticks = (ring.ticks ?? []).map((share2) => svgEl("path", { class: "progress-tick", d: tickPath(radius, share2) }));
-  return [...ticks, svgEl("circle", { class: "progress-track", r: round3(r) }), svgEl("path", { class: "progress-done", d: arcPath(r, 0, 1), pathLength: 100 })];
+  return [svgEl("circle", { class: "progress-track", r: round3(r) }), svgEl("path", { class: "progress-done", d: arcPath(r, 0, 1), pathLength: 100 })];
 };
 var placeLight = (group, ring, draw2) => {
   const light = childrenOf(group, "progress-light")[0];
@@ -6645,8 +6687,6 @@ var updateProgressRing = (group, ring, draw2) => {
   } else {
     const dash = ring.done >= 1 ? "none" : `${round3(ring.done * 100)} 100`;
     childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", dash));
-    const ticks = ring.ticks ?? [];
-    childrenOf(group, "progress-tick").forEach((tick, index) => setAttribute(tick, "d", tickPath(draw2.radius, ticks[index] ?? 0)));
   }
   placeLight(group, ring, draw2);
 };
@@ -6874,10 +6914,10 @@ var agentTitle = (session, agent, name) => {
   const extra = [...round4 > 1 ? [`round ${round4}`] : [], ...agent.role === name ? [] : [agent.role]];
   return extra.length > 0 ? `${name} (${extra.join(", ")})` : name;
 };
-var escapeRegExp2 = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escapeRegExp3 = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var pillBranch = (branch, key) => {
   const short = shortBranch(branch);
-  const rest = key ? short.replace(new RegExp(`^${escapeRegExp2(key)}[-_./]+`, "i"), "") : short;
+  const rest = key ? short.replace(new RegExp(`^${escapeRegExp3(key)}[-_./]+`, "i"), "") : short;
   return rest || short;
 };
 var branchCell = (session, agent) => {
@@ -12356,6 +12396,14 @@ var SESSION_FAILED_TEXT = "The session could not be loaded. Show it again to ret
 var EASE7 = "cubic-bezier(.2,.8,.2,1)";
 var DETAIL_RESIZE_MS = 500;
 var REVEAL_WAIT_MS = 650;
+var REVEAL_FRAMES = 2;
+var afterFrames = (run, frames = REVEAL_FRAMES) => {
+  if (frames === 0) {
+    run();
+  } else {
+    window.requestAnimationFrame(() => afterFrames(run, frames - 1));
+  }
+};
 var panelCount = 0;
 var guard2 = (owner, id, element, step) => {
   try {
@@ -12540,6 +12588,7 @@ var createFinishedSessionsPanel = (context, options) => {
   const states = /* @__PURE__ */ new Map();
   const known = /* @__PURE__ */ new Map();
   const reveals = /* @__PURE__ */ new Set();
+  const loadWaits = /* @__PURE__ */ new Map();
   const fullOf = (id) => latest && Object.hasOwn(latest.sessions, id) ? latest.sessions[id] : void 0;
   const isReady = (id) => fullOf(id) !== void 0 || known.has(id);
   const entryOf3 = (id) => latest ? finishedEntry(latest, id, summaryIndex) : void 0;
@@ -12619,9 +12668,15 @@ var createFinishedSessionsPanel = (context, options) => {
     if (before === "shown" !== (next.state === "shown")) {
       options.onShownChange();
     }
+    if (before === "loading" && next.state !== "loading") {
+      const wait = loadWaits.get(id);
+      loadWaits.delete(id);
+      wait?.();
+    }
   };
   const forget = (id) => {
     loader.abort(id);
+    loadWaits.delete(id);
     states.delete(id);
     known.delete(id);
   };
@@ -12752,8 +12807,19 @@ var createFinishedSessionsPanel = (context, options) => {
         window.scrollTo({ top: Math.max(0, top), behavior: context.reducedMotion() ? "auto" : "smooth" });
       };
       reveals.add(go);
-      if (context.reducedMotion() || opening.size === 0) {
+      if (context.reducedMotion() && states.get(sessionId) === "loading") {
+        const wait = () => afterFrames(go);
+        loadWaits.set(sessionId, wait);
+        window.setTimeout(() => {
+          if (loadWaits.get(sessionId) === wait) {
+            loadWaits.delete(sessionId);
+          }
+          go();
+        }, REVEAL_WAIT_MS);
+      } else if (opening.size === 0) {
         go();
+      } else if (context.reducedMotion()) {
+        afterFrames(go);
       } else {
         shell.element.addEventListener("transitionend", onEnd);
         window.setTimeout(go, REVEAL_WAIT_MS);
@@ -12770,6 +12836,7 @@ var createFinishedSessionsPanel = (context, options) => {
         }
       }
       reveals.clear();
+      loadWaits.clear();
       pageToast().dismiss(toastOwner);
     }
   };
@@ -16158,10 +16225,11 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   };
   const flightsTo = (view, finished) => {
     const flights = [];
+    const bar = options.topOffset();
     for (const id of stack.ids()) {
       const card = stack.cards.get(id);
       const source = card ? keySource(card) : null;
-      if (!card || !source || !finished.has(id) || !onScreen(card.element)) {
+      if (!card || !source || !finished.has(id) || !onScreen(card.element, bar) || !onScreen(source, bar)) {
         continue;
       }
       const session = sessionOf(view.sessions, id);
@@ -16203,6 +16271,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     }
   };
   let followed;
+  let jumps = 0;
   const stopFollow = () => {
     window.clearTimeout(followed?.timer);
     followed = void 0;
@@ -16213,15 +16282,16 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
       return void 0;
     }
     const { sessionId } = followed;
-    const kept = card.element.contains(document.activeElement) && onScreen(card.element);
+    const kept = card.element.contains(document.activeElement) && onScreen(card.element, options.topOffset());
     stopFollow();
     return kept ? sessionId : void 0;
   };
   const focusOnBody = () => document.activeElement === null || document.activeElement === document.body;
   const revealAtLand = (flight) => {
+    const jumpAt = jumps;
     const land = () => {
       flight.land();
-      if (!retired && focusOnBody()) {
+      if (!retired && jumps === jumpAt && focusOnBody()) {
         panel.reveal(flight.sessionId, options.topOffset());
       }
     };
@@ -16284,6 +16354,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     updateFootnote();
   };
   const jump = (sessionId) => {
+    jumps += 1;
     stopFollow();
     const session = latest ? sessionOf(latest.sessions, sessionId) : void 0;
     const card = stack.cards.get(sessionId);

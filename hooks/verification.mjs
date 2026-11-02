@@ -56,8 +56,11 @@ const PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 /** The script of `node`: a relative plain path without a `..` segment and with a `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` extension. */
 const NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
-/** The environment assignments a verification command may carry: an allowlisted name and a plain value. */
-const SAFE_ASSIGNMENT = /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|DEBUG|LANG|LC_ALL)=[A-Za-z0-9_.:,/-]*$/;
+/**
+ * The environment assignments a verification command may carry: an allowlisted name and a plain value, or the
+ * redaction placeholder `[redacted]`, as the hook stores `CI=1` (the mapping decides on the stored command).
+ */
+const SAFE_ASSIGNMENT = /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|DEBUG|LANG|LC_ALL)=(?:[A-Za-z0-9_.:,/-]*|\[redacted\])$/;
 /** The redirections a verification command may carry: stderr into stdout, stdout into stderr. */
 const REDIRECTIONS = new Set(['2>&1', '>&2', '1>&2']);
 /** The unquoted characters of shell syntax the split does not model: escapes, expansions, substitutions, input redirections, groups and comments. */

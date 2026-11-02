@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.18 (2026-11-02)
+
+- Reveal marks measure below the top bar and show under reduced motion
+- The typical-length arc shows the expected share done
+- Split fix items between parallel fixers by package
+- No network git call of the release asks on the terminal
+- A stored verification command keeps its tail with a redacted assignment
+
 ## 0.1.17 (2026-11-02)
 
 - Questions name the current leg's row, path-less calls stay out of a leg

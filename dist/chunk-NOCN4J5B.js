@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-3K4PR63I.js";
+} from "./chunk-DRDUSXK5.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
@@ -92,7 +92,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-IH6V7M2D.js";
+} from "./chunk-NNCN4HNI.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -1321,11 +1321,8 @@ var lengthOf = (runs) => {
   if (window.length < TYPICAL_MIN_RUNS) {
     return void 0;
   }
-  const calls = window.map((run) => run.calls);
-  const p25 = percentile(calls, 25) ?? 0;
-  const p75 = percentile(calls, 75) ?? 0;
-  const p90 = percentile(calls, 90) ?? 0;
-  return p90 < 1 ? void 0 : { runs: window.length, p25, p75, p90 };
+  const calls = window.map((run) => run.calls).sort((a, b) => a - b);
+  return (percentile(calls, 90) ?? 0) < 1 ? void 0 : { runs: calls.length, calls };
 };
 var typicalLengths = (entries) => {
   const byRole = /* @__PURE__ */ new Map();
