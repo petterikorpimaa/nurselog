@@ -3912,6 +3912,7 @@ var toolMetrics = (agents) => {
 };
 var coveredEditCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.coveredEdits ?? 0), 0);
 var denialCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.denials ?? 0), 0);
+var staleApprovalCount = (rows) => rows.filter((row) => row.owner && row.trust?.stale !== void 0).length;
 var verificationMetrics = (role, agents) => {
   const commands = { typecheck: 0, lint: 0, test: 0 };
   const failed = { typecheck: 0, lint: 0, test: 0 };
@@ -3947,7 +3948,8 @@ var sessionMetrics = (session) => {
   const agents = main ? [main, ...subagents] : subagents;
   const coveredEdits = coveredEditCount(agents);
   const denials = denialCount(agents);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, coveredEdits, denials, verification, tokens, resumes };
+  const staleApprovals = staleApprovalCount(session.rows);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, coveredEdits, denials, staleApprovals, verification, tokens, resumes };
   if (session.overhead) {
     metrics.overhead = overheadMetrics(session.overhead, total.usd);
   }
@@ -4201,6 +4203,8 @@ var newRun = (id, worktree, branch, at) => ({
   streams: [],
   joins: [],
   rebases: [],
+  fileTrust: {},
+  checkRuns: {},
   reviewers: [],
   fixes: [],
   gates: Object.fromEntries(GATE_IDS.map((gate) => [gate, newGate(gate)])),
@@ -4581,6 +4585,213 @@ var checkFix = (run, at) => {
   }
 };
 
+// src/model/budget.ts
+var meterLevel = (meter, warnAt) => {
+  const ratio = meter.used / meter.limit;
+  if (ratio >= 1) {
+    return "limit";
+  }
+  return ratio >= warnAt ? "warn" : "ok";
+};
+var setLevel = (meter, warnAt) => {
+  if (meter.limit > 0) {
+    meter.level = meterLevel(meter, warnAt);
+  }
+};
+var updateMeter = (state, run, agent, name, meter, warnAt, line) => {
+  if (meter.limit <= 0) {
+    return;
+  }
+  const level = meterLevel(meter, warnAt);
+  meter.level = level;
+  const key = `${run.id}/${agent.id}/${name}/${level}`;
+  if (level !== "ok" && !state.index.warned[key]) {
+    state.index.warned[key] = true;
+    logRun(state, run, line, `${name}: ${meter.used} of ${meter.limit}${level === "limit" ? ", budget reached" : ""}`, "warn", agent.id);
+  }
+};
+var verificationKinds = (command, config) => {
+  const stripped = stripPrefix(command);
+  const compiled = compile(config);
+  const runner = stripped.split(/\s+/)[0];
+  if (!compiled.runners.has(runner)) {
+    return void 0;
+  }
+  const firstCommand = stripped.split(/\s*(?:\||&&|;)\s*/)[0];
+  const kinds = [];
+  const full = [];
+  for (const [kind, pattern] of compiled.kinds) {
+    const match = pattern.exec(patternInput(stripped));
+    if (!match) {
+      continue;
+    }
+    kinds.push(kind);
+    const scriptMatch = pattern.exec(patternInput(firstCommand));
+    const args = scriptMatch ? firstCommand.slice(scriptMatch.index + scriptMatch[0].length).split(/\s+/).filter(Boolean) : [];
+    const hasPath = args.some((arg) => arg.includes("/") || /\.(?:ts|tsx|mjs)$/.test(arg));
+    if (!config.verification.fullRunOnly || !hasPath) {
+      full.push(kind);
+    }
+  }
+  return { kinds, full };
+};
+var countVerification = (state, run, agent, match) => {
+  if (!match) {
+    return [];
+  }
+  const key = `${run.id}/${agent.id}`;
+  const full = state.index.fullRuns[key] ?? (state.index.fullRuns[key] = { typecheck: 0, lint: 0, test: 0 });
+  const entries = [];
+  for (const kind of match.kinds) {
+    agent.budget.verifyRounds.commands[kind] += 1;
+  }
+  for (const kind of match.full) {
+    full[kind] += 1;
+    entries.push({ kind, position: agent.budget.verifyRounds.results[kind].push("running") - 1 });
+  }
+  agent.budget.verifyRounds.used = Math.max(full.typecheck, full.lint, full.test);
+  return entries;
+};
+var SGR = /\x1b\[[0-9;]*m/g;
+var verifyResult = (kind, event, config) => {
+  if (event.event === "tool.fail") {
+    return "fail";
+  }
+  const { exitCode, interrupted, stdoutTail } = event.data;
+  if (interrupted === true || typeof exitCode === "number" && exitCode !== 0) {
+    return "fail";
+  }
+  const pattern = compile(config).failPatterns.get(kind);
+  const tail = (stdoutTail ?? "").replace(SGR, "");
+  return pattern?.test(patternInput(tail)) ? "fail" : "pass";
+};
+var settleVerification = (agent, entries, event, config) => {
+  for (const { kind, position } of entries) {
+    agent.budget.verifyRounds.results[kind][position] = verifyResult(kind, event, config);
+  }
+};
+
+// src/model/trust.ts
+var FILE_TRUST_CAP = 200;
+var PROSE_FILE = /\.(?:md|mdx|txt|rst|adoc)$/i;
+var CHECK_KINDS = ["typecheck", "test"];
+var checkKindsOf = (full) => full.filter((kind) => kind === "typecheck" || kind === "test");
+var later = (at, than) => than === void 0 || time(at) > time(than);
+var noteTrustEdit = (run, path, at) => {
+  const known = ownValue(run.fileTrust, path);
+  if (known !== void 0) {
+    if (later(at, known.editAt)) {
+      known.editAt = at;
+    }
+    return;
+  }
+  if (Object.keys(run.fileTrust).length < FILE_TRUST_CAP) {
+    ownEntry(run.fileTrust, path, () => ({ editAt: at }));
+  }
+};
+var startCheckRuns = (run, kinds, at) => {
+  const taken = [];
+  for (const kind of kinds) {
+    const known = run.checkRuns[kind];
+    if (known === void 0 || time(at) >= time(known.at)) {
+      run.checkRuns[kind] = { at, result: "running" };
+      taken.push(known === void 0 ? { kind } : { kind, replaced: known });
+    }
+  }
+  return taken;
+};
+var holderOf = (state, run, kind, at) => {
+  for (const entry of Object.values(state.index.calls)) {
+    const held = entry.runId === run.id ? entry.checks?.find((start) => start.kind === kind && start.replaced?.at === at) : void 0;
+    if (held !== void 0) {
+      return held;
+    }
+  }
+  return void 0;
+};
+var settleCheckRuns = (state, run, starts, at, event, config) => {
+  for (const { kind } of starts) {
+    const known = run.checkRuns[kind];
+    const own = known?.at === at ? known : holderOf(state, run, kind, at)?.replaced;
+    if (own !== void 0) {
+      own.result = verifyResult(kind, event, config);
+    }
+  }
+};
+var restoreCheckRuns = (state, run, starts, at) => {
+  for (const { kind, replaced } of starts) {
+    if (run.checkRuns[kind]?.at === at) {
+      if (replaced === void 0) {
+        delete run.checkRuns[kind];
+      } else {
+        run.checkRuns[kind] = replaced;
+      }
+      continue;
+    }
+    const holder = holderOf(state, run, kind, at);
+    if (holder !== void 0 && replaced === void 0) {
+      delete holder.replaced;
+    } else if (holder !== void 0) {
+      holder.replaced = replaced;
+    }
+  }
+};
+var trustPrefix = (run, worktree) => {
+  if (run.worktree === worktree || !isInside2(run.worktree, worktree)) {
+    return void 0;
+  }
+  return run.worktree.slice(worktree.length + 1);
+};
+var rebaseTrust = (run, prefix) => {
+  const moved = {};
+  for (const [path, trust] of Object.entries(run.fileTrust)) {
+    ownEntry(moved, `${prefix}/${path}`, () => trust);
+  }
+  run.fileTrust = moved;
+};
+var mergeTrust = (target, source, cap2) => {
+  for (const [path, trust] of Object.entries(source.fileTrust)) {
+    const known = ownValue(target.fileTrust, path);
+    if (known === void 0) {
+      if (Object.keys(target.fileTrust).length < cap2) {
+        ownEntry(target.fileTrust, path, () => ({ ...trust }));
+      }
+      continue;
+    }
+    if (later(trust.editAt, known.editAt)) {
+      known.editAt = trust.editAt;
+    }
+    if (trust.lookAt !== void 0 && later(trust.lookAt, known.lookAt)) {
+      known.lookAt = trust.lookAt;
+    }
+  }
+  for (const kind of CHECK_KINDS) {
+    const run = source.checkRuns[kind];
+    const known = target.checkRuns[kind];
+    if (run !== void 0 && (known === void 0 || time(run.at) > time(known.at))) {
+      target.checkRuns[kind] = { ...run };
+    }
+  }
+};
+var trustMark = (path, trust, checkRuns) => {
+  const reviewed = trust.lookAt !== void 0 && time(trust.lookAt) >= time(trust.editAt);
+  const after = CHECK_KINDS.flatMap((kind) => checkRuns[kind] ?? []).filter((run) => time(run.at) > time(trust.editAt));
+  const checked = PROSE_FILE.test(path) || after.length > 0 && after.every((run) => run.result === "pass");
+  return { reviewed, checked };
+};
+var trustOfRuns = (runs, approvedAt) => {
+  const merged = { fileTrust: {}, checkRuns: {} };
+  for (const run of runs) {
+    mergeTrust(merged, run, Number.POSITIVE_INFINITY);
+  }
+  const files = {};
+  for (const [path, trust] of Object.entries(merged.fileTrust)) {
+    ownEntry(files, path, () => trustMark(path, trust, merged.checkRuns));
+  }
+  const edited = approvedAt === void 0 ? 0 : Object.values(merged.fileTrust).filter((trust) => time(trust.editAt) > time(approvedAt)).length;
+  return approvedAt !== void 0 && edited > 0 ? { files, stale: { approvedAt, files: edited } } : { files };
+};
+
 // src/model/questions.ts
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var ownLog = (state, question, line) => (text, tone, agentId, origin) => {
@@ -4906,6 +5117,12 @@ var closePermissions = (state, run, agent, line, how, sessionId) => {
     if (agent.now === call) {
       delete agent.now;
     }
+    const index = state.index.calls[call.toolUseId];
+    const callRun = index?.checks ? ownValue(state.branchStates, index.runId) : void 0;
+    if (index?.checks && callRun) {
+      restoreCheckRuns(state, callRun, index.checks, index.at);
+      delete index.checks;
+    }
     if (question?.state === "open") {
       closeQuestion(state, run, question, "expired", line);
     }
@@ -4953,92 +5170,6 @@ var closeSessionPermissions = (state, event) => {
     return [];
   }
   return closeRunPermissions(state, session, event, event.event === "session.end");
-};
-
-// src/model/budget.ts
-var meterLevel = (meter, warnAt) => {
-  const ratio = meter.used / meter.limit;
-  if (ratio >= 1) {
-    return "limit";
-  }
-  return ratio >= warnAt ? "warn" : "ok";
-};
-var setLevel = (meter, warnAt) => {
-  if (meter.limit > 0) {
-    meter.level = meterLevel(meter, warnAt);
-  }
-};
-var updateMeter = (state, run, agent, name, meter, warnAt, line) => {
-  if (meter.limit <= 0) {
-    return;
-  }
-  const level = meterLevel(meter, warnAt);
-  meter.level = level;
-  const key = `${run.id}/${agent.id}/${name}/${level}`;
-  if (level !== "ok" && !state.index.warned[key]) {
-    state.index.warned[key] = true;
-    logRun(state, run, line, `${name}: ${meter.used} of ${meter.limit}${level === "limit" ? ", budget reached" : ""}`, "warn", agent.id);
-  }
-};
-var verificationKinds = (command, config) => {
-  const stripped = stripPrefix(command);
-  const compiled = compile(config);
-  const runner = stripped.split(/\s+/)[0];
-  if (!compiled.runners.has(runner)) {
-    return void 0;
-  }
-  const firstCommand = stripped.split(/\s*(?:\||&&|;)\s*/)[0];
-  const kinds = [];
-  const full = [];
-  for (const [kind, pattern] of compiled.kinds) {
-    const match = pattern.exec(patternInput(stripped));
-    if (!match) {
-      continue;
-    }
-    kinds.push(kind);
-    const scriptMatch = pattern.exec(patternInput(firstCommand));
-    const args = scriptMatch ? firstCommand.slice(scriptMatch.index + scriptMatch[0].length).split(/\s+/).filter(Boolean) : [];
-    const hasPath = args.some((arg) => arg.includes("/") || /\.(?:ts|tsx|mjs)$/.test(arg));
-    if (!config.verification.fullRunOnly || !hasPath) {
-      full.push(kind);
-    }
-  }
-  return { kinds, full };
-};
-var countVerification = (state, run, agent, match) => {
-  if (!match) {
-    return [];
-  }
-  const key = `${run.id}/${agent.id}`;
-  const full = state.index.fullRuns[key] ?? (state.index.fullRuns[key] = { typecheck: 0, lint: 0, test: 0 });
-  const entries = [];
-  for (const kind of match.kinds) {
-    agent.budget.verifyRounds.commands[kind] += 1;
-  }
-  for (const kind of match.full) {
-    full[kind] += 1;
-    entries.push({ kind, position: agent.budget.verifyRounds.results[kind].push("running") - 1 });
-  }
-  agent.budget.verifyRounds.used = Math.max(full.typecheck, full.lint, full.test);
-  return entries;
-};
-var SGR = /\x1b\[[0-9;]*m/g;
-var verifyResult = (kind, event, config) => {
-  if (event.event === "tool.fail") {
-    return "fail";
-  }
-  const { exitCode, interrupted, stdoutTail } = event.data;
-  if (interrupted === true || typeof exitCode === "number" && exitCode !== 0) {
-    return "fail";
-  }
-  const pattern = compile(config).failPatterns.get(kind);
-  const tail = (stdoutTail ?? "").replace(SGR, "");
-  return pattern?.test(patternInput(tail)) ? "fail" : "pass";
-};
-var settleVerification = (agent, entries, event, config) => {
-  for (const { kind, position } of entries) {
-    agent.budget.verifyRounds.results[kind][position] = verifyResult(kind, event, config);
-  }
 };
 
 // src/model/sessions.ts
@@ -5741,6 +5872,7 @@ var mergeRun = (target, run) => {
   }
   target.joins = [...target.joins, ...run.joins].sort(bySessionTime2).slice(-JOINS_CAP);
   target.rebases = [...target.rebases, ...run.rebases].sort(bySessionTime2).slice(-REBASES_CAP);
+  mergeTrust(target, run, FILE_TRUST_CAP);
   for (const id of STAGE_ORDER) {
     if (target.stages[id].state === "pending" && run.stages[id].state !== "pending") {
       target.stages[id] = run.stages[id];
@@ -5783,10 +5915,15 @@ var renameRun = (state, oldId, newId, config) => {
   const target = state.branchStates[newId];
   const oldKey = branchWorkKey(run);
   delete state.branchStates[oldId];
+  const found = ownValue(state.index.worktrees, run.worktree) ? run.worktree : findWorktree(state, run.worktree) ?? run.worktree;
+  const worktree = target?.worktree ?? found;
+  const prefix = trustPrefix(run, worktree);
+  if (prefix !== void 0) {
+    rebaseTrust(run, prefix);
+  }
   if (target) {
     mergeRun(target, run);
   } else {
-    const worktree = ownValue(state.index.worktrees, run.worktree) ? run.worktree : findWorktree(state, run.worktree) ?? run.worktree;
     run.id = newId;
     run.worktree = worktree;
     run.branch = ownValue(state.index.worktrees, worktree)?.branch ?? run.branch;
@@ -5811,6 +5948,9 @@ var renameRun = (state, oldId, newId, config) => {
     }
   }
   for (const call of Object.values(state.index.calls)) {
+    if (prefix !== void 0 && call.runId === oldId && call.trustPath !== void 0) {
+      call.trustPath = `${prefix}/${call.trustPath}`;
+    }
     call.runId = remap(call.runId);
     if (call.join !== void 0) {
       call.join = remap(call.join);
@@ -6357,7 +6497,7 @@ var markerRun = (state, event, config) => {
 // src/model/activity.ts
 var STALE_AGENT_MS = 30 * 60 * 1e3;
 var GONE_SESSION_MS = 12 * 60 * 60 * 1e3;
-var later = (at, than) => than === void 0 || time(at) > time(than);
+var later2 = (at, than) => than === void 0 || time(at) > time(than);
 var holdsRun = (state, session, run) => {
   if (isTrunkBranch(state, run.branch)) {
     return true;
@@ -6373,13 +6513,13 @@ var endRun = (state, session, run, at) => {
     return false;
   }
   const ends = others.map((other) => other.endedAt);
-  run.endedAt = ends.reduce((latest, end) => end !== void 0 && later(end, latest) ? end : latest, at);
+  run.endedAt = ends.reduce((latest, end) => end !== void 0 && later2(end, latest) ? end : latest, at);
   return true;
 };
 var fixStageEnd = (state, run, at) => {
   const ended = run.fixes.filter((fix) => fix.agentId === "main" && fix.state === "done" && !fix.reReview && fix.sessionId);
   const ends = ended.map((fix) => recordOf(state, fix.sessionId ?? "")?.endedAt);
-  return ends.reduce((latest, end) => end !== void 0 && later(end, latest) ? end : latest, at);
+  return ends.reduce((latest, end) => end !== void 0 && later2(end, latest) ? end : latest, at);
 };
 var endMainFixes = (state, session, sessionId, at) => {
   const changed = [];
@@ -6426,7 +6566,7 @@ var noteActivity = (state, event) => {
     return [];
   }
   const session = event.sessionId ? state.index.sessions[event.sessionId] : void 0;
-  if (session && later(event.at, session.lastEventAt)) {
+  if (session && later2(event.at, session.lastEventAt)) {
     session.lastEventAt = event.at;
   }
   if (session && event.event === "session.end") {
@@ -6440,7 +6580,7 @@ var noteActivity = (state, event) => {
   if (!agentId) {
     return [];
   }
-  if (later(event.at, state.index.agentSeen[agentId])) {
+  if (later2(event.at, state.index.agentSeen[agentId])) {
     state.index.agentSeen[agentId] = event.at;
   }
   return wakeAgent(state, agentId);
@@ -6495,7 +6635,7 @@ var staysRemoved = (state, run) => {
   return run.removedAt !== void 0 && (record === void 0 || record.removedAt !== void 0);
 };
 var settleRemovedRun = (state, run, branch, at) => {
-  const end = later(at, run.lastEventAt) ? run.lastEventAt : at;
+  const end = later2(at, run.lastEventAt) ? run.lastEventAt : at;
   run.removedAt = at;
   run.endedAt = run.endedAt ?? end;
   for (const agent of Object.values(run.agents)) {
@@ -7059,25 +7199,165 @@ var fixerLook = (state, found, paths, at, aliases) => {
   entry.looks = looks;
   syncFix(state, agent.id, entry);
 };
+var trustRuns = (state, agentId) => {
+  if (agentId === "main") {
+    return [];
+  }
+  return Object.values(state.branchStates).filter((run) => {
+    const copy = ownValue(run.agents, agentId);
+    return copy?.stage === "review" && copy.reviewerId !== void 0 && Object.keys(run.fileTrust).length > 0;
+  });
+};
+var trustLook = (runs, paths, at, aliases) => {
+  for (const run of runs) {
+    for (const [path, trust] of Object.entries(run.fileTrust)) {
+      const newer = trust.lookAt === void 0 || time(at) > time(trust.lookAt);
+      if (newer && itemHit(run.worktree, path, paths, aliases)) {
+        trust.lookAt = at;
+      }
+    }
+  }
+};
 var noteLook = (state, agentId, at, pathsOf2) => {
   const aliases = state.index.worktreeAliases;
   const reviewer = runningEntry(state, agentId, "review");
-  if (reviewer) {
-    lookAt(reviewer, pathsOf2(aliases), at, aliases);
+  const fixer = reviewer ? void 0 : runningEntry(state, agentId, "implement");
+  const trusted = trustRuns(state, agentId);
+  if (!reviewer && !fixer?.entry.items && trusted.length === 0) {
     return;
   }
-  const fixer = runningEntry(state, agentId, "implement");
+  const paths = pathsOf2(aliases);
+  trustLook(trusted, paths, at, aliases);
+  if (reviewer) {
+    lookAt(reviewer, paths, at, aliases);
+    return;
+  }
   if (fixer?.entry.items) {
-    fixerLook(state, fixer, pathsOf2(aliases), at, aliases);
+    fixerLook(state, fixer, paths, at, aliases);
+  }
+};
+var DIFF_FILE = /\.(?:patch|diff)$/i;
+var GIT_NO_CONTENT = /* @__PURE__ */ new Set(["--stat", "--shortstat", "--numstat", "--dirstat", "--name-only", "--name-status", "--summary", "--compact-summary", "--raw", "--check", "--quiet", "--no-patch", "-s"]);
+var GH_NO_CONTENT = /* @__PURE__ */ new Set(["--name-only", "--web", "-w"]);
+var PATH_START = /^(?:\.{1,2}\/|\/|~)/;
+var RANGE = /^[^./~]\S*?[^.]\.{2,3}[^./]\S*$|^[^./~]\.{2,3}[^./]\S*$/;
+var VERSION = /^v?\d+(?:\.\d+)+$/;
+var pathLike = (word, keys) => {
+  const last = word.slice(word.lastIndexOf("/") + 1);
+  if (PATH_START.test(word) || /\.[^./]+$/.test(last) && !VERSION.test(last)) {
+    return true;
+  }
+  return keys.some((key) => key === word || key.startsWith(`${word.replace(/\/+$/, "")}/`));
+};
+var REDIRECT_WORD = /^(\d*|&)(>>?|<)(&?)(.*)$/;
+var withoutRedirects = (words) => {
+  const kept = [];
+  let toFile = false;
+  for (let at = 0; at < words.length; at += 1) {
+    const match = REDIRECT_WORD.exec(words[at]);
+    if (!match) {
+      kept.push(words[at]);
+      continue;
+    }
+    const [, descriptor, operator, copy, attached] = match;
+    const target = attached === "" ? words[at + 1] ?? "" : attached;
+    at += attached === "" ? 1 : 0;
+    const stdout = operator !== "<" && (descriptor === "" || descriptor === "1" || descriptor === "&");
+    const toDescriptor = copy === "&" && /^(?:\d+|-)$/.test(target);
+    if (stdout && !toDescriptor && !/^\/dev\/(?:stdout|stderr|tty)$/.test(target)) {
+      toFile = true;
+    }
+  }
+  return { words: kept, toFile };
+};
+var countsLines = (segment) => {
+  const [name = "", ...args] = commandWords(shellWords(segment));
+  const base = name.slice(name.lastIndexOf("/") + 1);
+  if (base === "wc" || base === "diffstat") {
+    return true;
+  }
+  const counting = (word) => /^-[A-Za-z]*[cq]/.test(word) || word === "--count" || word === "--quiet" || word === "--silent";
+  return base === "grep" && args.some(counting);
+};
+var separators = (command, segments) => {
+  const code = shellCode(command);
+  let at = 0;
+  return segments.map((segment) => {
+    at += segment.code.length;
+    const separator = /^(?:&&|\|\||;|\||\n|\$?\(|\))/.exec(code.slice(at))?.[0] ?? "";
+    at += separator.length;
+    return separator;
+  });
+};
+var wholeGitDiff = (words, keys) => {
+  const dashes = words.indexOf("--");
+  if (dashes >= 0 && dashes < words.length - 1) {
+    return false;
+  }
+  const before = dashes < 0 ? words : words.slice(0, dashes);
+  if (before.some((word) => GIT_NO_CONTENT.has(word.split("=")[0]))) {
+    return false;
+  }
+  const positional = before.filter((word) => !word.startsWith("-"));
+  if (positional.some((word) => PATH_START.test(word))) {
+    return false;
+  }
+  const range = positional.findIndex((word) => RANGE.test(word));
+  const revisions = range < 0 ? 2 : range + 1;
+  return positional.length <= revisions && !positional.some((word) => !RANGE.test(word) && pathLike(word, keys));
+};
+var wholeDiffWords = (words, keys) => {
+  const args = gitArgs([...words]);
+  if (args?.[0] === "diff") {
+    return wholeGitDiff(args.slice(1), keys);
+  }
+  const [name = "", ...rest] = commandWords([...words]);
+  return /(?:^|\/)gh$/.test(name) && rest[0] === "pr" && rest[1] === "diff" && !rest.some((word) => GH_NO_CONTENT.has(word));
+};
+var showsWholeDiff = (command, keys) => {
+  const segments = shellSegments(command);
+  const joins = separators(command, segments);
+  return segments.some((segment, index) => {
+    const { words, toFile } = withoutRedirects(shellWords(segment));
+    if (toFile || !wholeDiffWords(words, keys)) {
+      return false;
+    }
+    for (let next = index + 1; next < segments.length && joins[next - 1] === "|"; next += 1) {
+      if (countsLines(segments[next])) {
+        return false;
+      }
+    }
+    return true;
+  });
+};
+var trustDiffLook = (runs, agentId, at, cutoff) => {
+  for (const run of runs) {
+    const copy = ownValue(run.agents, agentId);
+    const limit = copy === void 0 ? Number.NaN : time(cutoff(copy));
+    for (const trust of Object.values(run.fileTrust)) {
+      const newer = trust.lookAt === void 0 || time(at) > time(trust.lookAt);
+      if (newer && time(trust.editAt) < limit) {
+        trust.lookAt = at;
+      }
+    }
   }
 };
 var noteRead = (state, agentId, filePath, at) => {
   if (isAbsolute2(filePath)) {
     noteLook(state, agentId, at, (aliases) => [resolveAlias(normalizePath(filePath), aliases)]);
   }
+  const runs = DIFF_FILE.test(filePath) ? trustRuns(state, agentId) : [];
+  if (runs.length > 0) {
+    trustDiffLook(runs, agentId, at, (copy) => copy.resumedAt ?? copy.startedAt);
+  }
 };
 var noteBashRead = (state, agentId, command, cwd, at) => {
   noteLook(state, agentId, at, (aliases) => pathWords(command, cwd, aliases));
+  const runs = trustRuns(state, agentId);
+  const keys = runs.flatMap((run) => Object.keys(run.fileTrust));
+  if (runs.length > 0 && showsWholeDiff(command, keys)) {
+    trustDiffLook(runs, agentId, at, () => at);
+  }
 };
 var noteGrepPath = (state, agentId, path, at) => {
   const word = path.trim();
@@ -7359,6 +7639,11 @@ var refreshRun = (state, run, at, config) => {
 var prFromUrl = (text) => {
   const match = /\/pull\/(\d+)/.exec(text);
   return match ? Number(match[1]) : void 0;
+};
+var REPO_PR_URL = /https:\/\/[^\s/]+\/([^\s/]+)\/([^\s/]+)\/pull\/\d+/;
+var prUrlOfOtherRepo = (text, repo) => {
+  const match = repo === "" ? null : REPO_PR_URL.exec(text);
+  return match !== null && `${match[1]}/${match[2]}`.toLowerCase() !== repo.toLowerCase();
 };
 var mergeWaits = (config) => config.github.mergeBy !== "agent";
 var ghPollingOff = (state, config) => {
@@ -9601,7 +9886,6 @@ var updateRanking = (state, config) => {
 
 // src/model/tool-calls.ts
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-var PROSE_FILE = /\.(?:md|mdx|txt|rst|adoc)$/i;
 var isCoveredEdit = (tool, filePath) => EDIT_TOOLS.has(tool) && !(filePath !== void 0 && PROSE_FILE.test(filePath));
 var findCall = (agent, toolUseId) => agent.recent.find((call) => call.toolUseId === toolUseId);
 var endCall = (call, event) => {
@@ -9897,6 +10181,9 @@ var onToolPre2 = (state, event, config, touched) => {
     onEditPre(state, run, agent, input.filePath, event, config);
     workOnEdit(state, run, agent, { filePath: input.filePath, started }, event, config, touched);
     noteEdit(state, agentKey, input.filePath, event.at, config);
+    if (inWorktree(run, input.filePath, state.index.worktreeAliases)) {
+      state.index.calls[toolUseId].trustPath = relativePath(run, input.filePath, state.index.worktreeAliases);
+    }
   }
   if (tool === "Read" && input.filePath) {
     noteRead(state, agentKey, input.filePath, event.at);
@@ -9967,6 +10254,11 @@ var onBashPre = (state, run, agent, event, config, touched) => {
   const verify = countVerification(state, run, agent, match);
   if (verify.length > 0) {
     callIndex.verify = verify;
+  }
+  const background = event.data.input.runInBackground === true;
+  const checks = background ? [] : startCheckRuns(run, checkKindsOf(match?.full ?? []), event.at);
+  if (checks.length > 0) {
+    callIndex.checks = checks;
   }
   if (match && match.kinds.length > 0) {
     noteVerification(state, agent.id, event.at);
@@ -10095,6 +10387,12 @@ var onToolEnd = (state, event, config, touched) => {
   if (index?.verify) {
     settleVerification(agent, index.verify, event, config);
   }
+  const backgrounded = event.event === "tool.post" && event.data.backgroundTaskId !== void 0;
+  if (index?.checks && backgrounded) {
+    restoreCheckRuns(state, run, index.checks, index.at);
+  } else if (index?.checks) {
+    settleCheckRuns(state, run, index.checks, index.at, event, config);
+  }
   const own = agentKey === "main" ? mainOf(state, event.sessionId) : void 0;
   const ownCall = own ? mainCall(own, event.data.toolUseId) : void 0;
   const repeated = (copy) => !index && copy?.endedAt !== void 0;
@@ -10151,6 +10449,9 @@ var onToolEnd = (state, event, config, touched) => {
   }
   const data = event.data;
   const succeeded = !data.interrupted && (data.exitCode === void 0 || data.exitCode === 0);
+  if (index?.trustPath && succeeded) {
+    noteTrustEdit(run, index.trustPath, event.at);
+  }
   if (index?.worktreeAdd && succeeded) {
     touched.push(onWorktreeAdded(state, event, index.worktreeAdd, agentKey, config, touched));
   }
@@ -10223,8 +10524,11 @@ var endJoin = (state, run, index, event, outcome, touched) => {
   return target;
 };
 var onPrCreated = (state, run, index, event, call, succeeded, touched, config) => {
-  const target = index.prHead ? branchRun(state, index.prHead) : run;
   const output = event.data.stdoutTail ?? "";
+  if (prUrlOfOtherRepo(output, config.github.repo)) {
+    return;
+  }
+  const target = index.prHead ? branchRun(state, index.prHead) : run;
   const number = prFromUrl(output);
   const url = /https:\/\/\S+\/pull\/\d+/.exec(output)?.[0] ?? "";
   const title = /--title\s+"([^"]*)"/.exec(call?.summary ?? "")?.[1] ?? "";
@@ -10279,6 +10583,9 @@ var onToolDenied = (state, event, config) => {
     return run;
   }
   delete state.index.calls[toolUseId];
+  if (index?.checks) {
+    restoreCheckRuns(state, run, index.checks, index.at);
+  }
   for (const copy of [call, ownCall]) {
     if (copy) {
       copy.endedAt = event.at;
@@ -11027,6 +11334,14 @@ var rowFixes = (ctx, fixes, reviewers) => fixes.map((fix) => {
   }
   return node;
 });
+var rowTrust = (runs) => {
+  const reviewers = runs.flatMap((run) => Object.values(run.agents)).filter((agent) => agent.stage === "review" && agent.reviewerId !== void 0);
+  if (reviewers.length === 0) {
+    return void 0;
+  }
+  const approvals = reviewers.flatMap((agent) => agent.report?.at !== void 0 && reviewerVerdict(agent) === "approved" ? [agent.report.at] : []);
+  return trustOfRuns(runs, newest(approvals));
+};
 var rowJoin = (ctx, runs) => {
   let found;
   for (const join3 of runs.flatMap((run) => run.joins)) {
@@ -11265,6 +11580,7 @@ var buildRow = (ctx, row) => {
   const join3 = rowJoin(ctx, row.runs);
   const prNode = rowPr(ctx, row.branch, pr);
   const merge = owner && pr ? rowMerge(ctx, row, pr) : void 0;
+  const trust = rowTrust(row.runs);
   const label = branchLabel(ctx.state, row.branch);
   const built = {
     branch: row.branch,
@@ -11282,6 +11598,7 @@ var buildRow = (ctx, row) => {
     fixes: rowFixes(ctx, fixes, reviewers),
     ...prNode === void 0 ? {} : { pr: prNode },
     ...merge === void 0 ? {} : { merge },
+    ...trust === void 0 ? {} : { trust },
     rebased: row.runs.some((run) => run.rebases.some((rebase) => rebase.sessionId === ctx.sessionId)),
     live: false
   };

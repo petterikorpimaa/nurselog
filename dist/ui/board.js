@@ -740,6 +740,7 @@ var modelLetter = (model, letters) => {
   return best === void 0 ? "?" : letters[best];
 };
 var plural = (count, noun3) => `${count} ${noun3}${count === 1 ? "" : "s"}`;
+var staleApprovalText = (files) => `${plural(files, "file")} changed since the approval`;
 var githubStatus = (github) => {
   const checked = github.polling || github.checkedAt !== void 0;
   if (github.error) {
@@ -2863,6 +2864,7 @@ var toolMetrics = (agents) => {
 };
 var coveredEditCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.coveredEdits ?? 0), 0);
 var denialCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.denials ?? 0), 0);
+var staleApprovalCount = (rows) => rows.filter((row2) => row2.owner && row2.trust?.stale !== void 0).length;
 var verificationMetrics = (role, agents) => {
   const commands = { typecheck: 0, lint: 0, test: 0 };
   const failed = { typecheck: 0, lint: 0, test: 0 };
@@ -2898,7 +2900,8 @@ var sessionMetrics = (session) => {
   const agents = main ? [main, ...subagents] : subagents;
   const coveredEdits = coveredEditCount(agents);
   const denials = denialCount(agents);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, coveredEdits, denials, verification, tokens: tokens2, resumes };
+  const staleApprovals = staleApprovalCount(session.rows);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, coveredEdits, denials, staleApprovals, verification, tokens: tokens2, resumes };
   if (session.overhead) {
     metrics.overhead = overheadMetrics(session.overhead, total.usd);
   }
@@ -5725,23 +5728,39 @@ var badgeOffset = (radius, low) => {
   const offset = Math.round(radius * 8) / 10;
   return { x: offset, y: low ? offset : -offset };
 };
-var drawBadge = (group, radius, count, low = false) => {
+var writeBadge = (core, count) => {
+  const [knockout, body, label] = [...core.children];
   const text2 = String(count);
   const width = text2.length > 1 ? BADGE_PILL : BADGE_HEIGHT;
-  const at = badgeOffset(radius, low);
   const outerWidth = width + 2 * BADGE_KNOCKOUT;
+  knockout?.setAttribute("x", String(round2(-outerWidth / 2)));
+  knockout?.setAttribute("width", String(round2(outerWidth)));
+  body?.setAttribute("x", String(round2(-width / 2)));
+  body?.setAttribute("width", String(width));
+  label?.setAttribute("class", text2.length > 2 ? "node-badge-text long" : "node-badge-text");
+  if (label) {
+    label.textContent = text2;
+  }
+};
+var drawBadge = (group, radius, count, low = false, amber = false) => {
+  const at = badgeOffset(radius, low);
   const outerHeight = BADGE_HEIGHT + 2 * BADGE_KNOCKOUT;
-  const knockoutAt = { x: round2(-outerWidth / 2), y: round2(-outerHeight / 2) };
-  const knockout = { ...knockoutAt, width: round2(outerWidth), height: round2(outerHeight), rx: round2(outerHeight / 2) };
-  const body = { x: round2(-width / 2), y: round2(-BADGE_HEIGHT / 2), width, height: BADGE_HEIGHT, rx: BADGE_HEIGHT / 2 };
-  const label = svgEl("text", { class: "node-badge-text", y: 2.7 });
-  label.textContent = text2;
+  const knockout = { y: round2(-outerHeight / 2), height: round2(outerHeight), rx: round2(outerHeight / 2) };
+  const body = { y: round2(-BADGE_HEIGHT / 2), height: BADGE_HEIGHT, rx: BADGE_HEIGHT / 2 };
   const core = svgEl("g", { class: "node-badge-core" });
-  core.append(svgEl("rect", { class: "node-badge-knockout", ...knockout }), svgEl("rect", { class: "node-badge-body", ...body }), label);
-  const badge = svgEl("g", { class: "node-badge", transform: `translate(${round2(at.x)} ${round2(at.y)})` });
+  core.append(svgEl("rect", { class: "node-badge-knockout", ...knockout }), svgEl("rect", { class: "node-badge-body", ...body }), svgEl("text", { y: 2.7 }));
+  writeBadge(core, count);
+  const badge = svgEl("g", { class: amber ? "node-badge amber" : "node-badge", transform: `translate(${round2(at.x)} ${round2(at.y)})` });
   badge.append(core);
   group.append(badge);
   return core;
+};
+var setBadgeCount = (badge, count) => {
+  const core = badge.firstElementChild;
+  const label = core?.children[2];
+  if (core && label?.textContent !== String(count)) {
+    writeBadge(core, count);
+  }
 };
 var SHEEN_TILT = 24;
 var sheenCount = 0;
@@ -10742,6 +10761,13 @@ var STATE_WORDS = {
   failed: "failed",
   skipped: "skipped"
 };
+var staleOf = (row2, tipped) => {
+  const files = row2.trust?.stale?.files ?? 0;
+  if (files <= 0) {
+    return {};
+  }
+  return tipped ? { staleApproval: files, tip: staleApprovalText(files) } : { staleApproval: files };
+};
 var fixesText = (count) => count === 1 ? "1 fix" : `${count} fixes`;
 var improvementsText = (count) => count === 1 ? "1 improvement" : `${count} improvements`;
 var drawsText = (session, ref) => {
@@ -10765,6 +10791,9 @@ var nodeName = (session, item2, card) => {
   if (item2.improvements !== void 0) {
     parts.push(improvementsText(item2.improvements));
   }
+  if (item2.staleApproval !== void 0) {
+    parts.push(staleApprovalText(item2.staleApproval));
+  }
   if (item2.progress !== void 0) {
     parts.push(item2.progress.text);
   }
@@ -10778,7 +10807,8 @@ var withBadgeCorners = (items) => {
       cornered.add(item2.at.key);
     }
   }
-  return items.map((item2) => item2.kind === "node" && item2.improvements !== void 0 && cornered.has(item2.key) ? { ...item2, badgeLow: true } : item2);
+  const badged = (item2) => item2.improvements !== void 0 || item2.staleApproval !== void 0;
+  return items.map((item2) => item2.kind === "node" && badged(item2) && cornered.has(item2.key) ? { ...item2, badgeLow: true } : item2);
 };
 var named = (session, item2) => {
   if (item2.kind !== "node" || item2.card === void 0) {
@@ -10940,12 +10970,12 @@ var placeSession = (session, options, room) => {
     groups2.push(newGroup(0, void 0, false, false));
   }
   const current = groups2[groups2.length - 1];
-  const groupOf3 = (index) => groups2.find((group) => group.index === index) ?? current;
+  const groupOf4 = (index) => groups2.find((group) => group.index === index) ?? current;
   for (const row2 of session.rows) {
-    groupOf3(row2.pipeline).rows.push(row2);
+    groupOf4(row2.pipeline).rows.push(row2);
   }
   for (const agentId of session.planAgents.filter((id) => id !== docs?.agentId && session.agents[id] !== void 0)) {
-    groupOf3(session.agents[agentId].pipeline).agents.push(agentId);
+    groupOf4(session.agents[agentId].pipeline).agents.push(agentId);
   }
   const planAgents = groups2.filter((group) => !group.folded).flatMap((group) => group.agents);
   const shown2 = {
@@ -10988,7 +11018,7 @@ var placeSession = (session, options, room) => {
     plan.forkLane = plan.fromText !== void 0 && from?.kind === "branch" && planOf.has(from.branch);
   }
   for (const plan of plans) {
-    groupOf3(plan.row.pipeline).plans.push(plan);
+    groupOf4(plan.row.pipeline).plans.push(plan);
   }
   const carries = new Set(session.promote?.state === "waiting" ? session.promote.carries ?? [] : []);
   const promoted = rows.filter((row2) => promoteFeeder(row2, carries));
@@ -11121,7 +11151,7 @@ var placeSession = (session, options, room) => {
   const fixRight = Math.max(fixLeft, ...besideLabels.map((width2) => NODE_R2 + LABEL_GAP + width2 + 12));
   const mergeLabels = rows.filter(mergeDrawn).map((row2) => textWidth(mergeText(session, row2)));
   const mergeRowsDrawn = rows.filter(mergeDrawn);
-  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf3(row2.pipeline) === current) ?? mergeRowsDrawn[0];
+  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf4(row2.pipeline) === current) ?? mergeRowsDrawn[0];
   const gateTarget = mergeRowsDrawn.find((row2) => row2.merge?.state === "waiting") ?? gateRowDrawn;
   const gateOnPromote = wrap && joined && gateTarget !== void 0 && planOf.get(gateTarget.branch) === promoteHost;
   const natural = {
@@ -11254,7 +11284,7 @@ ${FOLD_HINT}` : label };
         endColumnA = id;
       }
     };
-    const group = groupOf3(row2.pipeline);
+    const group = groupOf4(row2.pipeline);
     const earlier = group !== current;
     const unfolds = earlier && group.settled;
     const forked = plan.fromText !== void 0;
@@ -11524,7 +11554,8 @@ ${FOLD_HINT}` : label };
       edge(inKey, exit, { key, dx: -NODE_R2 }, flowOf({ state: row2.pr.state }), color, into.shape, { ...nodeBase, ...into.extra });
       const dot = { edges: [inKey], when: "appear", color };
       const card = agentId === void 0 ? {} : { card: { ref: { kind: "pr", branch } } };
-      add({ kind: "node", key, at: { x: prX, y: lineY }, state: row2.pr.state, color, mark, radius: NODE_R2, ...nodeBase, from: { key: exit.key }, dot, ...card });
+      const stale = staleOf(row2, card.card === void 0);
+      add({ kind: "node", key, at: { x: prX, y: lineY }, state: row2.pr.state, color, mark, radius: NODE_R2, ...nodeBase, from: { key: exit.key }, dot, ...card, ...stale });
       if (row2.pr.pr) {
         add({ kind: "text", key: `text:pr:${branch}`, at: { key, dy: FIX_LABEL_DY + plan.labelShift }, text: `#${row2.pr.pr.number}`, tone: "note", anchor: "middle", ...base });
       }
@@ -11805,7 +11836,7 @@ ${FOLD_HINT}` : label };
   const mergeRows = rows.filter(mergeDrawn);
   const waitingRows = mergeRows.filter((row2) => row2.merge?.state === "waiting");
   const gateColumn = column("merge");
-  const gateRow = mergeRows.find((row2) => groupOf3(row2.pipeline) === current) ?? mergeRows[0];
+  const gateRow = mergeRows.find((row2) => groupOf4(row2.pipeline) === current) ?? mergeRows[0];
   let mergeGate;
   let mergeWaits = false;
   if (gateColumn && gateRow) {
@@ -12296,6 +12327,21 @@ var createScene = (host, context) => {
     setAttribute(element, "aria-label", card ? item2.name : void 0);
     element.classList.toggle("open", open2);
   };
+  const syncStaleBadge = (entry) => {
+    const { item: item2, element } = entry;
+    if (item2.kind !== "node" || !element) {
+      return;
+    }
+    const badge = [...element.children].find((child) => child.classList.contains("node-badge") && child.classList.contains("amber"));
+    const count = item2.staleApproval ?? 0;
+    if (count <= 0) {
+      badge?.remove();
+    } else if (badge) {
+      setBadgeCount(badge, count);
+    } else {
+      drawBadge(element, item2.radius, count, entry.badgeLow === true, true);
+    }
+  };
   const placeBadge = (entry, before, still) => {
     const { item: item2, element } = entry;
     const badge = item2.kind === "node" && element ? [...element.children].find((child) => child.classList.contains("node-badge")) : void 0;
@@ -12331,6 +12377,7 @@ var createScene = (host, context) => {
       placeRing(entry);
       retitle(entry, item2.tip);
       button(entry);
+      syncStaleBadge(entry);
       placeBadge(entry, entry.badgeLow, true);
     }
   };
@@ -12651,6 +12698,7 @@ var createScene = (host, context) => {
           placeRing(entry);
           retitle(entry, item2.tip);
           button(entry);
+          syncStaleBadge(entry);
           placeBadge(entry, badgeBefore, first || entered.has(item2.key));
         }
       }
@@ -14609,6 +14657,19 @@ var badgesOf = (previous, current, pops) => {
       badges.push({ key: item2.key, delay: 0 });
     }
   }
+  return [...badges, ...staleBadgesOf(before, current, pops)];
+};
+var staleBadgesOf = (before, current, pops) => {
+  const badges = [];
+  for (const item2 of current.items) {
+    const old = before.get(item2.key);
+    if (item2.kind !== "node" || item2.staleApproval === void 0 || old?.kind !== "node" || old.staleApproval !== void 0) {
+      continue;
+    }
+    const stopped = old.state === "running" && SHEEN_STATES.includes(item2.state);
+    const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+    badges.push({ key: item2.key, delay: stopped ? pop + POP_MS2 + SHEEN_MS : 0 });
+  }
   return badges;
 };
 var foldsOf = (previous, current) => {
@@ -15895,11 +15956,40 @@ var nowBlock = (parts) => {
   }
   return block;
 };
-var filesBlock = (agent) => {
-  if (agent.filesChanged.length === 0) {
+var missingOf = (mark) => {
+  const missing = [];
+  if (!mark.reviewed) {
+    missing.push("review");
+  }
+  if (!mark.checked) {
+    missing.push("check");
+  }
+  return missing;
+};
+var groupOf3 = (file) => file.missing === void 0 ? 3 : 2 - file.missing.length;
+var markedFiles = (paths, trust) => {
+  const files = paths.map((path) => {
+    const mark = trust === void 0 ? void 0 : ownValue(trust.files, path);
+    return mark === void 0 ? { path } : { path, missing: missingOf(mark) };
+  });
+  return files.sort((a, b) => groupOf3(a) - groupOf3(b));
+};
+var filesBlock = (parts, row2, kind) => {
+  const trust = row2?.trust;
+  const runFiles = kind === "pr" && trust !== void 0 ? Object.keys(trust.files) : [];
+  const paths = runFiles.length > 0 ? runFiles : parts.agent.filesChanged;
+  if (paths.length === 0) {
     return { kind: "note", text: "No files changed." };
   }
-  return { kind: "files", files: [...agent.filesChanged] };
+  const marked = kind === "pr" || !parts.agentRunning;
+  return { kind: "files", files: markedFiles(paths, marked ? trust : void 0) };
+};
+var staleLine = (trust) => {
+  const stale = trust?.stale;
+  if (stale === void 0 || stale.files <= 0) {
+    return void 0;
+  }
+  return { text: staleApprovalText(stale.files), at: timeOfDay(parseTime(stale.approvedAt)) };
 };
 var stateChip = (state, nodeColor) => ({ text: STATE_TEXT[state], color: STATE_COLORS[state] ?? nodeColor, solid: false });
 var nodeState = (session, target) => {
@@ -15949,8 +16039,9 @@ var phaseText = (agent) => {
   const name = phase === void 0 ? void 0 : PHASE_NAMES.implement[phase];
   return phase === void 0 || name === void 0 ? "" : `Phase ${phase + 1} of ${PHASE_NAMES.implement.length}: ${name}`;
 };
-var fixCard = (parts, fix) => {
+var fixCard = (parts, fix, row2) => {
   const { session, agent, leg } = parts;
+  const files = agent.filesChanged.length > 0 ? [filesBlock(parts, row2, "fix")] : [];
   const chips = [{ text: "Fix", color: "var(--st-fix)", solid: true }, ...leg ? [legChip(leg)] : []];
   const reviewers = reviewersOf(session, fix);
   const from = reviewers.length > 0 ? `from ${reviewers.join(", ")}` : "";
@@ -15960,7 +16051,7 @@ var fixCard = (parts, fix) => {
   const items = fix.items ?? [];
   if (items.length === 0) {
     const note = fix.reviewerAgentId === void 0 ? NO_ITEMS_CONTINUED : NO_ITEMS;
-    return { kind: "fix", role: agent.role, chips, meta, blocks: [metrics, { kind: "note", text: note }] };
+    return { kind: "fix", role: agent.role, chips, meta, blocks: [metrics, { kind: "note", text: note }, ...files] };
   }
   const working = parts.running && fix.state === "running" ? fix.working : void 0;
   const rows = items.map((item2, index) => ({
@@ -15982,6 +16073,7 @@ var fixCard = (parts, fix) => {
       blocks.push({ kind: "items", type, rows: ofType });
     }
   }
+  blocks.push(...files);
   return { kind: "fix", role: agent.role, chips, meta, blocks };
 };
 var NO_ITEMS = "No items: the review named no file.";
@@ -16032,7 +16124,7 @@ var REVIEWS = {
   "changes-requested": { text: "changes requested", tone: "bad" },
   required: { text: "review required" }
 };
-var prBlock = (pr) => {
+var prBlock = (pr, trust) => {
   const facts = [{ text: pr.state }];
   if (pr.checks !== void 0) {
     facts.push(CHECKS[pr.checks]);
@@ -16046,10 +16138,16 @@ var prBlock = (pr) => {
   if (pr.deletions !== void 0) {
     facts.push({ text: `-${pr.deletions}`, tone: "del" });
   }
-  return { kind: "pr", number: pr.number, title: pr.title, facts };
+  const block = { kind: "pr", number: pr.number, title: pr.title, facts };
+  const stale = staleLine(trust);
+  if (stale !== void 0) {
+    block.stale = stale;
+  }
+  return block;
 };
-var agentCard = (parts, kind, pr) => {
+var agentCard = (parts, kind, pr, prRow) => {
   const { session, agent, leg } = parts;
+  const row2 = prRow ?? (agent.branch === void 0 ? void 0 : session.rows.find((entry) => entry.branch === agent.branch));
   let nodeColor = "var(--st-plan)";
   let place2 = `Plan \xB7 ${PLAN_WORK[agent.stage]}`;
   if (kind === "docs") {
@@ -16062,13 +16160,16 @@ var agentCard = (parts, kind, pr) => {
   const chips = [stateChip(parts.state, nodeColor), ...leg ? [legChip(leg)] : []];
   const meta = joinMeta([modelName(agent.model ?? ""), place2, timesText(parts.start, parts.end)]);
   const blocks = [];
+  const stale = kind === "pr" ? staleLine(row2?.trust) : void 0;
   if (pr !== void 0) {
-    blocks.push(prBlock(pr));
+    blocks.push(prBlock(pr, row2?.trust));
+  } else if (stale !== void 0) {
+    blocks.push({ kind: "stale", ...stale });
   }
   if (agent.description !== void 0 && agent.description.trim() !== "") {
     blocks.push({ kind: "task", text: agent.description.trim() });
   }
-  blocks.push(nowBlock(parts), { kind: "metrics", metrics: metricsOf(parts) }, filesBlock(agent));
+  blocks.push(nowBlock(parts), { kind: "metrics", metrics: metricsOf(parts) }, filesBlock(parts, row2, kind));
   const model = { kind, role: agent.role, chips, meta, blocks };
   if (pr !== void 0) {
     model.pr = { number: pr.number, url: pr.url };
@@ -16090,15 +16191,16 @@ var nodeCardModel = (session, target, config, clock) => {
   const running = newest2 && isRunning(rowState);
   const start = leg === void 0 ? agent.startedAt : target.startedAt ?? agent.startedAt;
   const end = newest2 && !running ? agent.endedAt : void 0;
-  const parts = { session, agent, leg, state, running, start, end, clock, config };
+  const parts = { session, agent, leg, state, running, start, end, clock, config, agentRunning: isRunning(rowState) };
   const ref = target.ref;
   let card;
   if (ref.kind === "fix") {
     const fix = fixOf(session, ref.branch, ref.fixId);
-    card = fix === void 0 ? void 0 : fixCard(parts, fix);
+    card = fix === void 0 ? void 0 : fixCard(parts, fix, session.rows.find((row2) => row2.branch === ref.branch));
   } else if (ref.kind === "pr") {
-    const pr = session.rows.find((row2) => row2.branch === ref.branch)?.pr;
-    card = pr === void 0 ? void 0 : agentCard(parts, "pr", pr.pr);
+    const prRow = session.rows.find((row2) => row2.branch === ref.branch);
+    const pr = prRow?.pr;
+    card = pr === void 0 ? void 0 : agentCard(parts, "pr", pr.pr, prRow);
   } else if (ref.kind === "docs") {
     card = agentCard(parts, "docs", void 0);
   } else if (ref.kind === "agent") {
@@ -16127,6 +16229,7 @@ var EDGE = 8;
 var MAX_HEIGHT = 440;
 var MAX_SHARE = 0.6;
 var BORDERS = 2;
+var TRUST_LEVELS = ["ok", "one", "both"];
 var shown;
 var isCardDetail = (detail) => {
   if (typeof detail !== "object" || detail === null) {
@@ -16289,6 +16392,34 @@ var createNodeCard = (context, options) => {
     }
     return item2;
   };
+  const fileOf = (file) => {
+    const missing = file.missing;
+    if (missing === void 0) {
+      return el("li", void 0, file.path);
+    }
+    const item2 = el("li");
+    item2.dataset.trust = TRUST_LEVELS[missing.length] ?? "both";
+    item2.append(el("span", "nc-trust-name", file.path));
+    if (missing.length === 0) {
+      item2.append(el("span", "visually-hidden", ", reviewed and checked"));
+      return item2;
+    }
+    item2.append(el("span", "visually-hidden", `, missing ${missing.join(" and ")}`));
+    const tags = el("span", "nc-trust-tags");
+    tags.setAttribute("aria-hidden", "true");
+    for (const tag of missing) {
+      tags.append(el("span", "nc-trust-tag", tag));
+    }
+    item2.append(tags);
+    return item2;
+  };
+  const staleOf2 = (line) => {
+    const stale = el("p", "nc-stale", line.text);
+    if (line.at !== "") {
+      stale.append(" ", el("span", void 0, `at ${line.at}`));
+    }
+    return stale;
+  };
   const issuesOf = (count) => {
     const note = el("p", "nc-note");
     const link = el("button", "nc-inline", "Follow-ups");
@@ -16323,8 +16454,13 @@ var createNodeCard = (context, options) => {
             facts.append(item2);
           }
           box.append(line, facts);
+          if (block.stale !== void 0) {
+            box.append(staleOf2(block.stale));
+          }
           return box;
         };
+      case "stale":
+        return () => staleOf2(block);
       case "now":
         return () => {
           const box = el("div", "nc-now");
@@ -16350,7 +16486,7 @@ var createNodeCard = (context, options) => {
           heading2.append(el("span", "nc-section-title", "Changed files"), el("span", "nc-count", String(block.files.length)));
           const list = el("ul", "nc-files");
           for (const file of block.files) {
-            list.append(el("li", void 0, file));
+            list.append(fileOf(file));
           }
           section2.append(heading2, list);
           return section2;

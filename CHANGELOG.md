@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.21 (2026-11-03)
+
+### New
+
+- Trust map marks on the changed files and the stale approval on the PR
+- Trust map per file against the last edit
+
+### Fixed
+
+- A PR URL of another repository opens no PR
+
 ## 0.1.20 (2026-11-03)
 
 ### New
