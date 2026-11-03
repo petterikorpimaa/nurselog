@@ -52,6 +52,11 @@
 .node .node-badge-knockout { fill: var(--card); }
 .node .node-badge-body { fill: color-mix(in srgb, var(--rev) 18%, var(--card)); stroke: var(--rev); stroke-width: 1.1; }
 .node .node-badge-text { font: 700 7.5px var(--f-mono); fill: var(--rev); text-anchor: middle; }
+/* three digits and more at 6 px, so they fit the pill, as the fix count's `long` (decision 241) */
+.node .node-badge-text.long { font-size: 6px; }
+/* a PR node's stale approval (decision 241): the same badge in --amber */
+.node .node-badge.amber .node-badge-body { fill: color-mix(in srgb, var(--amber) 18%, var(--card)); stroke: var(--amber); }
+.node .node-badge.amber .node-badge-text { fill: var(--amber); }
 .node.waiting .node-icon { stroke: var(--you); }
 .node .node-letter { font: 700 10px var(--f-mono); fill: var(--ink); text-anchor: middle; }
 /* a running node's model icon (model-icons.ts): its glyph follows `color`; its strokes scale with the graph like the

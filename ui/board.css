@@ -890,6 +890,9 @@ p { margin: 0; }
 .nc-pr-facts { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
 .nc-pr-facts [data-tone="ok"], .nc-pr-facts [data-tone="add"] { color: var(--rev); }
 .nc-pr-facts [data-tone="bad"], .nc-pr-facts [data-tone="del"] { color: var(--warm); }
+/* the stale approval's line of its own under the facts, the approval's time dim (decision 241) */
+.nc-stale { margin: 0; font: 500 11.5px var(--f-mono); color: var(--amber); overflow-wrap: anywhere; }
+.nc-stale span { color: var(--fg-3); white-space: nowrap; }
 .nc-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; }
 .nc-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .nc-metric-label { font: 600 9.5px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
@@ -909,6 +912,18 @@ p { margin: 0; }
 .nc-list { gap: 7px; }
 .nc-files { gap: 2px; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
 .nc-files li { overflow-wrap: anywhere; }
+/* a file the trust map marks (decision 241): the name takes the colour, amber with one check missing, red with both,
+   dim when covered; a tag per missing check at the right */
+.nc-files li[data-trust] { display: flex; align-items: baseline; gap: 8px; }
+.nc-files li[data-trust="ok"] { color: var(--fg-3); }
+.nc-files li[data-trust="one"] { --c: var(--amber); color: var(--c); }
+.nc-files li[data-trust="both"] { --c: var(--red); color: var(--c); }
+.nc-trust-name { min-width: 0; overflow-wrap: anywhere; }
+.nc-trust-tags { margin-left: auto; display: flex; gap: 4px; flex: none; }
+.nc-trust-tag {
+  font: 600 9.5px var(--f-mono); letter-spacing: .03em; padding: 0 5px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); color: var(--c);
+}
 .nc-item { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-left: 19px; }
 .nc-item::before { content: ""; position: absolute; left: 5px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--c); }
 .nc-text {
