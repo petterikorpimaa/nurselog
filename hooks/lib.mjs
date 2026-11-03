@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEFAULT_ROLES, escapeRegExp, LEGACY_ROLE_STAGE, stripControl } from './browser-safe.mjs';
-import { FAILURE_ERROR_CHARS, keptStdout } from './verification.mjs';
+import { FAILURE_ERROR_CHARS, keptStdout, SAFE_ASSIGNMENT_NAMES } from './verification.mjs';
 
 // The default roles and the text helpers live in `browser-safe.mjs`, which the browser-safe core of `src/` imports.
 export { DEFAULT_ROLES, escapeRegExp, LEGACY_ROLE_STAGE, stripControl };
@@ -659,6 +659,10 @@ const YAML_BLOCK_LABEL = /^([ \t]*)((?:-[ \t]+)?)(["']?)([A-Za-z_][\w.-]{0,256})
 const BLANK_LINE = /^[ \t]*\r?$/;
 /** What leads a shell assignment `NAME=value` in a command: the start, whitespace, a separator, a quote or a brace. */
 const SHELL_LEAD = /[\s;&|(`:"'?,{=]/;
+/** The separator of an empty value: the `=` right after the name and whitespace only behind it (`CI= pnpm lint`). */
+const EMPTY_SEPARATOR = /^=[ \t]+$/;
+/** The names whose empty value in a shell command is no assignment of the next word: the names a verification command may carry (`SAFE_ASSIGNMENT_NAMES`). */
+const EMPTY_VALUE_NAMES = new Set(SAFE_ASSIGNMENT_NAMES);
 const VENDOR_RUN = /\b[a-z]{2,10}(?:_[a-z0-9]{1,8})?[_-]([A-Za-z0-9]{30,})\b/g;
 const BASE64_LINE = /^[A-Za-z0-9+/]{60,76}={0,2}[ \t]*\r?$/;
 const HEX_RUN = /^[0-9a-f]+$/;
@@ -797,7 +801,8 @@ const isSecretPairName = (name, parent) => {
  * value holds a `:` or `=` the scan resumes at the start of that value, so `name: password: x` is seen too; a secret value cut by the 256-character bound of
  * the pattern is redacted to its end. A pair inside the value of another is not a shell assignment, nor is a name led by
  * anything but a flag's dashes or `SHELL_LEAD` (`$_ = x`, `'^HOME='`), so the upper-case `NAME=value` rule of a command
- * does not apply to them.
+ * does not apply to them. A shell assignment of a name in `SAFE_ASSIGNMENT_NAMES` with whitespace right after the `=` has
+ * an empty value (`CI= pnpm lint`): nothing is redacted and the scan goes on at the next word.
  */
 const redactAssignments = (text, command) => {
   let result = '';
@@ -808,7 +813,13 @@ const redactAssignments = (text, command) => {
     const [whole, lead, name, separator, value] = match;
     let end = match.index + whole.length;
     const shellName = lead !== '' || match.index === 0 || SHELL_LEAD.test(text[match.index - 1]);
-    if (!isSecretAssignment(name, separator, value, command && shellName && match.index >= inside)) {
+    const shell = command && shellName && match.index >= inside;
+    if (shell && lead === '' && EMPTY_SEPARATOR.test(separator) && EMPTY_VALUE_NAMES.has(name)) {
+      // The value is empty: the next word is no value but a word of its own, which the scan reads from its start.
+      ASSIGNMENT.lastIndex = end - value.length;
+      continue;
+    }
+    if (!isSecretAssignment(name, separator, value, shell)) {
       if (/[:=]/.test(value)) {
         ASSIGNMENT.lastIndex = end - value.length - 1;
         inside = Math.max(inside, end);

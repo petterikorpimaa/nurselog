@@ -56,11 +56,15 @@ const PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 /** The script of `node`: a relative plain path without a `..` segment and with a `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` extension. */
 const NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
+/** The names of the environment assignments a verification command may carry; redaction (`hooks/lib.mjs`) also leaves their empty value (`CI= pnpm lint`) as it is. */
+export const SAFE_ASSIGNMENT_NAMES = Object.freeze(['CI', 'NODE_ENV', 'FORCE_COLOR', 'NO_COLOR', 'TZ', 'DEBUG', 'LANG', 'LC_ALL']);
+/** The names as the alternatives of a pattern, each escaped (this file imports nothing, so `escapeRegExp` is not at hand). */
+const SAFE_NAME_ALTERNATIVES = SAFE_ASSIGNMENT_NAMES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /**
  * The environment assignments a verification command may carry: an allowlisted name and a plain value, or the
  * redaction placeholder `[redacted]`, as the hook stores `CI=1` (the mapping decides on the stored command).
  */
-const SAFE_ASSIGNMENT = /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|DEBUG|LANG|LC_ALL)=(?:[A-Za-z0-9_.:,/-]*|\[redacted\])$/;
+const SAFE_ASSIGNMENT = new RegExp(`^(?:${SAFE_NAME_ALTERNATIVES})=(?:[A-Za-z0-9_.:,/-]*|\\[redacted\\])$`);
 /** The redirections a verification command may carry: stderr into stdout, stdout into stderr. */
 const REDIRECTIONS = new Set(['2>&1', '>&2', '1>&2']);
 /** The unquoted characters of shell syntax the split does not model: escapes, expansions, substitutions, input redirections, groups and comments. */

@@ -1,6 +1,7 @@
 /* The main thread's messages (design sections 5 and 15): the main-thread strip on a card (strip.ts), the main-thread
    modal (modal.ts) with its shell and tag clone and its turns (turn-view.ts), and a question's link to the message of
-   its turn. The tokens are board.css's. Nothing here blinks: only waiting things pulse. */
+   its turn. The tokens are board.css's. Nothing here blinks and only waiting things pulse; the one loop is the typing
+   bubble's dots while the main thread works in a turn. */
 
 /* the "main" tag of the strip and the modal header: outlined, a dot in the shared colour */
 .main-tag {
@@ -25,7 +26,8 @@
 .main-strip:hover { background: var(--card-2); }
 .main-strip > svg { width: 12px; height: 12px; flex: none; color: var(--fg-3); transform: rotate(90deg); transition: transform .25s var(--ease); }
 .main-strip:hover > svg { transform: translateX(2px) rotate(90deg); }
-.main-strip-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.main-strip-line { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.main-strip-text { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .main-strip-kind, .main-kind { font: 600 10px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-2); white-space: nowrap; }
 .main-strip-time { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
 .main-strip-count { font: 500 10.5px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
@@ -86,6 +88,8 @@ body:has(.board[data-connection="reconnecting"]) .main-head-text, body:has(.boar
 body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.board[data-connection="disconnected"]) .main-scroll {
   opacity: .6;
 }
+/* and the typing bubble's dots hold still, as the cards' animations do (board.css) */
+body:has(.board:is([data-connection="reconnecting"], [data-connection="disconnected"])) .main-modal .main-typing i { animation-play-state: paused; }
 .main-empty { flex: none; font-size: 13px; color: var(--fg-3); }
 /* a block whose height changes is clipped while it does (turn-view.ts); the latest turn only top to bottom, so a
    bubble entering from the right is not cut */
@@ -132,14 +136,65 @@ body:has(.board[data-connection="disconnected"]) .main-head-text, body:has(.boar
 .main-ago { margin-left: auto; }
 .main-time { font: 500 11px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .main-cut { margin-top: 10px; font: 500 11px var(--f-mono); color: var(--fg-3); }
-/* the working card: dashed and quiet while the latest turn has no reply, in the ask look while the main thread waits
-   for the developer's answer; its background and border turn into the reply's */
-.main-latest > .main-message { transition: background-color .3s var(--ease), border-color .3s var(--ease); }
+/* the working card: dashed and quiet while the latest turn is open, holding its rail and the typing bubble while the
+   main thread works, else the text of its state; in the ask look while the main thread waits for the developer's
+   answer; its background and border turn into the reply's. It places the typing bubble that fades out (turn-view.ts). */
+.main-latest > .main-message { position: relative; transition: background-color .3s var(--ease), border-color .3s var(--ease); }
 .main-message.working { border: 1px dashed var(--border); background: transparent; }
 .main-message.working[data-pending="waiting"] { border: 1.5px dashed var(--you); }
-.main-message.working > :not(.main-working), .main-message:not(.working) > .main-working { display: none; }
+.main-message.working > :is(.main-message-head, .main-text, .main-cut), .main-message:not(.working) > .main-working { display: none; }
+/* a state text under a rail is divided from it by the hairline the final text gets */
+.main-rail:not([hidden]) ~ .main-working { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
 .main-working { font: 500 12px var(--f-mono); color: var(--fg-3); transition: color .3s var(--ease); }
 .main-message[data-pending="waiting"] .main-working { color: var(--you); }
+
+/* the time rail: the turn's progress messages above the final text, oldest first, each its time, a small dot joined to
+   the next by a hairline and its text, wrapping; a hairline divides it from the final text */
+.main-rail { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
+.main-rail-entry {
+  position: relative; display: grid; grid-template-columns: 40px 9px minmax(0, 1fr); gap: 0 8px; align-items: start;
+  padding: 3px 0; font-size: 12.5px; line-height: 18px; color: var(--fg-2);
+}
+.main-rail-time { font: 500 11px/18px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.main-rail-entry > i { width: 5px; height: 5px; margin: 6.5px 0 0 2px; border-radius: 50%; background: var(--fg-3); }
+.main-rail-entry:not(:last-child)::after {
+  content: ""; position: absolute; left: 52px; top: 17.5px; bottom: -6.5px; width: 1px; background: var(--border-2);
+}
+.main-rail-body { min-width: 0; overflow-wrap: anywhere; }
+.main-rail-text p, .main-rail-text ol, .main-rail-text ul, .main-rail-text pre { margin: 0 0 4px; }
+.main-rail-text > :last-child { margin-bottom: 0; }
+.main-rail-text ol, .main-rail-text ul { padding-left: 18px; }
+.main-rail-text li::marker { color: var(--fg-3); }
+.main-rail-text code { font-family: var(--f-mono); font-size: 11.5px; background: var(--card-3); padding: 0 4px; border-radius: 4px; }
+.main-rail-text pre {
+  padding: 6px 8px; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--card);
+  font: 11.5px/1.5 var(--f-mono); scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
+}
+.main-rail-text pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.main-rail-body .main-cut { margin-top: 2px; }
+.main-rail:not([hidden]) + .main-text { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* the typing bubble: three dots in a small bubble with the reply card's border, rising and fading in turn on a 1.2 s
+   loop, at the rail's next position in the working card and small after the strip's line; while it fades out it
+   leaves the flow where it was (turn-view.ts); board.css's reduced-motion rule leaves the dots static */
+.main-typing {
+  display: flex; align-items: center; gap: 4px; width: max-content; padding: 10px 13px;
+  border: 1px solid var(--border); border-radius: 12px 12px 12px 4px; background: var(--card-2);
+}
+.main-typing i {
+  display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); opacity: .75;
+  animation: main-typing 1.2s ease-in-out infinite;
+}
+.main-typing i:nth-child(2) { animation-delay: .16s; }
+.main-typing i:nth-child(3) { animation-delay: .32s; }
+@keyframes main-typing {
+  0%, 56%, 100% { transform: translateY(0); opacity: .35; }
+  28% { transform: translateY(-3px); opacity: 1; }
+}
+.main-typing.small { flex: none; gap: 3px; padding: 4px 7px; border-radius: 8px 8px 8px 3px; }
+.main-typing.small i { width: 4px; height: 4px; }
+.main-rail:not([hidden]) ~ .main-typing { margin: 6px 0 0 57px; }
+.main-message > .main-typing.leaving { position: absolute; top: var(--typing-top); left: var(--typing-left); margin: 0; }
 
 /* the message text: paragraphs, leads, lists, inline code and code blocks, built from text nodes */
 .main-text { font-size: 14px; line-height: 1.6; color: var(--fg); overflow-wrap: anywhere; }

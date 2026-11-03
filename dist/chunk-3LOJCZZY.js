@@ -3,6 +3,8 @@ import {
   DEFAULT_CONFIG,
   MAX_CONFIG_BYTES,
   MAX_POLL_SECONDS,
+  MESSAGE_FACT_TEXT_CAP,
+  MESSAGE_FACT_UUID,
   MIN_POLL_SECONDS,
   PROGRESS_ITEMS_CAP,
   SERVER_PORT_WARNING,
@@ -32,6 +34,7 @@ import {
   ownValue,
   patternInput,
   readSmallFile,
+  redactString,
   redactValue,
   roleConfig,
   shellCode,
@@ -40,7 +43,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-NNCN4HNI.js";
+} from "./chunk-TGKDM7PV.js";
 
 // src/config.ts
 import { existsSync } from "fs";
@@ -1436,6 +1439,59 @@ var requestOf = (record) => {
     output: usage.output_tokens ?? 0
   };
 };
+var isTextBlock = (block) => {
+  const fields = typeof block === "object" && block !== null ? block : {};
+  return fields.type === "text" && typeof fields.text === "string";
+};
+var prefixWithin = (text, cap) => {
+  if (text.length <= cap) {
+    return text;
+  }
+  const last = text.charCodeAt(cap - 1);
+  return text.slice(0, last >= 55296 && last <= 56319 ? cap - 1 : cap);
+};
+var REDACTION_MARK = "[redacted]";
+var dropSplitMark = (text) => {
+  const open = text.lastIndexOf("[");
+  const split = open > text.length - REDACTION_MARK.length && REDACTION_MARK.startsWith(text.slice(open));
+  return split ? text.slice(0, open) : text;
+};
+var STABLE_PASSES = 16;
+var stableText = (clean) => {
+  let text = clean.length > MESSAGE_FACT_TEXT_CAP ? dropSplitMark(prefixWithin(clean, MESSAGE_FACT_TEXT_CAP)) : clean;
+  for (let pass = 0; pass < STABLE_PASSES; pass += 1) {
+    const again = redactString(text);
+    if (again === text) {
+      return text;
+    }
+    let same = 0;
+    while (same < text.length && text[same] === again[same]) {
+      same += 1;
+    }
+    const lastWord = Math.max(0, text.search(/\s*\S*$/));
+    const end = same < text.length ? same : lastWord;
+    text = again.length <= MESSAGE_FACT_TEXT_CAP ? again : prefixWithin(text, Math.min(end, text.length - 1));
+  }
+  return "";
+};
+var isProgressRecord = (record) => {
+  const message = record.message;
+  const main = record.type === "assistant" && record.isSidechain !== true && message?.model !== SYNTHETIC_MODEL;
+  return main && message?.stop_reason !== "end_turn" && Array.isArray(message?.content);
+};
+var progressOf = (record) => {
+  const { uuid, timestamp: at } = record;
+  const blocks = isProgressRecord(record) ? record.message?.content : [];
+  const text = blocks.filter(isTextBlock).map((block) => block.text).join("\n\n");
+  const stamped = typeof uuid === "string" && MESSAGE_FACT_UUID.test(uuid) && typeof at === "string" && Number.isFinite(Date.parse(at));
+  if (!stamped || text.trim() === "") {
+    return void 0;
+  }
+  const clean = redactString(text);
+  const kept = stableText(clean);
+  return kept.trim() === "" ? void 0 : { uuid, at, text: kept, truncated: kept.length < clean.length };
+};
+var messageKey = (sessionId, uuid) => `${sessionId}\0${uuid}`;
 var copyFiles = (files) => {
   const copies = [...files].map(([path, file]) => [path, { ...file, partial: Buffer.from(file.partial) }]);
   return new Map(copies);
@@ -1447,6 +1503,7 @@ var createUsageFacts = (options) => {
   const files = /* @__PURE__ */ new Map();
   const timers = /* @__PURE__ */ new Map();
   const known = /* @__PURE__ */ new Map();
+  const messageIds = /* @__PURE__ */ new Set();
   const unpriced = /* @__PURE__ */ new Set();
   const reported = /* @__PURE__ */ new Set();
   const projectsDir = resolve3(expandHome(options.projectsDir ?? "~/.claude/projects"));
@@ -1480,6 +1537,20 @@ var createUsageFacts = (options) => {
         data.rates = { cacheRead: price.cacheRead, output: price.output };
       }
       write(createLine("server", "usage.fact", data, { sessionId: file.sessionId, agentId: file.agentId, cwd: file.cwd }));
+    }
+  };
+  const emitMessages = (file, records) => {
+    if (file.agentId) {
+      return;
+    }
+    for (const record of records) {
+      const written = typeof record.uuid === "string" && messageIds.has(messageKey(file.sessionId, record.uuid));
+      const early = options.messagesFrom !== void 0 && !(Date.parse(record.timestamp ?? "") >= options.messagesFrom);
+      const data = written || early ? void 0 : progressOf(record);
+      if (data) {
+        write(createLine("server", "message.fact", data, { sessionId: file.sessionId, cwd: file.cwd }));
+        messageIds.add(messageKey(file.sessionId, data.uuid));
+      }
     }
   };
   const openTranscript = (path) => {
@@ -1549,7 +1620,11 @@ var createUsageFacts = (options) => {
     } finally {
       closeSync(fd);
     }
-    emitBatch(file, records);
+    try {
+      emitBatch(file, records);
+    } finally {
+      emitMessages(file, records);
+    }
   };
   const readSafely = (path) => {
     try {
@@ -1584,6 +1659,10 @@ var createUsageFacts = (options) => {
         known.set(event.data.requestId, Math.max(event.data.output, known.get(event.data.requestId) ?? -1));
         return;
       }
+      if (event.event === "message.fact") {
+        messageIds.add(messageKey(event.sessionId, event.data.uuid));
+        return;
+      }
       if (event.src !== "hook" || !event.sessionId) {
         return;
       }
@@ -1611,12 +1690,14 @@ var createUsageFacts = (options) => {
       mainTranscripts: new Map(mainTranscripts),
       files: copyFiles(files),
       known: new Map(known),
+      messageIds: new Set(messageIds),
       reported: new Set(reported)
     }),
     restoreHistory(view) {
       refillMap(mainTranscripts, view.mainTranscripts);
       refillMap(files, copyFiles(view.files));
       refillMap(known, view.known);
+      refillSet(messageIds, view.messageIds);
       refillSet(reported, view.reported);
     },
     goLive() {
@@ -1768,7 +1849,7 @@ var HANDOVER = isRecord2({ offsets: isMap(isNumber), identities: isMap(isString)
 var OPEN_BASH = isMap(isObject);
 var VIEWS = {
   git: isRecord2({ branches: isMap(), forks: isSet, subjects: isSet, candidates: isSet, eventDirs: isSet, pendingAdds: isMap(isRecord2({ seen: isSet })), statWarnings: isMap(), historyReviewers: isMap(), historyDiffs: isMap(), openBash: OPEN_BASH }),
-  usage: isRecord2({ mainTranscripts: isMap(), files: isMap(isRecord2({ partial: isBytes })), known: isMap(), reported: isSet }),
+  usage: isRecord2({ mainTranscripts: isMap(), files: isMap(isRecord2({ partial: isBytes })), known: isMap(), messageIds: isSet, reported: isSet }),
   gh: isRecord2({ known: isMap(), forge: isMap(isObject), openBash: OPEN_BASH })
 };
 var LOG = isRecord2({ level: isString, message: isString, named: (value) => typeof value === "boolean" });

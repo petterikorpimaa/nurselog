@@ -88,16 +88,26 @@ p { margin: 0; }
    padding keeps the ping clear of the scroll clip, and clips the indicator's drop shadow to 2 px as the demo's strip
    does. While tabs lie past an edge that edge fades, and a marker filled like the badge sits on it, inside the content
    column, while a waiting tab's name or badge lies past it or under its fade; the marker pulses with the halo, and its
-   18 px disc has a 24 px hit area. */
+   18 px disc has a 24 px hit area. A shown marker has its own room at its edge (--marker-room, set by topbar.ts as
+   data-marker-start and data-marker-end): the strip is clear there and the fade starts after it, so a cut tab ends
+   before the marker and no badge lies under it. */
 .topbar-tabs-box { position: relative; display: flex; min-width: 0; }
 .topbar-tabs {
   position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; padding: 2px; margin: -2px;
   overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
 }
-.topbar-tabs[data-more-start="true"] { mask-image: linear-gradient(to right, transparent, #000 24px); }
-.topbar-tabs[data-more-end="true"] { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+.topbar-tabs { --marker-room: 28px; --room-start: 0px; --room-end: 0px; }
+.topbar-tabs[data-marker-start="true"] { --room-start: var(--marker-room); }
+.topbar-tabs[data-marker-end="true"] { --room-end: var(--marker-room); }
+.topbar-tabs[data-more-start="true"] { mask-image: linear-gradient(to right, transparent var(--room-start), #000 calc(var(--room-start) + 24px)); }
+.topbar-tabs[data-more-end="true"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--room-end) - 24px), transparent calc(100% - var(--room-end)));
+}
 .topbar-tabs[data-more-start="true"][data-more-end="true"] {
-  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(
+    to right, transparent var(--room-start), #000 calc(var(--room-start) + 24px), #000 calc(100% - var(--room-end) - 24px),
+    transparent calc(100% - var(--room-end))
+  );
 }
 .tabs-indicator {
   position: absolute; z-index: 0; top: 2px; left: 0; width: 0; height: 34px; border-radius: 9px; pointer-events: none;
@@ -178,14 +188,15 @@ p { margin: 0; }
 .warning-time { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
 .warning-text { overflow-wrap: anywhere; }
 
-/* the update button (update.ts; design section 15, "Update button"): the status block's last item while the source
-   reports a newer Nurselog, a pill of the button look in the --rev tone with a dot, "Update available" and the version
-   ("Update" alone at 760 px and narrower, the rest kept for assistive technology). The item is hidden without a notice,
-   so the status block keeps its gaps. Its popover opens under it, anchored right, above the board like the warnings
-   list; at 760 px and narrower, where the status block wraps, under the top bar at its right edge. The notes scroll
-   inside it past 40 % of the window, and update.ts ends it above the window's foot on open, where the notes list (a
-   scroll container, so its flex minimum is 0) gives up its height first; the command and the actions stay in reach.
-   The command wraps in its box, and the text actions and Copy have a 24 px hit area. */
+/* the update button (update.ts; design section 15, "Update button"): the status block's item before the Changelog
+   button while the source reports a newer Nurselog, a pill of the button look in the --rev tone with a dot, "Update
+   available" and the version ("Update" alone at 760 px and narrower, the rest kept for assistive technology). The item
+   is hidden without a notice, so the status block keeps its gaps. Its popover opens under it, anchored right, above
+   the board like the warnings list; at 760 px and narrower, where the status block wraps, under the top bar at its
+   right edge. The notes scroll inside it past 40 % of the window, and update.ts ends it above the window's foot on
+   open, where the notes list (a scroll container, so its flex minimum is 0) gives up its height first; the command and
+   the actions stay in reach. The command wraps in its box, and the text actions ("Full changelog", "Skip this
+   version") and Copy have a 24 px hit area. */
 .topbar-update { position: relative; flex: none; }
 .update-button {
   display: inline-flex; align-items: center; gap: 8px; padding-inline: 12px; border-radius: 999px; white-space: nowrap;
@@ -216,10 +227,13 @@ p { margin: 0; }
   scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
 }
 .update-notes li::marker { color: var(--fg-3); }
-.update-all { position: relative; align-self: flex-start; font-size: 12px; color: var(--fg-2); text-underline-offset: 3px; border-radius: 4px; }
-.update-all:hover { color: var(--fg); }
-.update-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.update-all::before, .update-skip::before { content: ""; position: absolute; inset: -4px 0; }
+/* the link to the changelog under the notes (the demo's .upf) */
+.update-full {
+  position: relative; align-self: flex-start; margin-top: -4px; border: 0; background: transparent; padding: 0; border-radius: 4px;
+  font-size: 12px; color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.update-full:hover { color: var(--fg); }
+.update-full::before, .update-skip::before { content: ""; position: absolute; inset: -4px 0; }
 .update-command {
   display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; background: var(--page);
   border: 1px solid var(--border); border-radius: 8px;
@@ -235,6 +249,86 @@ p { margin: 0; }
   text-decoration: underline; text-underline-offset: 3px;
 }
 .update-skip:hover { color: var(--fg-2); }
+
+/* the Changelog button (changelog-button.ts; design section 15, "Changelog"): the top bar's last item while the source
+   has a changelog, a quiet pill (the demo's .clb) with three lines, "Changelog" and the running version, and a dot in
+   the --rev tone (the demo's --web) while a version newer than the seen one is known, with a visually hidden " new" in
+   the button's name; the icon alone at 760 px and narrower, the rest kept for assistive technology, at the height of a
+   .button's line box at every width, so the icon alone stands as tall as the update pill beside it */
+.changelog-button {
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: calc(1.45em + 8px);
+  padding-inline: 11px; border-radius: 999px; background: transparent; color: var(--fg-2); white-space: nowrap;
+  transition: background-color .2s, color .2s;
+}
+.button.changelog-button:hover { background: var(--card-2); color: var(--fg); }
+.changelog-button svg { width: 13px; height: 13px; flex: none; color: var(--fg-3); }
+.changelog-version { font: 500 11px var(--f-mono); color: var(--fg-3); }
+.changelog-dot {
+  position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--rev);
+  box-shadow: 0 0 0 2px var(--page);
+}
+
+/* the modal's changelog mode (modal.ts, changelog-view.ts; the demo's .mbox.lmode): narrower than the main-thread mode,
+   without the mode tag, its title says what it is; the rail in place of the turns */
+.main-box.changelog-mode { width: min(680px, 100%); }
+/* the subtitle wraps, so "<latest> is available" stays whole in a narrow window */
+.main-box.changelog-mode .main-sub { white-space: normal; }
+.main-box.changelog-mode :is(.main-empty, .main-latest, .main-earlier), .main-box.changelog-mode .main-head .main-tag { display: none; }
+.main-box:not(.changelog-mode) .clog { display: none; }
+/* one version per block on a rail (the demo's .clog): the available ones filled in --rev, the installed one ringed, the
+   older ones grey; the groups' dots New --rev and Fixed --focus (the demo's --web and --api, the package colours of the
+   demo, which the board takes from the config) */
+.clog { position: relative; display: flex; flex-direction: column; }
+.clr { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 2px 0 22px 26px; border-radius: 10px; }
+.clr::before { content: ""; position: absolute; left: 6px; top: 12px; bottom: -2px; width: 1px; background: var(--border-2); }
+.clr:last-child::before { display: none; }
+.cln {
+  position: absolute; left: 1px; top: 5px; width: 11px; height: 11px; border-radius: 50%; box-sizing: border-box;
+  background: var(--card); border: 1.5px solid var(--fg-3);
+}
+.clr.cur .cln { border: 2px solid var(--fg); }
+.clr.av .cln { background: var(--rev); border-color: var(--rev); }
+.clr header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.clr h3 { font: 600 14px var(--f-mono); letter-spacing: 0; color: var(--fg); }
+.clr:not(.cur, .av) h3 { color: var(--fg-2); }
+.cls { font: 600 10px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: 1px 8px; }
+.cls.av { color: var(--rev); border: 1px solid color-mix(in srgb, var(--rev) 45%, transparent); }
+.cls.cur { color: var(--fg-2); border: 1px solid var(--border-2); }
+.clu { font-size: 11.5px; color: var(--rev); }
+.clr time { margin-left: auto; font: 500 11px var(--f-mono); color: var(--fg-3); }
+.clg h4 {
+  display: flex; align-items: center; gap: 7px; margin: 0 0 4px; font: 600 10px var(--f-mono); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--fg-3);
+}
+.clg h4 i { width: 6px; height: 6px; border-radius: 50%; }
+.clg.new h4 i { background: var(--rev); }
+.clg.fixed h4 i { background: var(--focus); }
+.clg ul {
+  display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 16px; font-size: 13px; line-height: 1.5;
+  color: var(--fg-2); overflow-wrap: anywhere;
+}
+.clr:is(.cur, .av) .clg ul { color: var(--fg); }
+.clg li::marker { color: var(--fg-3); }
+.clup { font-size: 12px; color: var(--fg-3); }
+/* a command that wraps keeps closed box edges on each line */
+.clup code {
+  font: 500 11.5px var(--f-mono); color: var(--fg-2); background: var(--page); border: 1px solid var(--border); border-radius: 5px;
+  padding: 1px 6px; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+/* the older versions behind one toggle on the rail: the body opens with a grid-rows transition (changelog-view.ts
+   plays the blocks' entry) */
+.clold { position: relative; padding-left: 26px; }
+.clmore {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border-2); background: transparent;
+  border-radius: 999px; padding: 3px 12px; font-size: 12px; color: var(--fg-2); cursor: pointer; transition: background-color .2s, color .2s;
+}
+.clmore:hover { background: var(--card-2); color: var(--fg); }
+.clmore svg { width: 11px; height: 11px; transform: rotate(180deg); transition: transform .3s var(--ease); }
+.clmore[aria-expanded="true"] svg { transform: none; }
+.clob { display: grid; grid-template-rows: 0fr; margin-left: -26px; transition: grid-template-rows .45s var(--ease); }
+.clob.open { grid-template-rows: 1fr; }
+.clob > div { overflow: hidden; min-height: 0; padding-top: 0; transition: padding-top .45s var(--ease); }
+.clob.open > div { padding-top: 18px; }
 
 /* board: one stack per repository (board-page.ts); on a tab switch the previous one stays at the top, without its empty
    note, footnote or finished bar, while it slides out, and the next one slides in on top of it (later in the DOM) */
@@ -694,7 +788,10 @@ p { margin: 0; }
   /* the update button reads "Update" alone, its name stays "Update available <version>"; its popover hangs from the top
      bar's right edge, as the wrapped status block may start anywhere */
   .update-button { padding-inline: 11px; }
-  .update-more, .update-version {
+  /* the Changelog button reads its icon alone, its name stays "Changelog <version>"; a version's date takes a line */
+  .changelog-button { padding-inline: 9px; }
+  .clr time { margin-left: 0; flex-basis: 100%; }
+  .update-more, .update-version, .changelog-label, .changelog-version {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
   }
   .topbar-update { position: static; }
@@ -727,3 +824,126 @@ p { margin: 0; }
   color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px;
 }
 .hand-off-show:hover { color: var(--fg); }
+
+/* the node card (node-card.ts, design section 15 "Node card"): the card a click on an agent's node opens beside it, in
+   the body and fixed to the window, under the sticky top bar; the head and the foot stay, the body scrolls and fades at
+   the edge that has more (the options page's .hc). Its width by kind; the motion is the script's. */
+.node-card {
+  position: fixed; left: 0; top: 0; z-index: 35; display: flex; flex-direction: column; width: 350px;
+  max-width: calc(100vw - 16px); max-height: min(440px, 60vh); color: var(--fg); background: var(--card);
+  border: 1px solid var(--border-2); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); overflow: hidden;
+  outline: none; font-size: 14px; line-height: 1.45;
+}
+.node-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.node-card.closing { pointer-events: none; }
+.node-card[data-kind="fix"] { width: 370px; }
+.node-card:is([data-kind="reviewer"], [data-kind="pr"]) { width: 340px; }
+.node-card[data-kind="docs"] { width: 330px; }
+.nc-head { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px 8px; }
+.nc-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.nc-role { font: 600 12.5px var(--f-mono); overflow-wrap: anywhere; }
+.nc-chips { display: contents; }
+.nc-chip {
+  font: 600 10px var(--f-mono); letter-spacing: .03em; padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); color: var(--c);
+}
+.nc-chip.solid { color: var(--ink); background: var(--c); border-color: var(--c); }
+.nc-meta { margin: 0; font: 500 11px var(--f-mono); color: var(--fg-3); overflow-wrap: anywhere; }
+.nc-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column;
+  gap: 12px; padding: 2px 14px 12px; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
+}
+.nc-body > * { flex: none; }
+.nc-body.more-below { mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
+.nc-body.more-above { mask-image: linear-gradient(to bottom, transparent, #000 18px); }
+.nc-body.more-above.more-below { mask-image: linear-gradient(to bottom, transparent, #000 18px, #000 calc(100% - 22px), transparent); }
+.nc-foot {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px 7px 8px;
+  border-top: 1px solid var(--border);
+}
+.nc-link {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; border: 0; background: transparent; padding: 4px 6px; border-radius: 6px;
+  font: inherit; font-size: 12px; color: var(--fg-2); text-decoration: none; cursor: pointer;
+}
+.nc-link:hover { background: var(--card-2); color: var(--fg); }
+.nc-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.nc-link svg { width: 12px; height: 12px; flex: none; }
+.nc-task { margin: 0; font-size: 12.5px; color: var(--fg); overflow-wrap: anywhere; }
+.nc-note { margin: 0; font-size: 12px; color: var(--fg-3); }
+.nc-inline {
+  border: 0; background: transparent; padding: 0; font: inherit; color: var(--fg-2); text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer;
+}
+.nc-inline:hover { color: var(--fg); }
+.nc-now { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: 12px; color: var(--fg-2); }
+.nc-now-label { flex: none; font: 600 9.5px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
+.nc-now-text { min-width: 0; font-family: var(--f-mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.nc-now-text b { color: var(--fg); font-weight: 600; }
+.nc-now-text.failed { color: var(--red); }
+/* how a leg ended reads as text, in the UI font; only the running call keeps the mono font */
+.nc-now-text.ended { font-family: var(--f-ui); font-size: 12px; color: var(--fg-2); }
+.nc-ended { display: flex; flex-direction: column; gap: 4px; }
+.nc-report { margin: 0; font-size: 12px; color: var(--fg-2); overflow-wrap: anywhere; }
+.nc-pr { display: flex; flex-direction: column; gap: 4px; }
+.nc-pr-title { margin: 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.nc-pr-title b { font-family: var(--f-mono); font-weight: 600; color: var(--st-pr); margin-right: 6px; }
+.nc-pr-facts { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
+.nc-pr-facts [data-tone="ok"], .nc-pr-facts [data-tone="add"] { color: var(--rev); }
+.nc-pr-facts [data-tone="bad"], .nc-pr-facts [data-tone="del"] { color: var(--warm); }
+.nc-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; }
+.nc-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nc-metric-label { font: 600 9.5px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
+.nc-metric b { font: 600 12px var(--f-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.nc-metric b i { font-style: normal; font-weight: 500; color: var(--fg-3); }
+.nc-metric small { font: 500 10.5px var(--f-mono); color: var(--fg-3); }
+.nc-metric .verify-pips { justify-content: flex-start; }
+.nc-bar { display: block; height: 3px; border-radius: 2px; background: var(--card-3); overflow: hidden; }
+.nc-bar i { display: block; height: 100%; background: var(--st-implement); }
+.nc-metric[data-level="warn"] .nc-bar i { background: var(--amber); }
+.nc-metric[data-level="limit"] .nc-bar i { background: var(--red); }
+.nc-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.nc-section h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 600; color: var(--c, var(--fg-2)); }
+.nc-section h4 svg { width: 13px; height: 13px; flex: none; }
+.nc-count { margin-left: auto; font: 500 11px var(--f-mono); color: var(--fg-3); }
+.nc-list, .nc-files { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.nc-list { gap: 7px; }
+.nc-files { gap: 2px; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
+.nc-files li { overflow-wrap: anywhere; }
+.nc-item { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-left: 19px; }
+.nc-item::before { content: ""; position: absolute; left: 5px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--c); }
+.nc-text {
+  margin: 0; font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.nc-file { margin: 0; display: flex; flex-wrap: wrap; gap: 0 6px; font-size: 11px; color: var(--fg-3); overflow-wrap: anywhere; }
+.nc-file code { color: var(--fg-2); }
+/* a reviewer's item: its file and category flow as one line of text, the path wrapping where it must */
+.nc-item .nc-file { display: block; }
+.nc-item .nc-file code + span::before { content: " · "; }
+/* the Fix card: the progress line over one segment per item, then a row per item with its mark (FX1) */
+.nc-progress { display: flex; flex-direction: column; gap: 5px; }
+.nc-progress p { margin: 0; display: flex; justify-content: space-between; gap: 8px; font: 500 11px var(--f-mono); color: var(--fg-2); }
+.nc-progress p span { color: var(--fg-3); }
+.nc-segs { display: flex; gap: 3px; }
+.nc-segs i { flex: 1; height: 4px; border-radius: 2px; background: var(--c); opacity: .2; }
+.nc-segs i[data-mark="edited"] { opacity: 1; }
+.nc-segs i[data-mark="working"] { animation: nc-pulse 1.4s ease-in-out infinite; }
+@keyframes nc-pulse { 0%, 100% { opacity: .25; } 50% { opacity: .75; } }
+.nc-row {
+  display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 2px 8px; align-items: start; padding: 4px 6px;
+  margin: 0 -6px; border-radius: 6px;
+}
+.nc-row .nc-file { grid-column: 2; }
+.nc-row[data-mark="edited"] .nc-text { color: var(--fg-2); }
+.nc-row[data-mark="working"] { background: color-mix(in srgb, var(--c) 9%, var(--card)); }
+.nc-tag { font: 600 9.5px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--c); }
+.nc-mark { width: 14px; height: 14px; margin-top: 1px; color: var(--c); transform-box: fill-box; transform-origin: center; }
+.nc-mark-disc { fill: currentColor; }
+.nc-mark-check { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; }
+.nc-mark-track { fill: none; stroke: currentColor; stroke-opacity: .3; stroke-width: 1.6; }
+.nc-mark-spin {
+  fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; transform-origin: 7px 7px;
+  animation: nc-spin 1s linear infinite;
+}
+@keyframes nc-spin { to { transform: rotate(360deg); } }
+.nc-mark-todo { fill: none; stroke: var(--fg-3); stroke-width: 1.6; stroke-dasharray: .1 2.6; stroke-linecap: round; }

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.19 (2026-11-03)
+
+### New
+
+- A node card on a click of an agent's node
+- Improvement badge, the fixer's ring by kind and card nodes in the session graph
+- A Fix from fix and improve follow-ups, its items on the board
+- Progress messages as a time rail in the reply, and a typing bubble
+- Progress messages of the main thread from its transcript
+- A Changelog button and the changelog in the modal
+- The running copy's changelog as GET /api/changelog, release notes under New and Fixed
+
+### Fixed
+
+- A marker whose run ref does not resolve stays on its session, fewer warnings
+- The pr-shepherd's progress has two phases, push and PR open
+- A short Resumes list, a clear tab marker and a Summary that keeps the USD column
+- Keep an empty value of an allowlisted name as it is
+
 ## 0.1.18 (2026-11-02)
 
 ### New

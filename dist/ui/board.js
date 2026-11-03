@@ -6,7 +6,7 @@ var attempt = (call) => {
   }
 };
 var createAppBadge = (api) => {
-  let shown;
+  let shown2;
   const clearBadge = () => {
     const clearAppBadge = api?.clearAppBadge;
     if (api && typeof clearAppBadge === "function") {
@@ -16,10 +16,10 @@ var createAppBadge = (api) => {
   return {
     set(count) {
       const next = Math.max(0, Math.floor(count));
-      if (!api || next === shown) {
+      if (!api || next === shown2) {
         return;
       }
-      shown = next;
+      shown2 = next;
       const setAppBadge = api.setAppBadge;
       if (next > 0 && typeof setAppBadge === "function") {
         attempt(() => setAppBadge.call(api, next));
@@ -28,7 +28,7 @@ var createAppBadge = (api) => {
       }
     },
     clear() {
-      shown = void 0;
+      shown2 = void 0;
       clearBadge();
     }
   };
@@ -645,6 +645,9 @@ var VERIFICATION_FAIL_PATTERNS = Object.freeze({
   lint: "\\([1-9]\\d* errors?, \\d+ warnings?\\)",
   test: "\\b[1-9]\\d* fail(?:ed)?\\b|\\bErrors +[1-9]\\d* errors?\\b"
 });
+var SAFE_ASSIGNMENT_NAMES = Object.freeze(["CI", "NODE_ENV", "FORCE_COLOR", "NO_COLOR", "TZ", "DEBUG", "LANG", "LC_ALL"]);
+var SAFE_NAME_ALTERNATIVES = SAFE_ASSIGNMENT_NAMES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+var SAFE_ASSIGNMENT = new RegExp(`^(?:${SAFE_NAME_ALTERNATIVES})=(?:[A-Za-z0-9_.:,/-]*|\\[redacted\\])$`);
 
 // src/model/paths.ts
 var time = (at) => Date.parse(at);
@@ -653,7 +656,7 @@ var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|tes
 var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
 
 // src/model/progress.ts
-var PHASE_SHARES = { implement: [0.25, 0.5, 0.25], pr: [1 / 3, 1 / 3, 1 / 3] };
+var PHASE_SHARES = { implement: [0.25, 0.5, 0.25], pr: [0.5, 0.5] };
 
 // src/model/retention.ts
 var PRUNE_EVERY_MS = 60 * 1e3;
@@ -662,6 +665,10 @@ var DRAIN_MS = 10 * 6e4;
 
 // src/ui/format.ts
 var pad = (value2) => String(value2).padStart(2, "0");
+var localDay = (iso) => {
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
 var elapsed = (ms) => {
   const seconds = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1e3)) : 0;
   const minutes = Math.floor(seconds / 60);
@@ -1167,8 +1174,8 @@ var mergedLine = (prNumber, promotedTo) => {
   return `PR #${prNumber} merged${into}`;
 };
 var laneTooltip = (lane, overview, now, labels, clickable = false) => {
-  const named = lane.label === void 0 ? [lane.branch] : [lane.label, lane.branch];
-  const lines = [...named, `from ${overview.trunk} \xB7 forked ${ago(now - (lane.fork ?? now))}`];
+  const named2 = lane.label === void 0 ? [lane.branch] : [lane.label, lane.branch];
+  const lines = [...named2, `from ${overview.trunk} \xB7 forked ${ago(now - (lane.fork ?? now))}`];
   if (lane.state === "merged" && lane.prNumber !== void 0) {
     lines.push(mergedLine(lane.prNumber, lane.promotedTo));
   } else {
@@ -1336,8 +1343,8 @@ var setColor = (element, color) => {
     setVars(element, { "--c": color });
   }
 };
-var setShown = (element, shown) => {
-  const display = shown ? "" : "none";
+var setShown = (element, shown2) => {
+  const display = shown2 ? "" : "none";
   if (element.style.display !== display) {
     element.style.display = display;
   }
@@ -2050,6 +2057,7 @@ var SESSION_LINK = "nurselog:session-link";
 var SESSION_FOCUS = "nurselog:session-focus";
 var SESSION_FOLD = "nurselog:session-fold";
 var SESSION_AGENT = "nurselog:session-agent";
+var SESSION_CARD = "nurselog:session-card";
 var SESSION_MAIN = "nurselog:session-main";
 
 // src/ui/session-row.ts
@@ -2104,7 +2112,7 @@ var questionIds = (event) => {
 };
 var createSessionConversationRow = (context, parts) => {
   const opens = parts.openMessages !== void 0;
-  const { element, line, dot, key, title, update: updateLine } = createLine("conversation", opens, context.config.keyUrl);
+  const { element, line, dot, key, title, update: updateLine2 } = createLine("conversation", opens, context.config.keyUrl);
   const { meta, branch, chip, elapsedText, costText } = createConversationMeta(context);
   line.append(meta);
   const questionsHost = el("div", "questions-host");
@@ -2137,7 +2145,7 @@ var createSessionConversationRow = (context, parts) => {
     element,
     update(session, previous = current) {
       current = session;
-      updateLine({ id: session.id, key: session.key, title: sessionHeading(session), ...parts.ticketless?.() ? { ticketless: true } : {} });
+      updateLine2({ id: session.id, key: session.key, title: sessionHeading(session), ...parts.ticketless?.() ? { ticketless: true } : {} });
       const state = conversationDot(session);
       dot.dataset.state = state;
       dot.title = state === "waiting" ? "Main thread: waiting for you" : `Main thread: ${state}`;
@@ -2201,18 +2209,18 @@ var createFinishedParts = (context, actions) => {
   const detail = el("div", "row-detail-inner");
   detailBox.append(detail);
   parts.element.append(detailBox);
-  let shown = false;
-  show.addEventListener("click", () => actions.onShow(!shown));
+  let shown2 = false;
+  show.addEventListener("click", () => actions.onShow(!shown2));
   clear.addEventListener("click", () => actions.onClear());
   const setShown2 = (next, open2 = next) => {
-    shown = next;
+    shown2 = next;
     detailBox.classList.toggle("open", open2);
     detail.inert = !open2;
     show.setAttribute("aria-expanded", String(next));
     setText(show, next ? HIDE_TEXT : SHOW_TEXT);
   };
   setShown2(false);
-  return { ...parts, outcome, facts, when, show, clear, detailBox, detail, setShown: setShown2, isShown: () => shown };
+  return { ...parts, outcome, facts, when, show, clear, detailBox, detail, setShown: setShown2, isShown: () => shown2 };
 };
 var createFinishedSessionRow = (context, actions) => {
   const parts = createFinishedParts(context, actions);
@@ -2293,16 +2301,16 @@ var enterRow = (element) => {
 var createRowList = (list, make) => {
   const rows = /* @__PURE__ */ new Map();
   let ids = [];
-  const leaving = /* @__PURE__ */ new Set();
+  const leaving2 = /* @__PURE__ */ new Set();
   const settled = (node) => {
     let current = node;
-    while (current && leaving.has(current)) {
+    while (current && leaving2.has(current)) {
       current = current.nextElementSibling;
     }
     return current;
   };
   const leave = (element, index) => {
-    leaving.add(element);
+    leaving2.add(element);
     element.inert = true;
     const height = `${element.offsetHeight}px`;
     const frames = [
@@ -2312,7 +2320,7 @@ var createRowList = (list, make) => {
     ];
     const slide2 = element.animate(frames, { duration: ROW_LEAVE_MS, delay: Math.min(index, 10) * 35, easing: ROW_LEAVE_EASE, fill: "forwards" });
     const end = () => {
-      leaving.delete(element);
+      leaving2.delete(element);
       element.remove();
     };
     slide2.finished.then(end, end);
@@ -2381,7 +2389,7 @@ var createRowList = (list, make) => {
       if (options.animate) {
         for (const [element, top] of before) {
           const delta = top - element.offsetTop;
-          if (element.isConnected && !leaving.has(element) && Math.abs(delta) > 1) {
+          if (element.isConnected && !leaving2.has(element) && Math.abs(delta) > 1) {
             element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: ROW_MOVE_MS, easing: EASE2 });
           }
         }
@@ -2658,11 +2666,11 @@ var createCardList = (list, context, item2, make) => {
      */
     sync(next, tops, foldIds) {
       const keep2 = new Set(next);
-      const leaving = [...cards].filter(([id]) => !keep2.has(id));
-      const places = leaving.map(([, card]) => tops.get(card.element) ?? card.element.offsetTop);
+      const leaving2 = [...cards].filter(([id]) => !keep2.has(id));
+      const places = leaving2.map(([, card]) => tops.get(card.element) ?? card.element.offsetTop);
       const folded = [];
       let left = 0;
-      leaving.forEach(([id, card], index) => {
+      leaving2.forEach(([id, card], index) => {
         cards.delete(id);
         if (foldIds.has(id)) {
           fold(id, card);
@@ -3132,9 +3140,9 @@ var modelText = (roles, source) => {
 };
 var sharedTurns = (roles, setup) => sharedValue(roles, (role) => agentOf(role, setup)?.maxTurns);
 var roleList = (names) => {
-  const shown = names.slice(0, MAX_ROLES).join(", ");
+  const shown2 = names.slice(0, MAX_ROLES).join(", ");
   const rest = names.length - MAX_ROLES;
-  return rest > 0 ? `${shown} +${rest}` : shown;
+  return rest > 0 ? `${shown2} +${rest}` : shown2;
 };
 var sharedBudget = (roles, setup) => {
   const budgets = roles.map((role) => entryOf2(role, setup)?.toolCalls);
@@ -3156,9 +3164,9 @@ var budgetText = (roles, setup, turns) => {
 };
 var lineRoles = (lines) => [...new Set(lines.flatMap((line) => line.role ?? []))];
 var listedRoles = (stage, lines, setup) => {
-  const named = lineRoles(lines);
-  if (named.length > 0 || !setup) {
-    return named;
+  const named2 = lineRoles(lines);
+  if (named2.length > 0 || !setup) {
+    return named2;
   }
   return setup.roles.filter((item2) => item2.stage === stage && item2.role !== "*" && !isPlanRole(item2) && !isVerifyRole(item2)).map((item2) => item2.role);
 };
@@ -3393,7 +3401,7 @@ var lineNumbers = (entries) => {
   const numbers = andList(entries.map((entry) => String(entry.line)));
   return entries.length === 1 ? `line ${numbers}` : `lines ${numbers}`;
 };
-var furtherLines = (role, named) => named.more === true ? `${CHANGE_FILE} names ${role} on further lines too.` : "";
+var furtherLines = (role, named2) => named2.more === true ? `${CHANGE_FILE} names ${role} on further lines too.` : "";
 var sharedLines = (shared) => {
   if (shared.length === 0) {
     return "";
@@ -3406,28 +3414,28 @@ var sharedLines = (shared) => {
 var sentences = (...parts) => parts.filter((part) => part !== "").join(" ");
 var quietChange = (role, window2, setup) => {
   if (window2?.k === 0) {
-    const named = namedLines(setup, role);
-    const own = named.lines.filter((entry) => entry.also === void 0 || entry.also.length === 0);
-    const shared = named.lines.filter((entry) => !own.includes(entry));
-    const fix = sentences(`Stop running ${role} by default.`, sharedLines(shared), furtherLines(role, named));
+    const named2 = namedLines(setup, role);
+    const own = named2.lines.filter((entry) => entry.also === void 0 || entry.also.length === 0);
+    const shared = named2.lines.filter((entry) => !own.includes(entry));
+    const fix = sentences(`Stop running ${role} by default.`, sharedLines(shared), furtherLines(role, named2));
     return { fix, removed: own.map((entry) => entry.text), lines: [`Run ${role} only when I ask for it.`] };
   }
   const line = `Run ${role} only when the diff touches the code it reviews, not on every diff.`;
   return { fix: `Run ${role} only where it finds issues.`, lines: [line] };
 };
-var alreadyNamed = (name, named) => {
-  const verb = named.lines.length === 1 ? "names" : "name";
-  return sentences(`${CHANGE_FILE} ${lineNumbers(named.lines)} already ${verb} ${name}.`, furtherLines(name, named));
+var alreadyNamed = (name, named2) => {
+  const verb = named2.lines.length === 1 ? "names" : "name";
+  return sentences(`${CHANGE_FILE} ${lineNumbers(named2.lines)} already ${verb} ${name}.`, furtherLines(name, named2));
 };
 var newAgent = (setup, agent) => {
   const file = `.claude/agents/${agent.name}.md`;
-  const named = namedLines(setup, agent.name);
+  const named2 = namedLines(setup, agent.name);
   if (setup?.agents.some((entry) => entry.name === agent.name || entry.file === file) === true) {
-    const fix = named.lines.length === 0 ? agent.runFix : `${agent.runFix} ${alreadyNamed(agent.name, named)}`;
+    const fix = named2.lines.length === 0 ? agent.runFix : `${agent.runFix} ${alreadyNamed(agent.name, named2)}`;
     return { fix, lines: [agent.routing] };
   }
-  if (named.lines.length > 0) {
-    return { fix: `${agent.addFix} ${alreadyNamed(agent.name, named)}`, file, isNew: true, lines: [...agent.lines] };
+  if (named2.lines.length > 0) {
+    return { fix: `${agent.addFix} ${alreadyNamed(agent.name, named2)}`, file, isNew: true, lines: [...agent.lines] };
   }
   const also = { file: CHANGE_FILE, removed: [], lines: [agent.routing] };
   return { fix: agent.addFix, file, isNew: true, lines: [...agent.lines], also };
@@ -3623,8 +3631,8 @@ var fileKinds = (files) => {
   });
 };
 var changedFiles = (files, clean = (path) => path) => {
-  const named = fileKinds(files).map(({ path, kind }) => kind === "changed" ? clean(path) : `${clean(path)} (${kind})`);
-  return named.join(", ");
+  const named2 = fileKinds(files).map(({ path, kind }) => kind === "changed" ? clean(path) : `${clean(path)} (${kind})`);
+  return named2.join(", ");
 };
 var PR = ["PR", "PRs"];
 var RUN = ["run", "runs"];
@@ -4015,11 +4023,6 @@ var readPoints = (series) => {
     return [{ session: item2.session, number: pointNumber(item2.value, k, n2), window: item2.window === true, k, n: n2, steps: readSteps(item2.steps), setupChange, agentChars }];
   });
 };
-var localDay = (iso) => {
-  const date = new Date(iso);
-  const pad4 = (part) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad4(date.getMonth() + 1)}-${pad4(date.getDate())}`;
-};
 var readSetupChanges = (value2) => {
   const entries = Array.isArray(value2) ? value2 : [];
   return entries.map((entry) => {
@@ -4107,12 +4110,12 @@ var mergeRuns = (session, runs) => {
   return { session, number: n2 > 0 ? k / n2 : null, window: true, k, n: n2, steps: void 0, setupChange: runs[0]?.setupChange, agentChars: void 0 };
 };
 var rowPoints = (points, perRun) => {
-  const newestFirst3 = [...points].reverse().filter((point2) => point2.window && point2.number !== null);
+  const newestFirst4 = [...points].reverse().filter((point2) => point2.window && point2.number !== null);
   if (!perRun) {
-    return newestFirst3;
+    return newestFirst4;
   }
   const bySession = /* @__PURE__ */ new Map();
-  for (const point2 of newestFirst3) {
+  for (const point2 of newestFirst4) {
     const runs = bySession.get(point2.session);
     if (runs === void 0) {
       bySession.set(point2.session, [point2]);
@@ -4537,8 +4540,8 @@ var readFirst = (change) => {
     const removed = kinds.length === 1 ? "The removed file" : "The removed files";
     return `${removed} may have held this change: read the setup as it is now first and make the change only if the setup lacks it.`;
   }
-  const named = ["changed", "added"].filter((kind) => present.includes(kind)).join(" and ");
-  const ask = present.length === 1 ? `The ${named} file may already hold this change: read it first` : `The ${named} files may already hold this change: read them first`;
+  const named2 = ["changed", "added"].filter((kind) => present.includes(kind)).join(" and ");
+  const ask = present.length === 1 ? `The ${named2} file may already hold this change: read it first` : `The ${named2} files may already hold this change: read them first`;
   return `${ask} and do not make it again.`;
 };
 var changedLine = (finding) => {
@@ -4695,7 +4698,7 @@ var impactHit = (finding, impact) => impact === "all" || finding.impact === impa
 var filterView = (report, filter) => {
   const findings = report.groups.flatMap((group) => group.findings);
   const passing = findings.filter((finding) => stageHit(finding, filter.stage) && impactHit(finding, filter.impact));
-  const shown = new Set(passing.map((finding) => finding.id));
+  const shown2 = new Set(passing.map((finding) => finding.id));
   const suggested = findings.filter((finding) => SUGGESTED.has(finding.group));
   const byImpact = suggested.filter((finding) => impactHit(finding, filter.impact));
   const byStage = suggested.filter((finding) => stageHit(finding, filter.stage));
@@ -4706,8 +4709,8 @@ var filterView = (report, filter) => {
   const filtered = filter.stage !== "all" || filter.impact !== "all";
   const noun3 = findings.length === 1 ? "finding" : "findings";
   const all = `${findings.length} ${noun3}`;
-  const summary = filtered ? `Showing ${shown.size} of ${all}` : `${all} \xB7 numbers count what is worth changing or considering`;
-  return { shown, stageCounts, impactCounts, filtered, summary };
+  const summary = filtered ? `Showing ${shown2.size} of ${all}` : `${all} \xB7 numbers count what is worth changing or considering`;
+  return { shown: shown2, stageCounts, impactCounts, filtered, summary };
 };
 var updatedText = (report, now) => {
   const updated = report.updated;
@@ -4815,9 +4818,9 @@ var createHealthReportView = (hooks) => {
       item2.hidden = !view.shown.has(id);
     }
     for (const group of groups2) {
-      const shown = group.ids.filter((id) => view.shown.has(id)).length;
-      group.section.hidden = shown === 0;
-      setText(group.count, String(shown));
+      const shown2 = group.ids.filter((id) => view.shown.has(id)).length;
+      group.section.hidden = shown2 === 0;
+      setText(group.count, String(shown2));
     }
     for (const option of options) {
       const counts = option.kind === "stage" ? view.stageCounts : view.impactCounts;
@@ -4836,8 +4839,8 @@ var createHealthReportView = (hooks) => {
     if (hooks.reducedMotion()) {
       return;
     }
-    const shown = [...items.values()].filter((item2) => !item2.hidden);
-    shown.forEach((item2, index) => {
+    const shown2 = [...items.values()].filter((item2) => !item2.hidden);
+    shown2.forEach((item2, index) => {
       const delay = Math.min(index, FADE_UP_MAX_DELAYED) * FADE_UP_STAGGER_MS;
       item2.animate(FADE_UP, { duration: FADE_UP_MS, delay, easing: EASE4, fill: "backwards" });
     });
@@ -5420,8 +5423,8 @@ var createHealthStrip = (context, hooks) => {
   const count = el("span", "hsc");
   const countDot = el("i");
   countDot.setAttribute("aria-hidden", "true");
-  const countText4 = el("span");
-  count.append(countDot, countText4);
+  const countText5 = el("span");
+  count.append(countDot, countText5);
   const basis = el("span", "hsu");
   const note = el("span", "hsn", EMPTY_TEXT);
   note.title = EMPTY_TITLE;
@@ -5451,12 +5454,12 @@ var createHealthStrip = (context, hooks) => {
   let drawnKeys;
   const drawOpen = () => {
     const empty = map?.empty ?? false;
-    const shown = open2 && !empty;
-    element.classList.toggle("open", shown);
-    body.classList.toggle("open", shown);
-    body.inert = !shown;
+    const shown2 = open2 && !empty;
+    element.classList.toggle("open", shown2);
+    body.classList.toggle("open", shown2);
+    body.inert = !shown2;
     for (const parts of steps.values()) {
-      parts.node.tabIndex = shown ? 0 : -1;
+      parts.node.tabIndex = shown2 ? 0 : -1;
     }
     toggle.setAttribute("aria-expanded", String(open2));
     toggle.setAttribute("aria-label", open2 ? "Hide the workflow map" : "Show the workflow map");
@@ -5499,13 +5502,13 @@ var createHealthStrip = (context, hooks) => {
     setText(parts.more, step.more > 0 ? `+${step.more}` : "");
     parts.more.hidden = step.more === 0;
   };
-  const placeSteps = (shown) => {
-    const ids = new Set(shown.map((step) => step.id));
+  const placeSteps = (shown2) => {
+    const ids = new Set(shown2.map((step) => step.id));
     for (const [id, item2] of items) {
       if (!ids.has(id)) {
         if (item2.contains(document.activeElement)) {
-          const at = Math.min(Array.from(list.children).indexOf(item2) - 1, shown.length - 1);
-          const heir = shown[Math.max(0, at)];
+          const at = Math.min(Array.from(list.children).indexOf(item2) - 1, shown2.length - 1);
+          const heir = shown2[Math.max(0, at)];
           if (heir) {
             steps.get(heir.id)?.node.focus();
           }
@@ -5515,14 +5518,14 @@ var createHealthStrip = (context, hooks) => {
         steps.delete(id);
       }
     }
-    shown.forEach((step, index) => {
+    shown2.forEach((step, index) => {
       const item2 = items.get(step.id);
       const at = list.children[index + 1];
       if (item2 && at !== item2) {
         list.insertBefore(item2, at ?? null);
       }
     });
-    list.dataset.steps = String(shown.length);
+    list.dataset.steps = String(shown2.length);
   };
   const bump = (id) => {
     const node = steps.get(id)?.node;
@@ -5558,7 +5561,7 @@ var createHealthStrip = (context, hooks) => {
     note.hidden = !next.empty;
     body.hidden = next.empty;
     countDot.hidden = next.change === 0;
-    setText(countText4, next.count);
+    setText(countText5, next.count);
     setText(basis, next.basis);
     for (const step of next.steps) {
       drawStep(step);
@@ -5697,6 +5700,31 @@ var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count) => {
     core.append(icon("M-4 0 L4 0"));
   }
   group.replaceChildren(...parts, core);
+  return core;
+};
+var BADGE_HEIGHT = 10.8;
+var BADGE_PILL = 13.4;
+var BADGE_KNOCKOUT = 1.3;
+var badgeOffset = (radius, low) => {
+  const offset = Math.round(radius * 8) / 10;
+  return { x: offset, y: low ? offset : -offset };
+};
+var drawBadge = (group, radius, count, low = false) => {
+  const text2 = String(count);
+  const width = text2.length > 1 ? BADGE_PILL : BADGE_HEIGHT;
+  const at = badgeOffset(radius, low);
+  const outerWidth = width + 2 * BADGE_KNOCKOUT;
+  const outerHeight = BADGE_HEIGHT + 2 * BADGE_KNOCKOUT;
+  const knockoutAt = { x: round2(-outerWidth / 2), y: round2(-outerHeight / 2) };
+  const knockout = { ...knockoutAt, width: round2(outerWidth), height: round2(outerHeight), rx: round2(outerHeight / 2) };
+  const body = { x: round2(-width / 2), y: round2(-BADGE_HEIGHT / 2), width, height: BADGE_HEIGHT, rx: BADGE_HEIGHT / 2 };
+  const label = svgEl("text", { class: "node-badge-text", y: 2.7 });
+  label.textContent = text2;
+  const core = svgEl("g", { class: "node-badge-core" });
+  core.append(svgEl("rect", { class: "node-badge-knockout", ...knockout }), svgEl("rect", { class: "node-badge-body", ...body }), label);
+  const badge = svgEl("g", { class: "node-badge", transform: `translate(${round2(at.x)} ${round2(at.y)})` });
+  badge.append(core);
+  group.append(badge);
   return core;
 };
 var SHEEN_TILT = 24;
@@ -5880,6 +5908,7 @@ var LEGEND_NODES = [
   { state: "approved", label: "approved" },
   { state: "changes", label: "changes requested" },
   { state: "changes", count: 3, label: "fixes requested" },
+  { state: "approved", improvements: 2, label: "improvements suggested" },
   { state: "handed", label: "stopped at budget" },
   { state: "running", className: "stale", label: "stale" },
   { state: "failed", label: "failed" },
@@ -5898,11 +5927,14 @@ var text = (className, value2, y, x = 0) => {
   element.textContent = value2;
   return element;
 };
-var nodeGroup = (state, color, mark, radius, x = 0, extra, count) => {
+var nodeGroup = (state, color, mark, radius, x = 0, extra, count, improvements) => {
   const classes = extra ? `node ${state} ${extra}` : `node ${state}`;
   const group = svgEl("g", { class: classes, transform: `translate(${x} 0)` });
   setVars(group, { "--c": color });
   drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }), count);
+  if (improvements !== void 0) {
+    drawBadge(group, radius, improvements);
+  }
   return group;
 };
 var pillGroup = (color, compact, x = 0) => {
@@ -5955,9 +5987,9 @@ var row = (title, items, note) => {
 var nodesRow = (config, color) => {
   const marks = legendMarks(config);
   const mark = legendSampleMark(marks);
-  const items = LEGEND_NODES.map(({ state, label, className, count }) => {
-    const svg = sample("-13 -13 26 26", 26, 26);
-    svg.append(nodeGroup(state, color, mark, NODE_R, 0, className, count));
+  const items = LEGEND_NODES.map(({ state, label, className, count, improvements }) => {
+    const svg = improvements === void 0 ? sample("-13 -13 26 26", 26, 26) : sample("-14 -14 28 28", 28, 28);
+    svg.append(nodeGroup(state, color, mark, NODE_R, 0, className, count, improvements));
     return item(svg, label);
   });
   return row("Nodes", items, marksNote(marks));
@@ -6124,8 +6156,8 @@ var mostRecentlyActive = (list) => {
 };
 var selectRepository = (list, wanted, currentId) => {
   const current = currentId === void 0 ? void 0 : list.find((repository) => repository.id === currentId);
-  const named = wanted === void 0 ? void 0 : list.find((repository) => repository.name === wanted);
-  return current ?? named ?? mostRecentlyActive(list);
+  const named2 = wanted === void 0 ? void 0 : list.find((repository) => repository.name === wanted);
+  return current ?? named2 ?? mostRecentlyActive(list);
 };
 var tabViews = (list, selectedId) => list.map((repository) => {
   const running = Math.max(0, repository.running);
@@ -6165,6 +6197,17 @@ var hiddenWaiting = (boxes, viewStart, viewEnd) => {
   }
   return { start: start?.id, end: end?.id };
 };
+var TAB_MARGIN = 24;
+var MARKER_ROOM = 28;
+var edgeMarkers = (boxes, viewStart, viewEnd, moreStart, moreEnd) => {
+  const fadeStart = moreStart ? viewStart + TAB_MARGIN : viewStart;
+  const fadeEnd = moreEnd ? viewEnd - TAB_MARGIN : viewEnd;
+  const first = hiddenWaiting(boxes, fadeStart, fadeEnd);
+  const clearStart = first.start === void 0 ? fadeStart : fadeStart + MARKER_ROOM;
+  const clearEnd = first.end === void 0 ? fadeEnd : fadeEnd - MARKER_ROOM;
+  const second = hiddenWaiting(boxes, clearStart, clearEnd);
+  return { start: second.start ?? first.start, end: second.end ?? first.end };
+};
 var tabNameId = (id) => `repo-tab-${id}-name`;
 var INCHWORM_REACH = 0.42;
 var inchwormFrames = (from, to) => {
@@ -6175,6 +6218,14 @@ var inchwormFrames = (from, to) => {
 var centredScroll = (tab, viewWidth, scrollWidth) => {
   const left = tab.left - (viewWidth - tab.width) / 2;
   return Math.min(Math.max(0, left), Math.max(0, scrollWidth - viewWidth));
+};
+var revealScroll = (tab, scrollLeft, viewWidth, markerStart, markerEnd) => {
+  const start = tab.left - TAB_MARGIN - (markerStart ? MARKER_ROOM : 0);
+  const end = tab.left + tab.width + TAB_MARGIN + (markerEnd ? MARKER_ROOM : 0) - viewWidth;
+  if (scrollLeft > start) {
+    return Math.max(0, start);
+  }
+  return scrollLeft < end ? end : void 0;
 };
 var travelDirection = (ids, fromId, toId) => {
   const from = fromId === void 0 ? -1 : ids.indexOf(fromId);
@@ -6355,6 +6406,209 @@ var createAnswerer = (deps) => {
   };
 };
 
+// src/ui/changelog.ts
+var SEEN_KEY = "nurselog.seenLog";
+var NO_VERSION = "0.0.0";
+var VERSION = /^\d+\.\d+\.\d+$/;
+var compareVersions = (a, b) => {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
+};
+var newestFirst2 = (notes) => {
+  const seen = /* @__PURE__ */ new Set();
+  const unique = notes.filter((note) => {
+    if (seen.has(note.version)) {
+      return false;
+    }
+    seen.add(note.version);
+    return true;
+  });
+  return unique.sort((a, b) => compareVersions(b.version, a.version));
+};
+var previousVersion = (changelog) => {
+  const older = changelog.releases.filter((release) => compareVersions(release.version, changelog.current) < 0);
+  return newestFirst2(older)[0]?.version ?? NO_VERSION;
+};
+var seenVersion = (stored, changelog) => {
+  return stored !== null && VERSION.test(stored) ? stored : previousVersion(changelog);
+};
+var newestKnown = (changelog, notice) => {
+  if (notice && compareVersions(notice.latest, changelog.current) > 0) {
+    return notice.latest;
+  }
+  return changelog.current;
+};
+var hasUnseen = (changelog, notice, seen) => {
+  return compareVersions(newestKnown(changelog, notice), seen) > 0;
+};
+var changelogRail = (changelog, notice, seen) => {
+  const { current } = changelog;
+  const railOf = (note, kind) => {
+    const version = { version: note.version, kind, unseen: compareVersions(note.version, seen) > 0, items: note.items };
+    if (note.date !== void 0) {
+      version.date = note.date;
+    }
+    if (note.groups !== void 0) {
+      version.groups = note.groups;
+    }
+    return version;
+  };
+  const known = newestFirst2(changelog.releases);
+  const available = newestFirst2(notice?.notes ?? []).filter((note) => compareVersions(note.version, current) > 0);
+  const installed = known.find((note) => note.version === current) ?? { version: current, items: [] };
+  const older = known.filter((note) => compareVersions(note.version, current) < 0);
+  const rail = {
+    current,
+    recent: [...available.map((note) => railOf(note, "available")), railOf(installed, "installed")],
+    older: older.map((note) => railOf(note, "older"))
+  };
+  if (notice && compareVersions(notice.latest, current) > 0) {
+    rail.latest = notice.latest;
+    rail.command = notice.command;
+  }
+  return rail;
+};
+var railSubtitle = (rail) => {
+  const available = rail.latest === void 0 ? "" : ` \xB7 ${rail.latest} is available`;
+  return `Nurselog \xB7 you have ${rail.current}${available}`;
+};
+var releaseDate = (date) => {
+  const options = { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };
+  return (/* @__PURE__ */ new Date(`${date}T12:00:00Z`)).toLocaleDateString("en-GB", options);
+};
+
+// src/ui/changelog-view.ts
+var OLDER_ID = "changelog-older";
+var HIDE_TEXT2 = "Hide older versions";
+var ENTRY_FRAMES = [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
+var ENTRY_MS = 360;
+var ENTRY_DELAY_MS = 60;
+var ENTRY_STAGGER_MS = 40;
+var ENTRY_DELAYED = 8;
+var KIND_LOOK = {
+  available: { className: "clr av", tag: { className: "cls av", text: "Available" } },
+  installed: { className: "clr cur", tag: { className: "cls cur", text: "You have this" } },
+  older: { className: "clr" }
+};
+var listOf2 = (items) => {
+  const list = el("ul");
+  list.append(...items.map((item2) => el("li", void 0, item2)));
+  return list;
+};
+var groupOf2 = (kind, label, items) => {
+  if (items.length === 0) {
+    return [];
+  }
+  const group = el("section", `clg ${kind}`);
+  const heading2 = el("h4");
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  heading2.append(dot, label);
+  group.append(heading2, listOf2(items));
+  return [group];
+};
+var notesOf = (entry) => {
+  if (entry.groups) {
+    return [...groupOf2("new", "New", entry.groups.new), ...groupOf2("fixed", "Fixed", entry.groups.fixed)];
+  }
+  if (entry.items.length === 0) {
+    return [];
+  }
+  const group = el("div", "clg");
+  group.append(listOf2(entry.items));
+  return [group];
+};
+var updateLine = (command) => {
+  const line = el("p", "clup", "Update with ");
+  line.append(el("code", void 0, command), "; the board then closes itself and the next session start starts the new version.");
+  return line;
+};
+var blockOf = (entry, command) => {
+  const look = KIND_LOOK[entry.kind];
+  const block = el("article", look.className);
+  block.dataset.version = entry.version;
+  const node = el("span", "cln");
+  node.setAttribute("aria-hidden", "true");
+  const header = el("header");
+  header.append(el("h3", void 0, entry.version));
+  if (look.tag) {
+    header.append(el("span", look.tag.className, look.tag.text));
+  }
+  if (entry.unseen) {
+    header.append(el("span", "clu", "new to you"));
+  }
+  if (entry.date !== void 0) {
+    const time2 = el("time", void 0, releaseDate(entry.date));
+    time2.setAttribute("datetime", entry.date);
+    header.append(time2);
+  }
+  block.append(node, header, ...notesOf(entry));
+  if (command !== void 0) {
+    block.append(updateLine(command));
+  }
+  return block;
+};
+var createChangelogView = (options) => {
+  const element = el("div", "clog");
+  const older = el("div", "clold");
+  const toggle = el("button", "clmore");
+  toggle.type = "button";
+  toggle.setAttribute("aria-controls", OLDER_ID);
+  const toggleText2 = el("span");
+  toggle.append(toggleText2, chevronIcon());
+  const body = el("div", "clob");
+  body.id = OLDER_ID;
+  const clip3 = el("div");
+  body.append(clip3);
+  older.append(toggle, body);
+  let olderBlocks = [];
+  let drawnParts = [];
+  const blocks = /* @__PURE__ */ new Map();
+  const setOpen2 = (open2, animate) => {
+    toggle.setAttribute("aria-expanded", String(open2));
+    body.classList.toggle("open", open2);
+    body.inert = !open2;
+    setText(toggleText2, open2 ? HIDE_TEXT2 : `Show ${plural(olderBlocks.length, "older version")}`);
+    if (!open2 || !animate) {
+      return;
+    }
+    olderBlocks.forEach((block, index) => {
+      const delay = ENTRY_DELAY_MS + Math.min(index, ENTRY_DELAYED) * ENTRY_STAGGER_MS;
+      block.animate(ENTRY_FRAMES, { duration: ENTRY_MS, delay, easing: EASE4, fill: "backwards" });
+    });
+  };
+  toggle.addEventListener("click", () => {
+    setOpen2(toggle.getAttribute("aria-expanded") !== "true", !options.reducedMotion());
+    options.toggled();
+  });
+  return {
+    element,
+    draw(rail) {
+      blocks.clear();
+      const drawBlock = (entry) => {
+        const block = blockOf(entry, entry.version === rail.latest ? rail.command : void 0);
+        blocks.set(entry.version, block);
+        return block;
+      };
+      const recent = rail.recent.map(drawBlock);
+      olderBlocks = rail.older.map(drawBlock);
+      clip3.replaceChildren(...olderBlocks);
+      setOpen2(false, false);
+      drawnParts = olderBlocks.length > 0 ? [...recent, older] : recent;
+      element.replaceChildren(...drawnParts);
+    },
+    parts: () => drawnParts,
+    block: (version) => blocks.get(version)
+  };
+};
+
 // src/model/keys.ts
 var KEY_BEFORE = String.raw`(?:^|[^\w\\./-])`;
 var KEY_AFTER = String.raw`(?:$|[^\w/.]|\.(?:$|[^A-Za-z0-9]))`;
@@ -6367,7 +6621,7 @@ var TYPICAL_RUNS = 50;
 
 // src/ui/graph/progress-ring.ts
 var RING_PARTS = 8;
-var PHASE_NAMES = { implement: ["read", "edit", "verify"], pr: ["push", "open the PR", "finish"] };
+var PHASE_NAMES = { implement: ["read", "edit", "verify"], pr: ["push", "open the PR"] };
 var TYPICAL_HOLD = 0.95;
 var RING_GAP = 3;
 var PART_GAP = 9.6 / 360;
@@ -6392,13 +6646,32 @@ var currentOf = (progress, count) => {
   const current = progress.current;
   return current !== void 0 && Number.isInteger(current) && current >= 0 && current < count ? current : void 0;
 };
+var improvementsOf = (progress) => {
+  const improvements = progress.improvements;
+  if (progress.kind !== "fixes" || typeof improvements !== "object" || improvements === null) {
+    return void 0;
+  }
+  const { total, done } = improvements;
+  const whole = Number.isInteger(total) && Number.isInteger(done) && total >= 1 && done >= 0 && done <= total;
+  const within = whole && total <= progress.total && done <= progress.done && progress.done - done <= progress.total - total;
+  return within ? { total, done } : void 0;
+};
+var kindsText = (progress) => {
+  const improvements = improvementsOf(progress);
+  if (improvements === void 0) {
+    return "";
+  }
+  const fixes = progress.total - improvements.total;
+  const fixText = fixes > 0 ? `, fixes ${progress.done - improvements.done} of ${fixes}` : "";
+  return `${fixText}, improvements ${improvements.done} of ${improvements.total}`;
+};
 var progressText = (progress, current) => {
   const { kind, done, total } = progress;
   if (kind === "files") {
     return `Changed files: ${done} of ${total} looked at`;
   }
   if (kind === "fixes") {
-    return `Fix items: ${done} of ${total} edited`;
+    return `Fix items: ${done} of ${total} edited${kindsText(progress)}`;
   }
   const names = PHASE_NAMES[kind];
   const phase = current ?? Math.min(done, names.length - 1);
@@ -6408,6 +6681,42 @@ var isProgress = (progress) => {
   const { kind, total, done } = progress;
   const known = isPhase(kind) || kind === "files" || kind === "fixes";
   return known && Number.isInteger(total) && total >= 1 && Number.isInteger(done) && done >= 0 && done <= total;
+};
+var withKinds = (parts, progress) => {
+  const improvements = improvementsOf(progress);
+  if (improvements === void 0 || parts.length !== progress.total) {
+    return parts;
+  }
+  const first = parts.length - improvements.total;
+  return parts.map((part, index) => ({ ...part, kind: index < first ? "fix" : "improve" }));
+};
+var kindArcsOf = (progress, lead) => {
+  const improvements = improvementsOf(progress);
+  if (improvements === void 0) {
+    return void 0;
+  }
+  const fixes = progress.total - improvements.total;
+  const fixesDone = progress.done - improvements.done;
+  const split = fixes / progress.total;
+  const fix = fixes === 0 ? 0 : fixesDone / fixes;
+  const improve = improvements.done / improvements.total;
+  const extra = Math.max(0, Math.floor(lead * progress.total) - progress.done);
+  if (extra <= 0) {
+    return { split, fix, improve };
+  }
+  const toFixes = Math.min(extra, fixes - fixesDone);
+  const reachFix = fixes === 0 ? 0 : (fixesDone + toFixes) / fixes;
+  const reachImprove = Math.min(1, (improvements.done + extra - toFixes) / improvements.total);
+  return { split, fix, improve, reach: { fix: reachFix, improve: reachImprove } };
+};
+var arcRing = (progress, done, text2) => {
+  const kinds = kindArcsOf(progress, done);
+  return kinds === void 0 ? { kind: "arc", done, text: text2 } : { kind: "arc", done, kinds, text: text2 };
+};
+var leadReach = (parts, shown2) => {
+  const open2 = parts.flatMap((part, index) => part.done ? [] : [index]);
+  const extra = Math.min(shown2 - (parts.length - open2.length), open2.length);
+  return extra > 1 ? open2[extra - 1] : void 0;
 };
 var fromProgress = (progress) => {
   const { kind, total, done } = progress;
@@ -6420,9 +6729,9 @@ var fromProgress = (progress) => {
   const text2 = progressText(progress, current);
   const flags = partsOf(progress);
   if (flags === void 0) {
-    return { kind: "arc", done: done / total, text: text2 };
+    return arcRing(progress, done / total, text2);
   }
-  const parts = files ? flags.map((part, index) => ({ share: part.share, done: index < done })) : flags;
+  const parts = files ? flags.map((part, index) => ({ share: part.share, done: index < done })) : withKinds(flags, progress);
   return current !== void 0 && current < parts.length ? { kind: "parts", parts, current, text: text2 } : { kind: "parts", parts, text: text2 };
 };
 var isAscendingCount = (value2, index, counts) => {
@@ -6516,10 +6825,10 @@ var fromFiles = (agent, progress, typical, forms) => {
   if (!filesLead && forms?.get(agent.id) !== legStart(agent)) {
     return { ...fromTypical(typical), text: text2 };
   }
-  const shown = Math.max(done, Math.floor(share2 * total));
-  const lit = parts.map((part, index) => ({ share: part.share, done: index < shown }));
-  if (shown < lit.length) {
-    return { kind: "parts", parts: lit, current: shown, text: text2 };
+  const shown2 = Math.max(done, Math.floor(share2 * total));
+  const lit = parts.map((part, index) => ({ share: part.share, done: index < shown2 }));
+  if (shown2 < lit.length) {
+    return { kind: "parts", parts: lit, current: shown2, text: text2 };
   }
   return { kind: "parts", parts: lit, text: text2 };
 };
@@ -6533,12 +6842,13 @@ var fromFixes = (agent, progress, phase, forms) => {
   const share2 = phaseShare(phase);
   const fixesLead = done > 0 && share2 <= done / total;
   const names = PHASE_NAMES.implement;
-  const lead = `Phase ${phase + 1} of ${names.length}: ${names[phase]}; fix items: ${done} of ${total} edited`;
+  const lead = `Phase ${phase + 1} of ${names.length}: ${names[phase]}; fix items: ${done} of ${total} edited${kindsText(progress)}`;
   const text2 = fixesLead ? progressText(progress, void 0) : lead;
-  const parts = partsOf(progress);
-  if (parts === void 0) {
-    return { kind: "arc", done: Math.max(done / total, share2), text: text2 };
+  const flags = partsOf(progress);
+  if (flags === void 0) {
+    return arcRing(progress, Math.max(done / total, share2), text2);
   }
+  const parts = withKinds(flags, progress);
   if (fixesLead) {
     forms?.set(agent.id, legStart(agent));
   }
@@ -6546,10 +6856,16 @@ var fromFixes = (agent, progress, phase, forms) => {
     const phases = PHASE_SHARES.implement.map((part, index) => ({ share: part, done: index < phase }));
     return { kind: "parts", parts: phases, current: phase, text: text2 };
   }
-  const shown = Math.max(done, Math.floor(share2 * total));
-  const lit = parts.map((part, index) => ({ share: part.share, done: index < shown }));
-  if (shown < lit.length) {
-    return { kind: "parts", parts: lit, current: shown, text: text2 };
+  const shown2 = Math.max(done, Math.floor(share2 * total));
+  const kinds = parts.some((part) => part.kind !== void 0);
+  const lit = kinds ? parts : parts.map((part, index) => ({ share: part.share, done: index < shown2 }));
+  const current = lit.findIndex((part) => !part.done);
+  const reach = kinds ? leadReach(lit, shown2) : void 0;
+  if (current >= 0 && reach !== void 0) {
+    return { kind: "parts", parts: lit, current, reach, text: text2 };
+  }
+  if (current >= 0) {
+    return { kind: "parts", parts: lit, current, text: text2 };
   }
   return { kind: "parts", parts: lit, text: text2 };
 };
@@ -6600,13 +6916,45 @@ var partArcs = (parts) => {
   }
   return arcs;
 };
+var kindArcs = (kinds) => {
+  const improve = { kind: "improve", done: kinds.improve, reach: kinds.reach?.improve ?? kinds.improve };
+  if (kinds.split <= 0) {
+    return [{ ...improve, from: 0, to: 1 }];
+  }
+  const fix = { kind: "fix", done: kinds.fix, reach: kinds.reach?.fix ?? kinds.fix, from: PART_GAP / 2, to: kinds.split - PART_GAP / 2 };
+  return [fix, { ...improve, from: kinds.split + PART_GAP / 2, to: 1 - PART_GAP / 2 }];
+};
+var kindPoint = (arc, share2) => arc.from + (arc.to - arc.from) * share2;
+var kindLight = (kinds) => {
+  const arcs = kindArcs(kinds);
+  const open2 = arcs.find((arc) => arc.done < 1);
+  if (open2 === void 0) {
+    return { from: 0, to: 1 };
+  }
+  const from = kindPoint(open2, open2.done);
+  const reached = arcs.filter((arc) => arc.reach > arc.done).map((arc) => kindPoint(arc, arc.reach));
+  return { from, to: reached.length > 0 ? Math.max(...reached) : open2.to };
+};
 var lightArc = (ring) => {
   if (ring.kind === "parts") {
-    return ring.current === void 0 ? { from: 0, to: 1 } : partArcs(ring.parts)[ring.current];
+    if (ring.current === void 0) {
+      return { from: 0, to: 1 };
+    }
+    const arcs = partArcs(ring.parts);
+    const reach = ring.reach !== void 0 && ring.reach > ring.current ? arcs[ring.reach] : void 0;
+    return reach === void 0 ? arcs[ring.current] : { from: arcs[ring.current].from, to: reach.to };
+  }
+  if (ring.kinds !== void 0) {
+    return kindLight(ring.kinds);
   }
   return ring.done > 0 && ring.done < 1 && ring.atHold !== true ? { from: ring.done, to: 1 } : { from: 0, to: 1 };
 };
-var isFull = (ring) => ring.kind === "parts" ? ring.parts.every((part) => part.done) : ring.done >= 1 || ring.atHold === true;
+var isFull = (ring) => {
+  if (ring.kind === "parts") {
+    return ring.parts.every((part) => part.done);
+  }
+  return ring.kinds === void 0 ? ring.done >= 1 || ring.atHold === true : kindArcs(ring.kinds).every((arc) => arc.done >= 1);
+};
 var lightSeconds = (arc) => Math.min(LIGHT_MAX_SECONDS, Math.max(LIGHT_MIN_SECONDS, (arc.to - arc.from) * LIGHT_SECONDS_PER_TURN));
 var keyPhase = (key) => {
   let hash = 0;
@@ -6617,9 +6965,9 @@ var keyPhase = (key) => {
 };
 var shapeOf = (ring, radius) => {
   if (ring.kind === "parts") {
-    return `parts|${radius}|${ring.parts.map((part) => round3(part.share)).join(" ")}`;
+    return `parts|${radius}|${ring.parts.map((part) => `${round3(part.share)}${part.kind ?? ""}`).join(" ")}`;
   }
-  return `arc|${radius}`;
+  return ring.kinds === void 0 ? `arc|${radius}` : `arcs|${radius}|${round3(ring.kinds.split)}`;
 };
 var childrenOf = (group, name) => [...group.children].filter((child) => child.classList.contains(name));
 var pendingArcs = /* @__PURE__ */ new WeakMap();
@@ -6642,13 +6990,22 @@ var drawLight = (arc, r, phase) => {
   });
   return light;
 };
+var partClass = (part) => part.kind === void 0 ? "progress-part" : `progress-part ${part.kind}`;
 var drawShape = (ring, radius) => {
   const r = radius + RING_GAP;
   if (ring.kind === "parts") {
-    return partArcs(ring.parts).map((arc) => svgEl("path", { class: "progress-part", d: arcPath(r, arc.from, arc.to) }));
+    const arcs = partArcs(ring.parts);
+    return ring.parts.map((part, index) => svgEl("path", { class: partClass(part), d: arcPath(r, arcs[index].from, arcs[index].to) }));
+  }
+  if (ring.kinds !== void 0) {
+    return kindArcs(ring.kinds).flatMap((arc) => {
+      const d = arcPath(r, arc.from, arc.to);
+      return [svgEl("path", { class: `progress-track ${arc.kind}`, d }), svgEl("path", { class: `progress-done ${arc.kind}`, d, pathLength: 100 })];
+    });
   }
   return [svgEl("circle", { class: "progress-track", r: round3(r) }), svgEl("path", { class: "progress-done", d: arcPath(r, 0, 1), pathLength: 100 })];
 };
+var dashOf = (done) => done >= 1 ? "none" : `${round3(done * 100)} 100`;
 var placeLight = (group, ring, draw2) => {
   const light = childrenOf(group, "progress-light")[0];
   const wanted = !draw2.still || ring.kind === "parts" && ring.current !== void 0;
@@ -6684,9 +7041,11 @@ var updateProgressRing = (group, ring, draw2) => {
   group.classList.toggle("still", draw2.still);
   if (ring.kind === "parts") {
     childrenOf(group, "progress-part").forEach((part, index) => part.classList.toggle("done", ring.parts[index]?.done === true));
+  } else if (ring.kinds !== void 0) {
+    const kinds = ring.kinds;
+    childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", dashOf(arc.classList.contains("improve") ? kinds.improve : kinds.fix)));
   } else {
-    const dash = ring.done >= 1 ? "none" : `${round3(ring.done * 100)} 100`;
-    childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", dash));
+    childrenOf(group, "progress-done").forEach((arc) => setStyle(arc, "stroke-dasharray", dashOf(ring.done)));
   }
   placeLight(group, ring, draw2);
 };
@@ -6991,12 +7350,12 @@ var compareRows = (a, b) => {
   const recency = (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt);
   return recency !== 0 ? recency : a.id.localeCompare(b.id);
 };
-var moreText = (rows, shown, showAll) => {
-  const hidden = rows.length - shown;
+var moreText = (rows, shown2, showAll) => {
+  const hidden = rows.length - shown2;
   if (hidden <= 0) {
     return void 0;
   }
-  const kinds = rows.slice(shown).some((row2) => row2.state === "stale") ? "finished or stale" : "finished";
+  const kinds = rows.slice(shown2).some((row2) => row2.state === "stale") ? "finished or stale" : "finished";
   return showAll ? "Show fewer" : `Show all ${rows.length} agents (${hidden} more ${kinds})`;
 };
 var sessionTableModel = (session, config, showAll) => {
@@ -7006,9 +7365,9 @@ var sessionTableModel = (session, config, showAll) => {
   const activeSubagents = subagents.filter((row2) => row2.active).length;
   const active = activeSubagents + mains.filter((row2) => row2.state !== "done").length;
   const finished = subagents.length - activeSubagents;
-  const shown = mains.length + activeSubagents + Math.min(finished, Math.max(2, 4 - active));
+  const shown2 = mains.length + activeSubagents + Math.min(finished, Math.max(2, 4 - active));
   const rows = [...mains, ...subagents];
-  return { rows, shown, more: moreText(rows, shown, showAll) };
+  return { rows, shown: shown2, more: moreText(rows, shown2, showAll) };
 };
 var pad2 = (value2) => String(value2).padStart(2, "0");
 var sinceStart = (ms) => {
@@ -7156,15 +7515,16 @@ var firstLine = (text2) => {
   return "";
 };
 var replyCount = (count) => count === 1 ? "1 reply" : `${count} replies`;
+var isProgress2 = (message) => message.progress === true;
 var stripModel = (messages, waits = () => false) => {
   const newest2 = messages.at(-1);
   if (!newest2) {
     return void 0;
   }
-  const waiting = waits(newest2);
-  const shown = newest2.kind === "plan" || newest2.kind === "ask" && waiting;
-  const label = shown ? KIND_LABEL[newest2.kind] : "";
-  const count = replyCount(messages.length);
+  const waiting = !isProgress2(newest2) && waits(newest2);
+  const shown2 = !isProgress2(newest2) && (newest2.kind === "plan" || newest2.kind === "ask" && waiting);
+  const label = shown2 ? KIND_LABEL[newest2.kind] : "";
+  const count = replyCount(messages.filter((message) => !isProgress2(message)).length);
   return { id: newest2.id, text: firstLine(newest2.text), kind: newest2.kind, label, at: parseTime(newest2.at), count, waiting };
 };
 var sessionStillWaits = (message, session) => {
@@ -7182,14 +7542,15 @@ var sessionStripModel = (session) => {
   const waits = (message) => sessionStillWaits(message, session);
   return stripModel(session.messages, waits);
 };
+var sessionWorking = (session, now) => mainWorking(sessionTurnFields(session), now);
 var holdsMessage = (session, messageId) => {
   return messageId !== "" && session.messages.some((message) => message.id === messageId);
 };
 var gateMessage = (session, questionIds2) => {
   const ids = new Set(questionIds2);
   const linked = session.questions.filter((question) => ids.has(question.id) && holdsMessage(session, question.messageId ?? ""));
-  const newestFirst3 = linked.sort((a, b) => (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0));
-  return (newestFirst3.find((question) => question.state === "open") ?? newestFirst3[0])?.messageId;
+  const newestFirst4 = linked.sort((a, b) => (parseTime(b.createdAt) ?? 0) - (parseTime(a.createdAt) ?? 0));
+  return (newestFirst4.find((question) => question.state === "open") ?? newestFirst4[0])?.messageId;
 };
 var pad3 = (value2) => String(value2).padStart(2, "0");
 var timeOfDay = (at) => {
@@ -7227,7 +7588,6 @@ var DEVELOPER_WHO = { prompt: "you", answer: "you answered" };
 var NO_MESSAGE_TEXT = "No message from you in this turn";
 var UNKNOWN_REPORTER = "a subagent";
 var PENDING_TEXT = {
-  working: "The main thread is working on your message.",
   waiting: "The main thread is waiting for your answer.",
   idle: "The main thread stopped without a reply.",
   ended: "The session ended before the main thread replied."
@@ -7254,9 +7614,7 @@ var toDeveloperEntry = (message) => {
   };
 };
 var timeOf2 = (item2) => parseTime(item2.at) ?? Number.NEGATIVE_INFINITY;
-var byTime = (items) => {
-  return [...items].sort((a, b) => timeOf2(a) - timeOf2(b) || (a.id < b.id ? -1 : Number(a.id > b.id)));
-};
+var byTime = (items) => [...items].sort((a, b) => timeOf2(a) - timeOf2(b));
 var turnNote = (reply, source) => {
   if (reply?.startedBy === void 0) {
     return { kind: "none", text: NO_MESSAGE_TEXT };
@@ -7264,46 +7622,99 @@ var turnNote = (reply, source) => {
   const name = source.reporter?.(reply.startedBy) ?? UNKNOWN_REPORTER;
   return { kind: "report", text: `after the report of ${name}` };
 };
-var toTurn = (developer, reply, source) => {
-  const entries = developer.map(toDeveloperEntry);
+var toTurn = (parts, reply, source) => {
+  const entries = parts.developer.map(toDeveloperEntry);
+  const progress = parts.progress.map(toEntry);
   const replyEntry = reply ? toEntry(reply) : void 0;
-  const first = entries[0] ?? replyEntry;
-  const note = source.developerMessages !== void 0 && entries.length === 0 ? turnNote(reply, source) : void 0;
-  return { key: first?.id ?? "", developer: entries, reply: replyEntry, note, time: first?.time ?? "", dateTime: first?.dateTime ?? "", at: first?.at };
+  const first = entries[0] ?? progress[0] ?? replyEntry;
+  const note = source.developerMessages !== void 0 && entries.length === 0 ? turnNote(reply ?? parts.progress[0], source) : void 0;
+  const key = entries[0]?.id ?? `after:${parts.before?.id ?? ""}`;
+  return { key, developer: entries, progress, reply: replyEntry, note, time: first?.time ?? "", dateTime: first?.dateTime ?? "", at: first?.at };
 };
-var pendingState = (source, newest2) => {
+var NEVER = Number.NEGATIVE_INFINITY;
+var openStart = (open2) => {
+  const starts = [...open2.developer.map(timeOf2), ...open2.progress.map((message) => parseTime(message.turnStartedAt) ?? NEVER)];
+  if (starts.length > 0) {
+    return Math.max(...starts);
+  }
+  return open2.before === void 0 ? void 0 : timeOf2(open2.before);
+};
+var QUIET_TURN_MS = 3 * 60 * 1e3;
+var inTurn = (source, start) => {
+  if (start === void 0 || source.main === void 0 || source.main === "ended" || source.failed === true) {
+    return false;
+  }
+  return source.main === "working" || (parseTime(source.idleSince) ?? NEVER) < start;
+};
+var quietAt = (source, open2, start) => {
+  if (source.callOpen === true) {
+    return void 0;
+  }
+  const turnStart = parseTime(source.turnStartedAt) ?? NEVER;
+  return Math.max(start, turnStart, ...open2.progress.map(timeOf2), parseTime(source.lastCallAt) ?? NEVER) + QUIET_TURN_MS;
+};
+var openState = (source, open2, now) => {
+  const start = openStart(open2);
+  const working = inTurn(source, start);
+  if (!working && open2.developer.length === 0 && open2.progress.length === 0) {
+    return void 0;
+  }
   if (source.main === "ended") {
-    return "ended";
+    return { state: "ended", typing: false, quietAt: void 0 };
   }
-  const newestAt = timeOf2(newest2);
-  const asked = (source.openQuestionsAt ?? []).some((at) => (parseTime(at) ?? Number.NEGATIVE_INFINITY) > newestAt);
-  if (asked) {
-    return "waiting";
+  if ((source.blockingQuestionsAt ?? []).some((at) => (parseTime(at) ?? NEVER) > (start ?? NEVER))) {
+    return { state: "waiting", typing: false, quietAt: void 0 };
   }
-  const idle = source.main === "idle" && (parseTime(source.idleSince) ?? Number.NEGATIVE_INFINITY) >= newestAt;
-  return idle ? "idle" : "working";
+  if (!working || start === void 0) {
+    return { state: "idle", typing: false, quietAt: void 0 };
+  }
+  const quiet = quietAt(source, open2, start);
+  const typing = now === void 0 || quiet === void 0 || now < quiet;
+  return { state: "working", typing, quietAt: typing ? quiet : void 0 };
 };
-var turnsModel = (source) => {
-  const replies = byTime(source.messages);
+var mainWorking = (source, now) => {
+  if (source.developerMessages === void 0) {
+    return false;
+  }
+  const before = byTime(source.messages.filter((message) => !isProgress2(message))).at(-1);
+  const after = before === void 0 ? NEVER : timeOf2(before);
+  const developer = source.developerMessages.filter((message) => timeOf2(message) > after);
+  const progress = source.messages.filter((message) => isProgress2(message) && timeOf2(message) > after);
+  return openState(source, { developer, progress, before }, now)?.typing === true;
+};
+var endOfTurn = (items, from, reply) => {
+  let next = from;
+  while (next < items.length && timeOf2(items[next]) <= timeOf2(reply)) {
+    next += 1;
+  }
+  return next;
+};
+var turnsModel = (source, now) => {
+  const messages = byTime(source.messages);
+  const replies = messages.filter((message) => !isProgress2(message));
+  const progress = messages.filter(isProgress2);
   const developer = byTime(source.developerMessages ?? []);
   const turns = [];
-  let next = 0;
+  let nextDeveloper = 0;
+  let nextProgress = 0;
+  let before;
   for (const reply of replies) {
-    const start = next;
-    while (next < developer.length && timeOf2(developer[next]) <= timeOf2(reply)) {
-      next += 1;
-    }
-    turns.push(toTurn(developer.slice(start, next), reply, source));
+    const turnDeveloper = developer.slice(nextDeveloper, endOfTurn(developer, nextDeveloper, reply));
+    const turnProgress = progress.slice(nextProgress, endOfTurn(progress, nextProgress, reply));
+    nextDeveloper += turnDeveloper.length;
+    nextProgress += turnProgress.length;
+    turns.push(toTurn({ developer: turnDeveloper, progress: turnProgress, before }, reply, source));
+    before = reply;
   }
-  const rest = developer.slice(next);
-  const newest2 = rest.at(-1);
-  const pending = newest2 ? pendingState(source, newest2) : void 0;
-  if (rest.length > 0) {
-    turns.push(toTurn(rest, void 0, source));
+  const open2 = { developer: developer.slice(nextDeveloper), progress: progress.slice(nextProgress), before };
+  const state = source.developerMessages === void 0 ? void 0 : openState(source, open2, now);
+  if (state !== void 0) {
+    turns.push(toTurn(open2, void 0, source));
   }
-  const newestFirst3 = turns.reverse();
+  const newestFirst4 = turns.reverse();
   const count = source.developerMessages === void 0 ? void 0 : developer.length;
-  return { latest: newestFirst3[0], pending, earlier: newestFirst3.slice(1), replies: replies.length, developer: count };
+  const card = { pending: state?.state, typing: state?.typing === true, quietAt: state?.quietAt };
+  return { latest: newestFirst4[0], ...card, earlier: newestFirst4.slice(1), replies: replies.length, developer: count };
 };
 var messagePlace = (model, messageId) => {
   if (messageId === void 0) {
@@ -7314,12 +7725,35 @@ var messagePlace = (model, messageId) => {
   }
   return model.earlier.some((turn) => turn.reply?.id === messageId) ? "earlier" : void 0;
 };
+var mainCalls = (agent) => {
+  const calls = {};
+  if (agent?.state === "failed") {
+    calls.failed = true;
+  }
+  if (agent?.now !== void 0) {
+    calls.callOpen = true;
+  }
+  const newest2 = agent?.now ?? agent?.recent.at(-1);
+  const at = agent?.now === void 0 ? newest2?.endedAt ?? newest2?.startedAt : newest2?.startedAt;
+  if (at !== void 0) {
+    calls.lastCallAt = at;
+  }
+  return calls;
+};
 var sessionMain = (session) => {
   if (session.endedAt !== void 0) {
     return { main: "ended" };
   }
-  const idleSince = ownValue(session.agents, MAIN_AGENT)?.idleSince;
-  return idleSince === void 0 ? { main: "working" } : { main: "idle", idleSince };
+  const agent = ownValue(session.agents, MAIN_AGENT);
+  const idleSince = agent?.idleSince;
+  const state = idleSince === void 0 ? { main: "working" } : { main: "idle", idleSince };
+  return { ...state, ...mainCalls(agent) };
+};
+var sessionTurnFields = (session) => {
+  const asked = session.questions.filter((question) => question.audience === "user" && question.state === "open" && question.blocking);
+  const developer = { developerMessages: session.developerMessages, blockingQuestionsAt: asked.map((question) => question.createdAt) };
+  const turn = session.turnStartedAt === void 0 ? {} : { turnStartedAt: session.turnStartedAt };
+  return { messages: session.messages, ...developer, ...turn, ...sessionMain(session) };
 };
 var sessionSource = (session) => {
   const heading2 = sessionHeading(session);
@@ -7328,9 +7762,7 @@ var sessionSource = (session) => {
     return agent ? agentName(session, agent) : UNKNOWN_REPORTER;
   };
   const title = modalTitle({ key: session.key, title: heading2, branch: heading2 });
-  const asked = session.questions.filter((question) => question.audience === "user" && question.state === "open");
-  const developer = { developerMessages: session.developerMessages, openQuestionsAt: asked.map((question) => question.createdAt) };
-  return { id: session.id, title, key: session.key, messages: session.messages, ...developer, ...sessionMain(session), reporter };
+  return { id: session.id, title, key: session.key, ...sessionTurnFields(session), reporter };
 };
 var createSessionModalSource = (sessions, sessionId, fallback = () => void 0) => {
   let memo;
@@ -7459,6 +7891,7 @@ var BUBBLE_SHIFT_PX = 12;
 var WORKING_DELAY_MS = 120;
 var WORKING_FADE_MS = 300;
 var REPLY_FADE_MS = 300;
+var TYPING_FADE_MS = 200;
 var TURN_TOGGLE_MS = 400;
 var LINES_FADE_MS = 160;
 var FULL_FADE_MS = 280;
@@ -7719,7 +8152,9 @@ var fadeFrom = (element, from, duration3, delay = 0) => {
 };
 var play = (element, frames, options) => {
   fades.get(element)?.cancel();
-  fades.set(element, element.animate(frames, options));
+  const animation = element.animate(frames, options);
+  fades.set(element, animation);
+  return animation;
 };
 var stopFade = (element) => {
   fades.get(element)?.cancel();
@@ -7836,6 +8271,85 @@ var fillBubbles = (group, bubbles, entries, agoId, reducedMotion) => {
   group.hidden = entries.length === 0;
   return added;
 };
+var TYPING_LABEL = "The main thread is writing";
+var createTyping = (small = false) => {
+  const bubble = el("span", small ? "main-typing small" : "main-typing");
+  bubble.setAttribute("role", "img");
+  bubble.setAttribute("aria-label", TYPING_LABEL);
+  bubble.append(el("i"), el("i"), el("i"));
+  bubble.hidden = true;
+  return bubble;
+};
+var leaving = /* @__PURE__ */ new WeakMap();
+var endLeave = (bubble) => {
+  leaving.get(bubble)?.cancel();
+  leaving.delete(bubble);
+  bubble.classList.remove("leaving");
+  bubble.removeAttribute("aria-hidden");
+};
+var setTyping = (bubble, show, animate) => {
+  const out = leaving.get(bubble);
+  const shown2 = !bubble.hidden && out === void 0;
+  const going = bubble.hidden || out !== void 0 && animate;
+  if (show ? shown2 : going) {
+    return;
+  }
+  const from = animate && out !== void 0 ? opacityNow(bubble) : 0;
+  endLeave(bubble);
+  if (show) {
+    bubble.hidden = false;
+    if (animate) {
+      fadeFrom(bubble, from, TYPING_FADE_MS);
+    }
+    return;
+  }
+  if (!animate) {
+    stopFade(bubble);
+    bubble.hidden = true;
+    return;
+  }
+  const opacity = opacityNow(bubble);
+  stopFade(bubble);
+  bubble.style.setProperty("--typing-top", `${bubble.offsetTop}px`);
+  bubble.style.setProperty("--typing-left", `${bubble.offsetLeft}px`);
+  bubble.classList.add("leaving");
+  bubble.setAttribute("aria-hidden", "true");
+  const animation = bubble.animate([{ opacity }, { opacity: 0 }], { duration: TYPING_FADE_MS, easing: OPEN_EASE, fill: "forwards" });
+  leaving.set(bubble, animation);
+  const gone = () => {
+    if (leaving.get(bubble) === animation) {
+      endLeave(bubble);
+      bubble.hidden = true;
+    }
+  };
+  animation.finished.then(gone, noop);
+};
+var createRailEntry = () => {
+  const element = el("li", "main-rail-entry");
+  const time2 = el("time", "main-rail-time");
+  const dot = el("i");
+  dot.setAttribute("aria-hidden", "true");
+  const body = el("div", "main-rail-body");
+  const text2 = el("div", "main-rail-text");
+  const cut = el("p", "main-cut");
+  body.append(text2, cut);
+  element.append(time2, dot, body);
+  let textKey;
+  return {
+    element,
+    fill(entry) {
+      setText(time2, entry.time);
+      time2.dateTime = entry.dateTime;
+      time2.title = fullTime(entry.at);
+      if (textKey !== entry.text) {
+        textKey = entry.text;
+        drawMessageText(text2, entry.text);
+      }
+      setText(cut, entry.cut);
+      cut.hidden = entry.cut === "";
+    }
+  };
+};
 var fillReportNote = (element, turn) => {
   const report = turn.note?.kind === "report" ? turn.note.text : "";
   setText(element, report);
@@ -7848,14 +8362,46 @@ var createReplyCard = () => {
   const time2 = el("time", "main-time");
   const ago2 = el("span", "main-ago");
   head.append(kind, time2, ago2);
+  const rail = el("ol", "main-rail");
+  rail.setAttribute("aria-label", "Progress messages");
+  rail.hidden = true;
   const text2 = el("div", "main-text");
   const cut = el("p", "main-cut");
-  element.append(head, text2, cut);
+  element.append(head, rail, text2, cut);
+  const steps = /* @__PURE__ */ new Map();
   let drawnId;
   return {
     element,
     parts: [head, text2, cut],
     ago: ago2,
+    rail,
+    fillRail(entries) {
+      const keep2 = new Set(entries.map((entry) => entry.id));
+      for (const [id, step] of steps) {
+        if (!keep2.has(id)) {
+          step.element.remove();
+          steps.delete(id);
+        }
+      }
+      const added = [];
+      let previous = null;
+      for (const entry of entries) {
+        let step = steps.get(entry.id);
+        if (step === void 0) {
+          step = createRailEntry();
+          steps.set(entry.id, step);
+          added.push(step.element);
+        }
+        step.fill(entry);
+        const expected = previous ? previous.nextElementSibling : rail.firstElementChild;
+        if (step.element !== expected) {
+          rail.insertBefore(step.element, expected);
+        }
+        previous = step.element;
+      }
+      rail.hidden = entries.length === 0;
+      return added;
+    },
     fill(entry) {
       element.dataset.kind = entry.kind;
       setText(kind, entry.label);
@@ -7970,6 +8516,7 @@ var createTurnCard = (reducedMotion) => {
       if (entry) {
         reply.fill(entry);
       }
+      reply.fillRail(turn.progress);
       if (open2) {
         bubbles.forEach((bubble) => bubble.measure());
       }
@@ -8019,6 +8566,12 @@ var drawHealthTitle = (title, text2) => {
 var HEALTH_DELAYED_PARTS = 6;
 var HEALTH_CLOSE_STAGGER_MS = 20;
 var HEALTH_CLOSE_DELAYED = 3;
+var MODE_LABELS = {
+  main: { tag: "main", close: "Close messages", region: "Messages" },
+  health: { tag: "health", close: "Close workflow health", region: "Workflow health report" },
+  changelog: { tag: "changelog", close: "Close changelog", region: "Changelog" }
+};
+var CHANGELOG_TITLE = "Changelog";
 var modal;
 var openMainThreadModal = (request) => {
   modal ??= createModal();
@@ -8027,6 +8580,10 @@ var openMainThreadModal = (request) => {
 var openHealthReport = (request) => {
   modal ??= createModal();
   modal.openHealth(request);
+};
+var openChangelog = (request) => {
+  modal ??= createModal();
+  modal.openChangelog(request);
 };
 var mainThreadModalFrom = () => modal?.from();
 var rectOf = (element) => {
@@ -8098,7 +8655,8 @@ var createModal = () => {
   const latestReply = createReplyCard();
   const latest = latestReply.element;
   const working = el("p", "main-working");
-  latest.append(working);
+  const latestTyping = createTyping();
+  latest.append(working, latestTyping);
   latestArea.append(latestGroup, latestNote, latest);
   const earlier = el("section", "main-earlier");
   earlier.setAttribute("aria-label", "Earlier turns");
@@ -8119,7 +8677,8 @@ var createModal = () => {
     show: (sessionId) => showSession(sessionId),
     reducedMotion: () => reducedMotion()
   });
-  scroll.append(empty, latestArea, earlier, reportView.element);
+  const changelogView = createChangelogView({ reducedMotion: () => reducedMotion(), toggled: () => updateScrollStop() });
+  scroll.append(empty, latestArea, earlier, reportView.element, changelogView.element);
   box.append(header, rule, scroll);
   const riders = [header, rule, scroll];
   root.append(backdrop, box);
@@ -8128,6 +8687,7 @@ var createModal = () => {
   let token = 0;
   let request;
   let health;
+  let changelog;
   let opened;
   let mode = "main";
   let drawnReport;
@@ -8144,6 +8704,7 @@ var createModal = () => {
   const turns = /* @__PURE__ */ new Map();
   let anchor;
   let drawnPending;
+  let drawnTyping;
   let ghost;
   let motion = [];
   let lifted = [];
@@ -8240,7 +8801,7 @@ var createModal = () => {
     earlierToggle.setAttribute("aria-expanded", String(open3));
     earlierWrap.inert = !open3;
   };
-  const reducedMotion = () => health ? motionQuery.matches : request?.context.reducedMotion() ?? true;
+  const reducedMotion = () => health || changelog ? motionQuery.matches : request?.context.reducedMotion() ?? true;
   const setTagLabel = (label) => {
     if (tag.textContent !== label) {
       tag.replaceChildren(...mainTag(label).childNodes);
@@ -8248,20 +8809,21 @@ var createModal = () => {
   };
   const setMode = (next) => {
     mode = next;
-    const healthMode = next === "health";
-    box.classList.toggle("health-mode", healthMode);
-    setTagLabel(healthMode ? "health" : "main");
-    close.setAttribute("aria-label", healthMode ? "Close workflow health" : "Close messages");
-    scroll.setAttribute("aria-label", healthMode ? "Workflow health report" : "Messages");
+    const labels = MODE_LABELS[next];
+    box.classList.toggle("health-mode", next === "health");
+    box.classList.toggle("changelog-mode", next === "changelog");
+    setTagLabel(labels.tag);
+    close.setAttribute("aria-label", labels.close);
+    scroll.setAttribute("aria-label", labels.region);
   };
   const drawnHeight = (element) => element.hidden ? 0 : element.getBoundingClientRect().height;
   const fadeOutPrevious = () => {
     ghost?.remove();
-    const shown = [...latestArea.children].filter((child) => child instanceof HTMLElement && !child.hidden);
+    const shown2 = [...latestArea.children].filter((child) => child instanceof HTMLElement && !child.hidden);
     const copy = el("div", "main-latest-ghost");
-    copy.append(...shown.map((child) => child.cloneNode(true)));
-    for (const named of copy.querySelectorAll("[id]")) {
-      named.removeAttribute("id");
+    copy.append(...shown2.map((child) => child.cloneNode(true)));
+    for (const named2 of copy.querySelectorAll("[id]")) {
+      named2.removeAttribute("id");
     }
     copy.setAttribute("aria-hidden", "true");
     copy.inert = true;
@@ -8275,9 +8837,35 @@ var createModal = () => {
     };
     copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FOLD_FADE_MS, easing: OPEN_EASE, fill: "forwards" }).finished.then(gone, gone);
   };
+  const slides = /* @__PURE__ */ new WeakMap();
+  const drawnTop = (element) => {
+    return element.hidden ? void 0 : element.getBoundingClientRect().top - latest.getBoundingClientRect().top;
+  };
+  const areaTop = (element) => {
+    return element.hidden ? void 0 : element.getBoundingClientRect().top - latestArea.getBoundingClientRect().top;
+  };
+  const slideFrom2 = (element, from, topOf = drawnTop) => {
+    slides.get(element)?.cancel();
+    slides.delete(element);
+    const to = topOf(element);
+    if (from === void 0 || to === void 0 || Math.abs(to - from) < 0.5) {
+      return;
+    }
+    const frames = [{ transform: `translateY(${from - to}px)` }, { transform: "none" }];
+    slides.set(element, element.animate(frames, { duration: TURN_HEIGHT_MS, easing: OPEN_EASE }));
+  };
+  const growNoteIn = () => {
+    const height = latestNote.getBoundingClientRect().height;
+    const margin = getComputedStyle(latestNote).marginBottom;
+    const frames = [{ height: "0px", marginBottom: "0px", opacity: 0 }, { height: `${height}px`, marginBottom: margin, opacity: 1 }];
+    latestNote.classList.add("sizing");
+    const done = () => latestNote.classList.remove("sizing");
+    play(latestNote, frames, { duration: TURN_HEIGHT_MS, easing: OPEN_EASE }).finished.then(done, done);
+  };
   const fillLatest = (model, animate) => {
     const turn = model.latest;
-    const key = JSON.stringify([turn?.key, turn?.reply?.id, turn?.developer.map((entry) => entry.id), turn?.note, model.pending]);
+    const steps = turn?.progress.map((entry) => entry.id);
+    const key = JSON.stringify([turn?.key, turn?.reply?.id, turn?.developer.map((entry) => entry.id), steps, turn?.note, model.pending, model.typing]);
     const changed = key !== areaKey;
     areaKey = key;
     const shape = turn ? { key: turn.key, reply: turn.reply?.id } : void 0;
@@ -8285,10 +8873,17 @@ var createModal = () => {
     const folds = animate && change === "turn" && latestShape !== void 0 && turn !== void 0 && !earlierOpen;
     latestShape = shape;
     const areaFrom = latestArea.hidden ? drawnHeight(empty) : drawnHeight(latestArea);
-    const cardTop = latest.getBoundingClientRect().top - latestArea.getBoundingClientRect().top;
-    const cardFrom = Math.max(0, Math.min(drawnHeight(latest), areaFrom - cardTop));
+    const cardFrom = drawnHeight(latest);
+    const inPlace = change === "reply" || change === "same";
+    const railFrom = animate && changed ? drawnTop(latestReply.rail) : void 0;
+    const typingFrom = animate && changed ? drawnTop(latestTyping) : void 0;
+    const noteHidden = latestNote.hidden;
     const pendingChanged = change === "same" && drawnPending !== void 0 && model.pending !== void 0 && drawnPending !== model.pending;
     drawnPending = model.pending;
+    const typingChanged = change === "same" && drawnTyping !== void 0 && drawnTyping !== model.typing;
+    drawnTyping = model.typing;
+    const cardTopFrom = animate && changed ? areaTop(latest) : void 0;
+    const noteTopFrom = animate && changed ? areaTop(latestNote) : void 0;
     const latestOpacity = changed ? opacityNow(latest) : 1;
     const noteOpacity = changed ? opacityNow(latestNote) : 1;
     if (changed) {
@@ -8306,6 +8901,8 @@ var createModal = () => {
     if (folds && changed) {
       fadeOutPrevious();
     }
+    const writing = turn !== void 0 && model.typing;
+    setTyping(latestTyping, writing, animate && inPlace);
     latestArea.hidden = turn === void 0;
     empty.hidden = turn !== void 0;
     latestAt = turn?.reply?.at;
@@ -8317,10 +8914,13 @@ var createModal = () => {
     fillReportNote(latestNote, turn);
     latest.classList.toggle("working", model.pending !== void 0);
     latest.dataset.pending = model.pending ?? "";
-    setText(working, model.pending === void 0 ? "" : PENDING_TEXT[model.pending]);
+    const pendingText = model.pending === void 0 || model.pending === "working" ? "" : PENDING_TEXT[model.pending];
+    setText(working, pendingText);
+    working.hidden = pendingText === "";
     if (turn.reply) {
       latestReply.fill(turn.reply);
     }
+    const addedSteps = latestReply.fillRail(turn.progress);
     for (const bubble of latestBubbles.values()) {
       bubble.measure();
     }
@@ -8329,8 +8929,23 @@ var createModal = () => {
     }
     const delay = folds ? FOLD_FADE_MS : 0;
     growFrom(latestArea, areaFrom, TURN_HEIGHT_MS);
-    if (change === "reply" && added.length === 0) {
+    if ((change === "reply" || pendingChanged || typingChanged || inPlace && addedSteps.length > 0) && added.length === 0) {
       growFrom(latest, cardFrom, TURN_HEIGHT_MS);
+    }
+    if (inPlace && added.length > 0) {
+      slideFrom2(latestNote, noteTopFrom, areaTop);
+      slideFrom2(latest, cardTopFrom, areaTop);
+    }
+    const noteGrows = inPlace && noteHidden && !latestNote.hidden;
+    if (inPlace) {
+      for (const step of addedSteps) {
+        play(step, riseFrames(), { duration: SWAP_MS, easing: OPEN_EASE, fill: "backwards" });
+      }
+      slideFrom2(latestReply.rail, railFrom);
+      slideFrom2(latestTyping, typingFrom);
+    }
+    if (noteGrows) {
+      growNoteIn();
     }
     let entering = false;
     if (change === "reply") {
@@ -8348,6 +8963,8 @@ var createModal = () => {
     }
     if (!entering) {
       resumeFade(latest, latestOpacity);
+    }
+    if (!entering && !noteGrows) {
       resumeFade(latestNote, noteOpacity);
     }
     for (const bubble of added) {
@@ -8444,7 +9061,7 @@ var createModal = () => {
   };
   const render = (source, context, animate) => {
     drawn = source;
-    const model = turnsModel(source);
+    const model = turnsModel(source, context.now());
     drawnModel = model;
     const sub = modalSubtitle(context.config.repo, model.replies, model.developer);
     drawModalTitle(title, source, context.config.keyUrl);
@@ -8473,6 +9090,8 @@ var createModal = () => {
     latestShape = void 0;
     areaKey = void 0;
     drawnPending = void 0;
+    drawnTyping = void 0;
+    setTyping(latestTyping, false, false);
     anchor = void 0;
     ghost?.remove();
     ghost = void 0;
@@ -8524,6 +9143,9 @@ var createModal = () => {
     if (mode === "health") {
       return [head, ...reportView.parts().map((part) => [part])];
     }
+    if (mode === "changelog") {
+      return [head, ...changelogView.parts().map((part) => [part])];
+    }
     return [head, [latestArea.hidden ? empty : latestArea], earlier.hidden ? [] : [earlier]];
   };
   const openDelays = (contentAt, count) => {
@@ -8534,7 +9156,7 @@ var createModal = () => {
   };
   const closeDelays = (count) => {
     const reverse = (index) => Math.min(count - 1 - index, HEALTH_CLOSE_DELAYED) * HEALTH_CLOSE_STAGGER_MS;
-    return Array.from({ length: count }, (_, index) => mode === "health" ? reverse(index) : 0);
+    return Array.from({ length: count }, (_, index) => mode === "main" ? 0 : reverse(index));
   };
   const focusTarget = (current) => {
     if (isShown(current.opener)) {
@@ -8569,6 +9191,7 @@ var createModal = () => {
     phase = "closed";
     request = void 0;
     health = void 0;
+    changelog = void 0;
     opened = void 0;
     drawnReport = void 0;
     drawn = void 0;
@@ -8644,12 +9267,13 @@ var createModal = () => {
       closeAtOnce();
       return;
     }
-    if (source !== drawn && phase === "open") {
+    const clock = current.context.now();
+    const quiet = drawnModel?.quietAt !== void 0 && clock >= drawnModel.quietAt;
+    if ((source !== drawn || quiet) && phase === "open") {
       render(source, current.context, !current.context.reducedMotion());
     } else if (anchor) {
       holdScroll();
     }
-    const clock = current.context.now();
     const second = Math.floor(clock / 1e3);
     if (second !== lastSecond) {
       lastSecond = second;
@@ -8766,6 +9390,7 @@ var createModal = () => {
       prepare: (continuing) => {
         request = next;
         health = void 0;
+        changelog = void 0;
         if (!continuing) {
           reset();
         }
@@ -8795,6 +9420,7 @@ var createModal = () => {
       prepare: (continuing) => {
         health = next;
         request = void 0;
+        changelog = void 0;
         if (!continuing) {
           reportView.reset(next.filter);
           drawnReport = void 0;
@@ -8808,6 +9434,37 @@ var createModal = () => {
         const newest2 = next.report();
         if (animate && newest2 && newest2 !== drawnReport) {
           renderHealth(newest2, true);
+        }
+      }
+    });
+  };
+  const openChangelog2 = (next) => {
+    if (phase === "opening" || phase === "open") {
+      return;
+    }
+    form(next, "changelog", motionQuery.matches, {
+      prepare: (continuing) => {
+        changelog = next;
+        request = void 0;
+        health = void 0;
+        if (continuing) {
+          return;
+        }
+        drawHealthTitle(title, CHANGELOG_TITLE);
+        const sub = railSubtitle(next.rail);
+        setText(subtitle, sub);
+        subtitle.title = sub;
+        changelogView.draw(next.rail);
+        scroll.scrollTop = 0;
+      },
+      done: (animate) => {
+        const block = next.flash === void 0 ? void 0 : changelogView.block(next.flash);
+        if (!block) {
+          return;
+        }
+        scrollToShow(block, animate);
+        if (animate) {
+          block.animate(FLASH_ITEM, { duration: FLASH_ITEM_MS, easing: "ease" });
         }
       }
     });
@@ -8947,7 +9604,7 @@ var createModal = () => {
     }
   });
   setEarlierOpen(false);
-  return { open: open2, openHealth, from: () => opened ? fromOf(opened) : void 0 };
+  return { open: open2, openHealth, openChangelog: openChangelog2, from: () => opened ? fromOf(opened) : void 0 };
 };
 
 // src/ui/overview.ts
@@ -9276,8 +9933,8 @@ var createGlance = (context) => {
     setText(mergedText2, `${glance.merged} merged`);
   };
   const drawTokens = (glance) => {
-    const shown = glance.tokens > 0 ? glance.segments : [];
-    const present = new Set(shown.map((segment) => segment.stage));
+    const shown2 = glance.tokens > 0 ? glance.segments : [];
+    const present = new Set(shown2.map((segment) => segment.stage));
     for (const [stage, drawn] of segments) {
       if (!present.has(stage)) {
         drawn.element.remove();
@@ -9285,7 +9942,7 @@ var createGlance = (context) => {
       }
     }
     let previous;
-    for (const segment of shown) {
+    for (const segment of shown2) {
       let drawn = segments.get(segment.stage);
       if (!drawn) {
         drawn = { element: el("i"), width: "", color: "", title: "" };
@@ -9311,7 +9968,7 @@ var createGlance = (context) => {
       }
       previous = item2;
     }
-    bar.hidden = shown.length === 0;
+    bar.hidden = shown2.length === 0;
     setText(tokenText, glance.tokens > 0 ? `${tokens(glance.tokens)} \xB7 ${cost(glance.usd)}` : "none yet");
   };
   return {
@@ -9354,16 +10011,16 @@ var createOverview = (host, context, link, openHealth) => {
   let open2 = readValue(openKey, true) === "1";
   const layout = () => {
     branchesHost.hidden = !branches || branchesFailed || branches.isEmpty();
-    const shown = [branchesHost, ranking.element].filter((panel) => !panel.hidden).length;
-    section2.dataset.panels = String(shown);
-    element.hidden = shown === 0;
+    const shown2 = [branchesHost, ranking.element].filter((panel) => !panel.hidden).length;
+    section2.dataset.panels = String(shown2);
+    element.hidden = shown2 === 0;
   };
   const ranking = createRanking(
     context,
     link,
     openHealth,
-    (shown) => {
-      ranking.element.hidden = !shown;
+    (shown2) => {
+      ranking.element.hidden = !shown2;
       layout();
     },
     () => !open2
@@ -9789,8 +10446,8 @@ var agentColumn = (rows, agentId, branch, docsAgentId) => {
 };
 
 // src/ui/graph/columns.ts
-var buildColumns = (shown, natural, x0, room = {}) => {
-  const ids = STAGE_IDS.filter((id) => shown[id]);
+var buildColumns = (shown2, natural, x0, room = {}) => {
+  const ids = STAGE_IDS.filter((id) => shown2[id]);
   const byId = {};
   const columns = [];
   let x = x0;
@@ -9990,6 +10647,14 @@ var clickTarget = (layout, key) => {
   }
   return void 0;
 };
+var cardTarget = (layout, key) => {
+  const item2 = isCompactKey(key) ? void 0 : layout.items.find((entry) => entry.key === key);
+  if (item2?.kind !== "node" || item2.card === void 0 || item2.agentId === void 0) {
+    return void 0;
+  }
+  const { ref, startedAt } = item2.card;
+  return startedAt === void 0 ? { key, agentId: item2.agentId, ref } : { key, agentId: item2.agentId, ref, startedAt };
+};
 var recentlyHandled = (session, now) => session.questions.filter((question) => {
   const resolved = question.resolvedAt === void 0 ? NaN : Date.parse(question.resolvedAt);
   return question.audience === "main" && question.state === "handled" && resolved + HANDLED_CHECK_MS > now;
@@ -10042,6 +10707,70 @@ var fixCountOf = (session, reviewer) => {
   }
   const count = session.followups.filter((item2) => item2.type === "fix" && item2.origin.agentId === reviewer.agentId).length;
   return count > 0 ? { count } : {};
+};
+var improvementCountOf = (session, reviewer) => {
+  if (reviewer.state !== "approved" && reviewer.state !== "changes") {
+    return {};
+  }
+  const improvements = session.followups.filter((item2) => item2.type === "improve" && item2.origin.agentId === reviewer.agentId).length;
+  return improvements > 0 ? { improvements } : {};
+};
+var STATE_WORDS = {
+  pending: "pending",
+  running: "running",
+  done: "done",
+  approved: "approved",
+  changes: "changes requested",
+  handed: "stopped at budget",
+  waiting: "waiting for you",
+  failed: "failed",
+  skipped: "skipped"
+};
+var fixesText = (count) => count === 1 ? "1 fix" : `${count} fixes`;
+var improvementsText = (count) => count === 1 ? "1 improvement" : `${count} improvements`;
+var drawsText = (session, ref) => {
+  if (ref.kind === "fix") {
+    return "Fix";
+  }
+  if (ref.kind === "pr") {
+    const number = session.rows.find((row2) => row2.branch === ref.branch)?.pr?.pr?.number;
+    return number === void 0 ? "PR" : `PR #${number}`;
+  }
+  return ref.kind === "docs" ? "Docs" : void 0;
+};
+var nodeName = (session, item2, card) => {
+  const agentId = item2.agentId ?? "";
+  const role = ownValue(session.agents, agentId)?.role ?? agentId;
+  const state = item2.stale === true && item2.state === "running" ? "stale" : STATE_WORDS[item2.state];
+  const parts = [role, drawsText(session, card.ref), state];
+  if (item2.count !== void 0) {
+    parts.push(fixesText(item2.count));
+  }
+  if (item2.improvements !== void 0) {
+    parts.push(improvementsText(item2.improvements));
+  }
+  if (item2.progress !== void 0) {
+    parts.push(item2.progress.text);
+  }
+  return parts.filter((part) => part !== void 0 && part !== "").join(", ");
+};
+var withBadgeCorners = (items) => {
+  const cornered = /* @__PURE__ */ new Set();
+  for (const item2 of items) {
+    const onCorner = item2.kind === "bubble" || item2.kind === "node" && item2.key.startsWith(sessionKeys.handled(""));
+    if (onCorner && "key" in item2.at) {
+      cornered.add(item2.at.key);
+    }
+  }
+  return items.map((item2) => item2.kind === "node" && item2.improvements !== void 0 && cornered.has(item2.key) ? { ...item2, badgeLow: true } : item2);
+};
+var named = (session, item2) => {
+  if (item2.kind !== "node" || item2.card === void 0) {
+    return item2;
+  }
+  const node = { ...item2, name: nodeName(session, item2, item2.card) };
+  delete node.tip;
+  return node;
 };
 var PILL_LABEL_MAX = 40;
 var pillText = (row2) => row2.branchLabel === void 0 ? shortBranch(row2.branch) : clip2(labelText(row2.branchLabel), PILL_LABEL_MAX);
@@ -10111,8 +10840,8 @@ var loopSpecs = (row2, reOnly, sharedExit) => {
   });
 };
 var fixOffsets = (row2, loops) => {
-  const leaving = (index) => loops.filter((loop) => loop.fixIndex === index).length;
-  const pitches = row2.fixes.slice(1).map((_, index) => FIX_PITCH + Math.max(0, leaving(index) - 1) * LANE_STEP);
+  const leaving2 = (index) => loops.filter((loop) => loop.fixIndex === index).length;
+  const pitches = row2.fixes.slice(1).map((_, index) => FIX_PITCH + Math.max(0, leaving2(index) - 1) * LANE_STEP);
   const span = pitches.reduce((sum, pitch) => sum + pitch, 0);
   return row2.fixes.map((_, index) => pitches.slice(0, index).reduce((sum, pitch) => sum + pitch, 0) - span / 2);
 };
@@ -10175,7 +10904,7 @@ var withProgress = (layout, session, typical, forms) => {
     return { ...item2, progress: ring, tip: `${agent.role}
 ${ring.text}` };
   });
-  return { ...layout, items };
+  return { ...layout, items: withBadgeCorners(items).map((item2) => named(session, item2)) };
 };
 var placeSession = (session, options, room) => {
   const items = [];
@@ -10195,15 +10924,15 @@ var placeSession = (session, options, room) => {
     groups2.push(newGroup(0, void 0, false, false));
   }
   const current = groups2[groups2.length - 1];
-  const groupOf2 = (index) => groups2.find((group) => group.index === index) ?? current;
+  const groupOf3 = (index) => groups2.find((group) => group.index === index) ?? current;
   for (const row2 of session.rows) {
-    groupOf2(row2.pipeline).rows.push(row2);
+    groupOf3(row2.pipeline).rows.push(row2);
   }
   for (const agentId of session.planAgents.filter((id) => id !== docs?.agentId && session.agents[id] !== void 0)) {
-    groupOf2(session.agents[agentId].pipeline).agents.push(agentId);
+    groupOf3(session.agents[agentId].pipeline).agents.push(agentId);
   }
   const planAgents = groups2.filter((group) => !group.folded).flatMap((group) => group.agents);
-  const shown = {
+  const shown2 = {
     plan: true,
     implement: rows.length > 0,
     join: rows.some((row2) => row2.join !== void 0),
@@ -10214,7 +10943,7 @@ var placeSession = (session, options, room) => {
     promote: session.promote !== void 0,
     docs: docs !== void 0
   };
-  const wrap = options.wrap && LINE_B.some((id) => shown[id]);
+  const wrap = options.wrap && LINE_B.some((id) => shown2[id]);
   const plans = rows.map((row2) => {
     const pill = pillText(row2);
     const { parents, depths } = streamParents(row2.streams);
@@ -10243,7 +10972,7 @@ var placeSession = (session, options, room) => {
     plan.forkLane = plan.fromText !== void 0 && from?.kind === "branch" && planOf.has(from.branch);
   }
   for (const plan of plans) {
-    groupOf2(plan.row.pipeline).plans.push(plan);
+    groupOf3(plan.row.pipeline).plans.push(plan);
   }
   const carries = new Set(session.promote?.state === "waiting" ? session.promote.carries ?? [] : []);
   const promoted = rows.filter((row2) => promoteFeeder(row2, carries));
@@ -10376,7 +11105,7 @@ var placeSession = (session, options, room) => {
   const fixRight = Math.max(fixLeft, ...besideLabels.map((width2) => NODE_R2 + LABEL_GAP + width2 + 12));
   const mergeLabels = rows.filter(mergeDrawn).map((row2) => textWidth(mergeText(session, row2)));
   const mergeRowsDrawn = rows.filter(mergeDrawn);
-  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf2(row2.pipeline) === current) ?? mergeRowsDrawn[0];
+  const gateRowDrawn = mergeRowsDrawn.find((row2) => groupOf3(row2.pipeline) === current) ?? mergeRowsDrawn[0];
   const gateTarget = mergeRowsDrawn.find((row2) => row2.merge?.state === "waiting") ?? gateRowDrawn;
   const gateOnPromote = wrap && joined && gateTarget !== void 0 && planOf.get(gateTarget.branch) === promoteHost;
   const natural = {
@@ -10389,9 +11118,9 @@ var placeSession = (session, options, room) => {
     merge: Math.ceil(Math.max(NATURAL.merge, ...mergeLabels.map((width2) => width2 + 24)))
   };
   const inLineB = (id) => wrap && LINE_B.includes(id);
-  const setA = buildColumns({ ...shown, ...Object.fromEntries(LINE_B.map((id) => [id, shown[id] && !wrap])) }, natural, X0, room.a);
+  const setA = buildColumns({ ...shown2, ...Object.fromEntries(LINE_B.map((id) => [id, shown2[id] && !wrap])) }, natural, X0, room.a);
   const bStart = setA.byId.implement?.start ?? setA.end;
-  const shownB = { ...shown, plan: false, implement: false, join: false, review: false };
+  const shownB = { ...shown2, plan: false, implement: false, join: false, review: false };
   const setB = wrap ? buildColumns(shownB, natural, bStart, room.b) : { ids: [], byId: {}, columns: [], end: bStart };
   const lacking = { a: {}, b: {} };
   let lacks = false;
@@ -10458,7 +11187,8 @@ ${FOLD_HINT}` : label };
         edge(`edge:agent:${agentId}`, { key: anchor.key, dy: anchor.radius }, top2, flow, "shared", "line", base);
       }
       const dot = { edges: [`edge:agent:${agentId}`], when: "start", color: "shared", back: true };
-      add({ kind: "node", key, at, state: agent.state, color: "shared", mark: markOf(agent.model, options), radius: SMALL_R, stale, ...base, from: { key: anchor.key }, dot });
+      const card = { ref: { kind: "agent", agentId } };
+      add({ kind: "node", key, at, state: agent.state, color: "shared", mark: markOf(agent.model, options), radius: SMALL_R, stale, ...base, from: { key: anchor.key }, dot, card });
       const tone2 = isActive3(agent.state) ? "reviewer" : "reviewer-dim";
       add({ kind: "text", key: `text:agent:${agentId}`, at: { key, dx: -(SMALL_R + LABEL_GAP), dy: 3.5 }, text: agent.role, tone: tone2, anchor: "end", ...base });
     });
@@ -10508,7 +11238,7 @@ ${FOLD_HINT}` : label };
         endColumnA = id;
       }
     };
-    const group = groupOf2(row2.pipeline);
+    const group = groupOf3(row2.pipeline);
     const earlier = group !== current;
     const unfolds = earlier && group.settled;
     const forked = plan.fromText !== void 0;
@@ -10552,7 +11282,8 @@ ${FOLD_HINT}` : label };
         const last = index === stream.runs.length - 1 && row2.join !== void 0 && column("join") !== void 0;
         const joinEdge = plan.multi ? `edge:join:${branch}:${stream.id}` : `edge:join:${branch}`;
         const dot = { edges: [inKey], when: "start", color: laneColor, ...last ? { out: [joinEdge] } : {} };
-        add({ kind: "node", key, at, state: run.state, color: laneColor, mark, radius: NODE_R2, stale: run.stale, ...nodeBase, from: { key: previousKey }, dot });
+        const card = { ref: { kind: "agent", agentId: run.agentId }, startedAt: run.startedAt };
+        add({ kind: "node", key, at, state: run.state, color: laneColor, mark, radius: NODE_R2, stale: run.stale, ...nodeBase, from: { key: previousKey }, dot, card });
         if (index > 0) {
           add({ kind: "text", key: `text:run:${token}`, at: { key, dy: -(NODE_R2 + LABEL_GAP) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
         }
@@ -10659,8 +11390,9 @@ ${FOLD_HINT}` : label };
         const enter = slide2("review", { x: rx - 20, y });
         const firstRound = reviewer.afterFix === void 0 ? { fan: branch } : {};
         const dot = { edges: [loopKey], when: "start", color: "review", out: [`${edgeKey}>review`], ...firstRound };
-        const fixCount = fixCountOf(session, reviewer);
-        add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...fixCount, ...nodeBase, ...enter, dot });
+        const counts = { ...fixCountOf(session, reviewer), ...improvementCountOf(session, reviewer) };
+        const card = { ref: { kind: "agent", agentId: reviewer.agentId }, startedAt: reviewer.startedAt };
+        add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...counts, ...nodeBase, ...enter, dot, card });
         const tone2 = isEnded(reviewer.state) ? "reviewer-dim" : "reviewer";
         add({ kind: "text", key: `text:agent:${token}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
         labelledRight.add(key);
@@ -10709,7 +11441,10 @@ ${FOLD_HINT}` : label };
         edge(inKey, fedByReview ? loopFrom : pillExit, { key, dx: -NODE_R2 }, loop.state, loop.color, shape, { ...nodeBase, ...extra });
         const from = fedByReview ? { from: { key: loopFrom.key } } : slide2("fix", { x: fx, y: fy });
         const dot = { edges: [inKey], when: "start", color: byMain ? "shared" : color };
-        add({ kind: "node", key, at: { x: fx, y: fy }, state: fix.state, color: byMain ? "shared" : color, mark, radius: NODE_R2, stale: fix.stale, ...nodeBase, ...from, dot });
+        const fixStart = fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt };
+        const card = byMain ? {} : { card: { ref: { kind: "fix", branch, fixId: fix.id }, ...fixStart } };
+        const fixNode = { at: { x: fx, y: fy }, state: fix.state, color: byMain ? "shared" : color, mark, radius: NODE_R2, stale: fix.stale };
+        add({ kind: "node", key, ...fixNode, ...nodeBase, ...from, dot, ...card });
         const label = fixLabelOf(fix);
         const labelAt = stacked ? { key, dx: NODE_R2 + LABEL_GAP, dy: 3.5 } : { key, dy: FIX_LABEL_DY + plan.labelShift };
         add({ kind: "text", key: `text:fix:${branch}:${fix.id}`, at: labelAt, text: label, tone: "note", anchor: stacked ? "start" : "middle", ...nodeBase });
@@ -10772,7 +11507,8 @@ ${FOLD_HINT}` : label };
       const { key: inKey, ...into } = fromFix(crossKey(plan, `edge:pr:${branch}`, exitY));
       edge(inKey, exit, { key, dx: -NODE_R2 }, flowOf({ state: row2.pr.state }), color, into.shape, { ...nodeBase, ...into.extra });
       const dot = { edges: [inKey], when: "appear", color };
-      add({ kind: "node", key, at: { x: prX, y: lineY }, state: row2.pr.state, color, mark, radius: NODE_R2, ...nodeBase, from: { key: exit.key }, dot });
+      const card = agentId === void 0 ? {} : { card: { ref: { kind: "pr", branch } } };
+      add({ kind: "node", key, at: { x: prX, y: lineY }, state: row2.pr.state, color, mark, radius: NODE_R2, ...nodeBase, from: { key: exit.key }, dot, ...card });
       if (row2.pr.pr) {
         add({ kind: "text", key: `text:pr:${branch}`, at: { key, dy: FIX_LABEL_DY + plan.labelShift }, text: `#${row2.pr.pr.number}`, tone: "note", anchor: "middle", ...base });
       }
@@ -10850,24 +11586,24 @@ ${FOLD_HINT}` : label };
     const moreWidth = (count) => pillWidth(`+${count}`) - 4;
     const endOf = (count) => pillsLeft + widths.slice(0, count).reduce((sum, width2) => sum + width2 + COMPACT_GAP, 0) - COMPACT_GAP;
     const pillRoom = summaryMin - SUMMARY_GAP;
-    let shown2 = group.rows.length;
-    if (endOf(shown2) > pillRoom) {
-      shown2 = Math.max(1, shown2 - 1);
-      while (shown2 > 1 && endOf(shown2) + COMPACT_GAP + moreWidth(group.rows.length - shown2) > pillRoom) {
-        shown2 -= 1;
+    let shown3 = group.rows.length;
+    if (endOf(shown3) > pillRoom) {
+      shown3 = Math.max(1, shown3 - 1);
+      while (shown3 > 1 && endOf(shown3) + COMPACT_GAP + moreWidth(group.rows.length - shown3) > pillRoom) {
+        shown3 -= 1;
       }
     }
     const hitKey = sessionKeys.compactHit(index);
     const hitAt = { x: px4 - HIT_LEFT, y: cy - HIT_HALF };
     const hitIndex = items.length;
     let x = pillsLeft;
-    group.rows.slice(0, shown2).forEach((row2, slot) => {
+    group.rows.slice(0, shown3).forEach((row2, slot) => {
       const key = sessionKeys.compactPill(row2.branch);
       const pillAt = { x: x + widths[slot] / 2, y: cy };
       add({ kind: "pill", key, at: pillAt, text: pillText(row2), color: rowColor(row2), compact: true, branch: row2.branch, ...pillTip(row2), ...base, from: { key: sessionKeys.pill(row2.branch) } });
       x += widths[slot] + COMPACT_GAP;
     });
-    const hidden = group.rows.slice(shown2);
+    const hidden = group.rows.slice(shown3);
     if (hidden.length > 0) {
       const width2 = moreWidth(hidden.length);
       const tip = hidden.map((row2) => row2.branch).join(", ");
@@ -11032,7 +11768,8 @@ ${FOLD_HINT}` : label };
       edge(inKey, { key: sessionKeys.promote, dx: NODE_R2 }, { key: sessionKeys.docs, dx: -NODE_R2 }, flowOf({ state: docs.state }), "shared", "curve", base);
     }
     const dot = inKey === void 0 ? void 0 : { edges: [inKey], when: "start", color: "shared" };
-    add({ kind: "node", key: sessionKeys.docs, at, state: docs.state, color: "shared", mark, radius: NODE_R2, ...base, ...slide2("docs", at), ...dot ? { dot } : {} });
+    const card = agentId === void 0 ? {} : { card: { ref: { kind: "docs" } } };
+    add({ kind: "node", key: sessionKeys.docs, at, state: docs.state, color: "shared", mark, radius: NODE_R2, ...base, ...slide2("docs", at), ...dot ? { dot } : {}, ...card });
   }
   const you = session.plan.you;
   let planGate = false;
@@ -11052,7 +11789,7 @@ ${FOLD_HINT}` : label };
   const mergeRows = rows.filter(mergeDrawn);
   const waitingRows = mergeRows.filter((row2) => row2.merge?.state === "waiting");
   const gateColumn = column("merge");
-  const gateRow = mergeRows.find((row2) => groupOf2(row2.pipeline) === current) ?? mergeRows[0];
+  const gateRow = mergeRows.find((row2) => groupOf3(row2.pipeline) === current) ?? mergeRows[0];
   let mergeGate;
   let mergeWaits = false;
   if (gateColumn && gateRow) {
@@ -11185,6 +11922,9 @@ var isMergePlace = (question) => question.place.kind === "merge" || question.pla
 var SHEEN = [{ transform: "translateX(-16px)" }, { transform: "translateX(16px)" }];
 var SHEEN_EASING = "cubic-bezier(.5,0,.3,1)";
 var ROLL_MS = 450;
+var BADGE_IN = [{ transform: "scale(0)", opacity: 0 }, { transform: "none", opacity: 1 }];
+var BADGE_MS = 320;
+var BADGE_EASING = "cubic-bezier(.3, 1.45, .5, 1)";
 var RING_OUT = [{ opacity: 1 }, { opacity: 0 }];
 var RING_OUT_MS = 180;
 var createStopMotion = (entries, hooks) => {
@@ -11311,6 +12051,10 @@ var playRoll = (entry, delay) => {
     animation.oncancel = finish;
   }
 };
+var playBadge = (entry, delay) => {
+  const badge = [...entry.element?.children ?? []].find((child) => child.classList.contains("node-badge"));
+  badge?.firstElementChild?.animate(BADGE_IN, { duration: BADGE_MS, delay, easing: BADGE_EASING, fill: "backwards" });
+};
 
 // src/ui/graph/scene.ts
 var TRAIL = [
@@ -11326,8 +12070,8 @@ var POP2 = [{ transform: "scale(.4)" }, { transform: "scale(1.22)", offset: 0.6 
 var SWEEP = [{ transform: "none" }, { transform: "scale(1.35)", offset: 0.4 }, { transform: "none" }];
 var SWEEP_STEP_MS = 55;
 var ORBIT_IN = [{ opacity: 0 }, { opacity: 1 }];
-var DIM_MS = 200;
 var PIXEL_EPSILON = 1e-6;
+var BADGE_SLIDE_MS = 200;
 var HIT_REACH = 5;
 var RING = BUBBLE_RADIUS + 3;
 var fixed2 = (value2) => (Math.round(value2 * 10) / 10).toString();
@@ -11351,7 +12095,7 @@ var textElement = (className, text2, attributes = {}) => {
 var signatureOf = (item2) => {
   switch (item2.kind) {
     case "node":
-      return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}|${item2.count ?? ""}`;
+      return `${item2.state}|${item2.mark}|${item2.radius}|${item2.color}|${item2.stale === true}|${item2.idle === true}|${item2.count ?? ""}|${item2.improvements ?? ""}`;
     case "pill":
       return `${item2.text}|${item2.color}|${item2.compact === true}|${item2.skipped === true}|${item2.tip ?? ""}`;
     case "rect":
@@ -11370,7 +12114,7 @@ var signatureOf = (item2) => {
   }
 };
 var createScene = (host, context) => {
-  const svg = svgEl("svg", { class: "graph", role: "img", viewBox: "0 0 900 160" });
+  const svg = svgEl("svg", { class: "graph", role: "group", viewBox: "0 0 900 160" });
   const layers = { edges: svgEl("g"), nodes: svgEl("g"), over: svgEl("g"), dots: svgEl("g") };
   svg.append(layers.edges, layers.nodes, layers.over, layers.dots);
   host.replaceChildren(svg);
@@ -11380,8 +12124,9 @@ var createScene = (host, context) => {
   let viewTarget = { w: 900, h: 160, pw: 900 * GRAPH_SCALE };
   let tween;
   let focus;
+  let outside = false;
   let linked;
-  let dimTimer;
+  let cardKey;
   let shownView = "";
   let lastTime;
   let settled = false;
@@ -11394,14 +12139,14 @@ var createScene = (host, context) => {
     const width = Math.floor(box.pw + PIXEL_EPSILON);
     const height = Math.floor(box.h * box.pw / box.w + PIXEL_EPSILON);
     const viewBox = `0 0 ${fixed2(box.w)} ${fixed2(box.h)}`;
-    const shown = `${viewBox} ${width} ${height}`;
-    if (shown === shownView) {
+    const shown2 = `${viewBox} ${width} ${height}`;
+    if (shown2 === shownView) {
       return;
     }
     svg.setAttribute("viewBox", viewBox);
     svg.style.setProperty("width", `${width}px`);
     svg.style.setProperty("height", `${height}px`);
-    shownView = shown;
+    shownView = shown2;
   };
   const position = (ref) => placeOf(entries, ref);
   const layerOf = (item2) => {
@@ -11514,6 +12259,48 @@ var createScene = (host, context) => {
       }
     }
   };
+  const setAttribute = (element, name, value2) => {
+    if (value2 === void 0) {
+      element.removeAttribute(name);
+    } else if (element.getAttribute(name) !== value2) {
+      element.setAttribute(name, value2);
+    }
+  };
+  const button = (entry) => {
+    const { item: item2, element } = entry;
+    if (item2.kind !== "node" || !element) {
+      return;
+    }
+    const card = item2.card !== void 0;
+    const open2 = card && item2.key === cardKey;
+    setAttribute(element, "tabindex", card ? "0" : void 0);
+    setAttribute(element, "role", card ? "button" : void 0);
+    setAttribute(element, "aria-haspopup", card ? "dialog" : void 0);
+    setAttribute(element, "aria-expanded", card ? String(open2) : void 0);
+    setAttribute(element, "aria-label", card ? item2.name : void 0);
+    element.classList.toggle("open", open2);
+  };
+  const placeBadge = (entry, before, still) => {
+    const { item: item2, element } = entry;
+    const badge = item2.kind === "node" && element ? [...element.children].find((child) => child.classList.contains("node-badge")) : void 0;
+    if (item2.kind !== "node" || !badge) {
+      entry.badgeLow = void 0;
+      return;
+    }
+    const low = item2.badgeLow === true;
+    const to = badgeOffset(item2.radius, low);
+    const at = `translate(${fixed2(to.x)} ${fixed2(to.y)})`;
+    if (badge.getAttribute("transform") !== at) {
+      badge.setAttribute("transform", at);
+    }
+    entry.badgeLow = low;
+    if (before === void 0 || before === low || still || context.reducedMotion()) {
+      return;
+    }
+    const from = badgeOffset(item2.radius, before);
+    const frames = [{ transform: `translate(${fixed2(from.x)}px, ${fixed2(from.y)}px)` }, { transform: `translate(${fixed2(to.x)}px, ${fixed2(to.y)}px)` }];
+    badge.animate(frames, { duration: BADGE_SLIDE_MS, easing: EASING2 });
+  };
   const rebuild = (entry) => {
     const { item: item2, element } = entry;
     if (!element) {
@@ -11523,11 +12310,12 @@ var createScene = (host, context) => {
     entry.signature = signatureOf(item2);
     render(entry);
     element.classList.toggle("clickable", clickable);
-    element.classList.toggle("dim", !lit(item2));
     element.classList.toggle("linked", isLinked(item2));
     if (item2.kind === "node") {
       placeRing(entry);
       retitle(entry, item2.tip);
+      button(entry);
+      placeBadge(entry, entry.badgeLow, true);
     }
   };
   const stops = createStopMotion(entries, { reducedMotion: () => context.reducedMotion(), destroyed: () => destroyed, rebuild });
@@ -11544,6 +12332,9 @@ var createScene = (host, context) => {
         entry.core = drawNode(element, item2.state, item2.mark, item2.radius, sessionRings(item2), item2.count);
         entry.orbit = [...element.children].find((child) => child.classList.contains("node-orbit"));
         entry.title = void 0;
+        if (item2.improvements !== void 0 && item2.improvements > 0) {
+          drawBadge(element, item2.radius, item2.improvements, item2.badgeLow === true);
+        }
         element.prepend(svgEl("circle", { class: "node-hit", r: item2.radius + HIT_REACH }));
         break;
       }
@@ -11750,47 +12541,29 @@ var createScene = (host, context) => {
       return true;
     });
   };
-  const lit = (item2) => {
-    const compactPill = item2.kind === "pill" && item2.compact === true;
-    if (!focus || !compactPill && (item2.agentId === void 0 && item2.branch === void 0 || isCompactKey(item2.key))) {
-      return true;
-    }
-    return focus.agentId !== void 0 ? item2.agentId === focus.agentId : item2.branch === focus.branch;
-  };
-  const agentNodeOf = (item2, agentId) => {
-    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || isCompactKey(item2.key)) {
-      return false;
-    }
-    return agentId === void 0 || item2.agentId === agentId;
-  };
+  const agentNodeOf = (item2, agentId) => item2.kind === "node" && item2.agentId === agentId && !isCompactKey(item2.key);
   const isLinked = (item2) => linked !== void 0 && agentNodeOf(item2, linked);
   const linkedAgent = () => {
     const agentId = focus?.agentId;
-    if (agentId === void 0) {
+    if (agentId === void 0 || agentId === "main" && !outside) {
       return void 0;
     }
     const nodes = [...entries.values()].filter((entry) => entry.alive && agentNodeOf(entry.item, agentId));
-    return nodes.length > 1 ? agentId : void 0;
+    return nodes.length > (outside ? 0 : 1) ? agentId : void 0;
   };
-  const applyFocus = (changed) => {
-    if (changed) {
-      svg.classList.add("dimming");
-      clearTimeout(dimTimer);
-      dimTimer = setTimeout(() => svg.classList.remove("dimming"), DIM_MS + 50);
-    }
-    svg.classList.toggle("focused", focus !== void 0);
+  const applyFocus = () => {
     linked = linkedAgent();
     for (const entry of entries.values()) {
-      entry.element?.classList.toggle("dim", !lit(entry.item));
       entry.element?.classList.toggle("linked", isLinked(entry.item));
     }
   };
-  const setFocus = (next) => {
-    if (next?.agentId === focus?.agentId && next?.branch === focus?.branch) {
+  const setFocus = (next, fromOutside) => {
+    if (next?.agentId === focus?.agentId && next?.branch === focus?.branch && fromOutside === outside) {
       return false;
     }
     focus = next;
-    applyFocus(true);
+    outside = fromOutside;
+    applyFocus();
     return true;
   };
   const focusable = (target) => {
@@ -11815,7 +12588,8 @@ var createScene = (host, context) => {
     } else if (item2?.branch !== void 0) {
       next = { branch: item2.branch };
     }
-    if (setFocus(next)) {
+    const moved = next?.agentId !== focus?.agentId || next?.branch !== focus?.branch;
+    if (setFocus(next, false) && moved) {
       const detail = { target: next };
       svg.dispatchEvent(new CustomEvent(SESSION_FOCUS, { bubbles: true, detail }));
     }
@@ -11852,6 +12626,7 @@ var createScene = (host, context) => {
         if (stops.held(entry, signature)) {
           continue;
         }
+        const badgeBefore = entry.badgeLow;
         if (signature !== entry.signature) {
           entry.signature = signature;
           render(entry);
@@ -11859,11 +12634,13 @@ var createScene = (host, context) => {
         if (item2.kind === "node") {
           placeRing(entry);
           retitle(entry, item2.tip);
+          button(entry);
+          placeBadge(entry, badgeBefore, first || entered.has(item2.key));
         }
       }
       refreshHover();
       if (focus) {
-        applyFocus(false);
+        applyFocus();
       }
       first = false;
       settled = false;
@@ -11892,6 +12669,7 @@ var createScene = (host, context) => {
       }
       (effects.sheens ?? []).forEach((sheen) => stops.whenShown(sheen.key, sheen.delay, playSheen));
       (effects.rolls ?? []).forEach((roll) => stops.whenShown(roll.key, roll.delay, playRoll));
+      (effects.badges ?? []).forEach((badge) => stops.whenShown(badge.key, badge.delay, playBadge));
       stops.releaseUnclaimed();
       const now = performance.now();
       for (const dot of effects.dots) {
@@ -11943,7 +12721,7 @@ var createScene = (host, context) => {
       settled = step(1, performance.now());
     },
     clearFocus() {
-      setFocus(void 0);
+      setFocus(void 0, false);
     },
     focus(target) {
       if (destroyed) {
@@ -11955,7 +12733,20 @@ var createScene = (host, context) => {
       } else if (target?.branch !== void 0) {
         next = { branch: target.branch };
       }
-      setFocus(next && focusable(next) ? next : void 0);
+      setFocus(next && focusable(next) ? next : void 0, true);
+    },
+    node(key) {
+      const entry = entries.get(key);
+      return entry?.alive === true && entry.element ? entry.element : void 0;
+    },
+    markCard(key) {
+      if (destroyed) {
+        return;
+      }
+      cardKey = key;
+      for (const entry of entries.values()) {
+        button(entry);
+      }
     },
     isSettled() {
       return settled;
@@ -11963,7 +12754,6 @@ var createScene = (host, context) => {
     destroy() {
       destroyed = true;
       tween = void 0;
-      clearTimeout(dimTimer);
       stops.clear();
       svg.removeEventListener("pointerover", onPointer);
       svg.removeEventListener("pointerleave", onPointer);
@@ -12438,7 +13228,7 @@ var createPanelShell = (context, options, make) => {
   body.append(inner);
   element.append(bar, body);
   const cards = /* @__PURE__ */ new Map();
-  const shown = /* @__PURE__ */ new Set();
+  const shown2 = /* @__PURE__ */ new Set();
   let open2 = false;
   let incoming = 0;
   let displayed = -1;
@@ -12490,9 +13280,9 @@ var createPanelShell = (context, options, make) => {
         dropCard(id);
       }
     }
-    for (const id of [...shown]) {
+    for (const id of [...shown2]) {
       if (!keep2.has(id)) {
-        shown.delete(id);
+        shown2.delete(id);
       }
     }
     const fresh = [];
@@ -12518,7 +13308,7 @@ var createPanelShell = (context, options, make) => {
       guardStep(id, row2.element, () => row2.frame(clock, time2));
     }
     for (const [id, card] of cards) {
-      if (shown.has(id)) {
+      if (shown2.has(id)) {
         guardStep(id, card.element, () => card.frame(clock, time2));
       }
     }
@@ -12551,7 +13341,7 @@ var createPanelShell = (context, options, make) => {
     body,
     rows,
     cards,
-    shown,
+    shown: shown2,
     isOpen: () => open2,
     guard: guardStep,
     dropCard,
@@ -12559,7 +13349,7 @@ var createPanelShell = (context, options, make) => {
     sync,
     frame,
     expect,
-    visibleCards: () => open2 ? [...shown].filter((id) => cards.has(id)) : []
+    visibleCards: () => open2 ? [...shown2].filter((id) => cards.has(id)) : []
   };
 };
 var createFinishedSessionsPanel = (context, options) => {
@@ -12580,7 +13370,7 @@ var createFinishedSessionsPanel = (context, options) => {
     onClearAll: () => clearAll()
   };
   const shell = createPanelShell(context, shellOptions, make);
-  const { rows, cards, shown } = shell;
+  const { rows, cards, shown: shown2 } = shell;
   const toastOwner = {};
   let latest;
   let summaryIndex = /* @__PURE__ */ new Map();
@@ -12615,9 +13405,9 @@ var createFinishedSessionsPanel = (context, options) => {
     const row2 = rows.rows.get(id);
     const state = states.get(id) ?? "hidden";
     if (state === "shown") {
-      shown.add(id);
+      shown2.add(id);
     } else {
-      shown.delete(id);
+      shown2.delete(id);
     }
     if (!row2) {
       return;
@@ -12753,7 +13543,7 @@ var createFinishedSessionsPanel = (context, options) => {
       for (const [id, row2] of rows.rows) {
         drawRow(id, row2);
       }
-      for (const id of shown) {
+      for (const id of shown2) {
         if (fullOf(id)) {
           drawCard(id);
         }
@@ -12962,9 +13752,9 @@ var toItem = (question, key, clock, streamName, words) => {
 };
 var questionsModel = (questions, clock, streamName, words) => {
   const keys2 = keysOf2(questions);
-  const shown = questions.filter((question) => isVisible(question, clock));
-  const relaying = new Set(shown.map((question) => question.relays?.id).filter((id) => id !== void 0));
-  const visible = shown.filter((question) => !(question.state === "relayed" && relaying.has(question.id))).sort(compare);
+  const shown2 = questions.filter((question) => isVisible(question, clock));
+  const relaying = new Set(shown2.map((question) => question.relays?.id).filter((id) => id !== void 0));
+  const visible = shown2.filter((question) => !(question.state === "relayed" && relaying.has(question.id))).sort(compare);
   const open2 = questions.filter((question) => question.state === "open" && question.audience === "user").length;
   const heading2 = visible.some((question) => question.audience === "user") ? HEADING_USER : HEADING_MAIN;
   const items = visible.map((question) => toItem(question, keys2.get(question) ?? question.id, clock, streamName, words));
@@ -13001,9 +13791,9 @@ var latestSlide = /* @__PURE__ */ new WeakMap();
 var slide = (element, open2, scale) => {
   const height = element.offsetHeight;
   const closed = { height: "0px", opacity: 0, transform: scale ? "translateY(-8px) scale(.98)" : "translateY(-8px)" };
-  const shown = { height: `${height}px`, opacity: 1, transform: "none" };
+  const shown2 = { height: `${height}px`, opacity: 1, transform: "none" };
   element.classList.add("sliding");
-  const frames = open2 ? [closed, shown] : [shown, closed];
+  const frames = open2 ? [closed, shown2] : [shown2, closed];
   const animation = element.animate(frames, { duration: open2 ? 550 : 400, easing: EASE8, fill: open2 ? "none" : "forwards" });
   latestSlide.set(element, animation);
   const done = () => {
@@ -13031,7 +13821,7 @@ var createQuestionsCore = (host, context, options) => {
   section2.append(heading2, list);
   host.append(section2);
   const entries = /* @__PURE__ */ new Map();
-  const leaving = /* @__PURE__ */ new Set();
+  const leaving2 = /* @__PURE__ */ new Set();
   let input = { questions: [], streamName: roleName, words: NO_WORDS, hasMessage: () => false, openMessage: () => void 0 };
   let highlighted = /* @__PURE__ */ new Set();
   let hovered;
@@ -13131,17 +13921,17 @@ var createQuestionsCore = (host, context, options) => {
       entry.slot.remove();
       return;
     }
-    leaving.add(entry.slot);
+    leaving2.add(entry.slot);
     entry.slot.classList.add("leaving");
     const remove = () => {
-      leaving.delete(entry.slot);
+      leaving2.delete(entry.slot);
       entry.slot.remove();
     };
     slide(entry.slot, false, true).finished.then(remove, remove);
   };
   const nextKept = (previous) => {
     let next = previous ? previous.nextElementSibling : list.firstElementChild;
-    while (next && leaving.has(next)) {
+    while (next && leaving2.has(next)) {
       next = next.nextElementSibling;
     }
     return next;
@@ -13276,7 +14066,7 @@ var createQuestionsCore = (host, context, options) => {
     reveal(questionIds2) {
       const wanted = new Set(questionIds2);
       const isWanted = (child) => child instanceof HTMLElement && wanted.has(child.dataset.questionId ?? "");
-      const slot = [...list.children].find((child) => !leaving.has(child) && isWanted(child));
+      const slot = [...list.children].find((child) => !leaving2.has(child) && isWanted(child));
       const item2 = slot?.firstElementChild;
       if (!(item2 instanceof HTMLElement) || section2.hidden) {
         return;
@@ -13432,9 +14222,9 @@ var followupColumns = (followups, expanded = /* @__PURE__ */ new Set()) => {
     const items = ordered.filter((followup) => followup.type === type);
     const count = items.length;
     const open2 = expanded.has(type);
-    const shown = open2 || count <= SHOWN_ITEMS ? items : items.slice(count - SHOWN_ITEMS);
+    const shown2 = open2 || count <= SHOWN_ITEMS ? items : items.slice(count - SHOWN_ITEMS);
     const toggle = count <= SHOWN_ITEMS ? "" : open2 ? "Show fewer" : `Show all (${count})`;
-    return { type, title: WORDS[type].title, items, shown, count, toggle };
+    return { type, title: WORDS[type].title, items, shown: shown2, count, toggle };
   });
 };
 var newFollowups = (previous, next) => {
@@ -13450,7 +14240,7 @@ var FLY_DELAY_MS2 = 320;
 var FLY_MS3 = 900;
 var BUMP_MS = 500;
 var sectionCount = 0;
-var iconOf = (type) => {
+var followupIcon = (type) => {
   const icon2 = svgEl("svg", { viewBox: "0 0 14 14", "aria-hidden": "true" });
   if (type === "issue") {
     const ring = svgEl("circle", { cx: 7, cy: 7, r: 5.2, fill: "none", stroke: "currentColor", "stroke-width": 1.5 });
@@ -13557,7 +14347,7 @@ var createSessionFollowupsView = (host, context, options) => {
     const title = el("span", "followup-column-title");
     const count = el("span", "followup-column-count", "0");
     const head = el("h4");
-    head.append(iconOf(type), title, count);
+    head.append(followupIcon(type), title, count);
     const list = el("div", "followup-list");
     const empty = el("div", "followup-empty", "None yet");
     const more = el("button", "show-all");
@@ -13573,7 +14363,7 @@ var createSessionFollowupsView = (host, context, options) => {
     });
     element.append(head, list, empty, more);
     grid.append(element);
-    return { type, head, title, count, list, empty, more };
+    return { type, element, head, title, count, list, empty, more };
   };
   const columnOf = (type) => {
     let column = columns.get(type);
@@ -13596,7 +14386,7 @@ var createSessionFollowupsView = (host, context, options) => {
     const entered = [];
     for (const model of followupColumns(followups, expanded)) {
       const column = columnOf(model.type);
-      const shown = new Set(model.shown);
+      const shown2 = new Set(model.shown);
       const nodes = [];
       for (const followup of model.items) {
         let entry = items.get(followup.id);
@@ -13607,7 +14397,7 @@ var createSessionFollowupsView = (host, context, options) => {
         const entering2 = entry.at !== followup.at;
         entry.at = followup.at;
         fillItem(entry, followup, session);
-        if (shown.has(followup)) {
+        if (shown2.has(followup)) {
           nodes.push(entry.element);
           if (entering2) {
             entered.push(entry.element);
@@ -13680,6 +14470,27 @@ var createSessionFollowupsView = (host, context, options) => {
       first = false;
     },
     frame: () => void 0,
+    revealFollowups(type) {
+      const column = columns.get(type);
+      if (destroyed || section2.hidden || column === void 0) {
+        return;
+      }
+      setOpen2(true);
+      toggle.focus({ preventScroll: true });
+      const reduced = context.reducedMotion();
+      const behavior = reduced ? "auto" : "smooth";
+      column.head.scrollIntoView({ block: "nearest", behavior });
+      if (reduced) {
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        timers.delete(timer);
+        if (!destroyed) {
+          column.element.scrollIntoView({ block: "nearest", behavior });
+        }
+      }, FLASH_DELAY_MS);
+      timers.add(timer);
+    },
     destroy() {
       destroyed = true;
       current = void 0;
@@ -13716,7 +14527,7 @@ var fitGraph = (session, options, hostWidth, wrapped) => {
 // src/ui/graph/session-effects.ts
 var MESSAGE_POP_MS = 80;
 var QUESTION_POP_MS = 80;
-var NONE = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [], fills: [] };
+var NONE = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [], badges: [], fills: [] };
 var isEnded2 = (state) => !isActive2(state) && state !== "pending" && state !== "skipped";
 var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
 var SHEEN_STATES = ["done", "approved", "changes"];
@@ -13765,6 +14576,24 @@ var rollsOf = (previous, current, pops) => {
     }
   }
   return rolls;
+};
+var VERDICTS = ["approved", "changes"];
+var badgesOf = (previous, current, pops) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const badges = [];
+  for (const item2 of current.items) {
+    const old = before.get(item2.key);
+    if (item2.kind !== "node" || item2.improvements === void 0 || old?.kind !== "node") {
+      continue;
+    }
+    if (old.state === "running") {
+      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+      badges.push({ key: item2.key, delay: pop + POP_MS2 + SHEEN_MS });
+    } else if (VERDICTS.includes(old.state) && old.improvements === void 0) {
+      badges.push({ key: item2.key, delay: 0 });
+    }
+  }
+  return badges;
 };
 var foldsOf = (previous, current) => {
   const before = foldedPipelines(previous.session, previous.expanded);
@@ -13891,7 +14720,7 @@ var dotsOf = (previous, current, unfolded, filled) => {
   }
   return dots.filter(drawn);
 };
-var newestMessage = (session) => session.messages[session.messages.length - 1]?.id;
+var newestMessage = (session) => session.messages.filter((message) => message.progress !== true).at(-1)?.id;
 var sessionEffects = (previous, current) => {
   if (!previous) {
     return NONE;
@@ -13918,7 +14747,8 @@ var sessionEffects = (previous, current) => {
   const dots = planned.map(({ edges, color, delay, reverse }) => reverse ? { edges, color, delay, reverse } : { edges, color, delay });
   const sheens = sheensOf(previous.layout, current.layout, pops);
   const rolls = rollsOf(previous.layout, current.layout, pops);
-  return { pops, dots, sweep, folds, sheens, rolls, fills };
+  const badges = badgesOf(previous.layout, current.layout, pops);
+  return { pops, dots, sweep, folds, sheens, rolls, badges, fills };
 };
 
 // src/ui/graph/session-view.ts
@@ -14020,6 +14850,12 @@ var createSessionGraphView = (host, context) => {
       toggleFold(pipeline);
       return;
     }
+    const card = cardTarget(last.layout, key);
+    if (card !== void 0) {
+      const detail = { ...card, keyboard: false };
+      target?.dispatchEvent(new CustomEvent(SESSION_CARD, { bubbles: true, detail }));
+      return;
+    }
     const click = clickTarget(last.layout, key);
     if (click?.kind === "agent") {
       const detail = { agentId: click.agentId };
@@ -14029,6 +14865,30 @@ var createSessionGraphView = (host, context) => {
     }
   };
   wrapper.addEventListener("click", onClick);
+  const cardNodeOf = (event) => {
+    const element = event.target instanceof Element ? event.target.closest("[data-key]") : null;
+    const detail = last && element ? cardTarget(last.layout, element.getAttribute("data-key") ?? "") : void 0;
+    return element && detail ? { element, detail } : void 0;
+  };
+  const onKey = (event) => {
+    const node = event.key === "Enter" || event.key === " " ? cardNodeOf(event) : void 0;
+    if (!node) {
+      return;
+    }
+    event.preventDefault();
+    if (event.repeat) {
+      return;
+    }
+    const detail = { ...node.detail, keyboard: true };
+    node.element.dispatchEvent(new CustomEvent(SESSION_CARD, { bubbles: true, detail }));
+  };
+  const onDown = (event) => {
+    if (cardNodeOf(event)) {
+      event.preventDefault();
+    }
+  };
+  wrapper.addEventListener("keydown", onKey);
+  wrapper.addEventListener("mousedown", onDown);
   return {
     update(session) {
       draw2(session, "play");
@@ -14053,6 +14913,12 @@ var createSessionGraphView = (host, context) => {
     focus(target) {
       scene.focus(target);
     },
+    node(key) {
+      return scene.node(key);
+    },
+    markCard(key) {
+      scene.markCard(key);
+    },
     agentNode(agentId) {
       const item2 = last?.layout.items.find((entry) => entry.kind === "node" && entry.agentId === agentId);
       return item2 === void 0 ? void 0 : wrapper.querySelector(`[data-key="${CSS.escape(item2.key)}"]`) ?? void 0;
@@ -14060,6 +14926,8 @@ var createSessionGraphView = (host, context) => {
     destroy() {
       resize.disconnect();
       wrapper.removeEventListener("click", onClick);
+      wrapper.removeEventListener("keydown", onKey);
+      wrapper.removeEventListener("mousedown", onDown);
       scene.destroy();
       last = void 0;
     }
@@ -14508,7 +15376,7 @@ var createTableCore = (host, context, source) => {
       previous = entry.item;
     }
   };
-  const reorder = (ordered, shown, created, toggled) => {
+  const reorder = (ordered, shown2, created, toggled) => {
     const animate = motion();
     const before = /* @__PURE__ */ new Map();
     if (animate) {
@@ -14518,10 +15386,10 @@ var createTableCore = (host, context, source) => {
         }
       }
     }
-    place2(shownList, ordered.slice(0, shown));
-    place2(moreList, ordered.slice(shown));
+    place2(shownList, ordered.slice(0, shown2));
+    place2(moreList, ordered.slice(shown2));
     ordered.forEach((entry, index) => {
-      entry.visible = index < shown || showAll;
+      entry.visible = index < shown2 || showAll;
     });
     if (!animate) {
       return;
@@ -14871,6 +15739,913 @@ var createSessionLogView = (host, context) => {
   };
 };
 
+// src/ui/node-card-model.ts
+var VERDICTS2 = {
+  changes: { text: "changes requested", color: "var(--warm)", solid: false },
+  approved: { text: "approved", color: "var(--rev)", solid: false }
+};
+var STATE_COLORS = {
+  approved: "var(--rev)",
+  changes: "var(--warm)",
+  handed: "var(--amber)",
+  failed: "var(--red)",
+  waiting: "var(--you)",
+  stale: "var(--fg-3)",
+  idle: "var(--fg-3)",
+  pending: "var(--fg-3)",
+  skipped: "var(--fg-3)"
+};
+var PLAN_WORK = { implement: "implementing", review: "reviewing", pr: "shepherding", other: "exploring" };
+var LEG_COLOR = "var(--fg-2)";
+var KINDS2 = ["fix", "improve"];
+var legStarts = (session, agentId) => {
+  const starts = /* @__PURE__ */ new Set();
+  const add = (startedAt) => {
+    const start = parseTime(startedAt);
+    if (start !== void 0) {
+      starts.add(start);
+    }
+  };
+  for (const row2 of session.rows) {
+    for (const run of row2.streams.flatMap((stream) => stream.runs)) {
+      if (run.agentId === agentId) {
+        add(run.startedAt);
+      }
+    }
+    for (const fix of row2.fixes) {
+      if (fix.agentId === agentId) {
+        add(fix.startedAt);
+      }
+    }
+  }
+  return [...starts].sort((a, b) => a - b);
+};
+var legOf = (session, target) => {
+  const starts = legStarts(session, target.agentId);
+  const start = parseTime(target.startedAt);
+  const index = start === void 0 ? -1 : starts.indexOf(start);
+  return starts.length > 1 && index >= 0 ? { n: index + 1, m: starts.length } : void 0;
+};
+var legChip = (leg) => ({ text: `Leg ${leg.n} of ${leg.m}`, color: LEG_COLOR, solid: false });
+var timesText = (start, end) => {
+  const from = timeOfDay(parseTime(start));
+  const to = timeOfDay(parseTime(end));
+  if (from === "") {
+    return to;
+  }
+  return to === "" ? from : `${from} to ${to}`;
+};
+var joinMeta = (parts) => parts.filter((part) => part !== void 0 && part !== "").join(" \xB7 ");
+var countText4 = (meter) => meter.limit > 0 ? `${meter.used}/${meter.limit}` : String(meter.used);
+var ratioOf3 = (meter) => meter.limit > 0 ? Math.min(1, meter.used / meter.limit) : void 0;
+var countMetric = (label, meter, pips) => {
+  const metric = { label, value: String(meter.used), level: meter.level };
+  if (meter.limit > 0) {
+    metric.limit = String(meter.limit);
+  }
+  if (pips !== void 0) {
+    metric.pips = pips;
+  } else if (meter.limit > 0) {
+    metric.ratio = ratioOf3(meter);
+  }
+  return metric;
+};
+var totalMs = (parts) => {
+  const { agent, clock } = parts;
+  const startedAt = parseTime(agent.startedAt) ?? clock;
+  const endedAt = parts.running ? clock : parseTime(agent.endedAt) ?? clock;
+  return { endedAt, ms: endedAt - startedAt };
+};
+var legMetric = (total, totalText, own) => {
+  if (own === void 0) {
+    return { ...total, sub: "in all" };
+  }
+  return { label: total.label, value: own, level: "ok", sub: `${totalText} in all` };
+};
+var isNewest = (leg) => leg === void 0 || leg.n === leg.m;
+var isRunning = (state) => state === "running" || state === "waiting";
+var metricsOf = (parts, only) => {
+  const { agent, leg } = parts;
+  const budget = agent.budget;
+  const { endedAt, ms } = totalMs(parts);
+  const totalTime = elapsed(ms);
+  const calls = countMetric("Calls", budget.toolCalls);
+  const verify = countMetric("Verify", budget.verifyRounds, verifyCell(budget.verifyRounds, parts.running).pips);
+  const context = budget.context;
+  const ctx = { label: "Ctx", value: contextSize(context.used), level: context.level };
+  if (context.limit > 0) {
+    ctx.limit = contextSize(context.limit);
+    ctx.ratio = ratioOf3(context);
+  }
+  const costMetric = { label: "Cost", value: cost(budget.costUsd), level: "ok" };
+  const time2 = { label: "Time", value: totalTime, level: "ok" };
+  const showVerify = budget.verifyRounds.limit > 0 || budget.verifyRounds.used > 0;
+  const all = [calls, ...showVerify ? [verify] : [], ctx, costMetric, time2];
+  const wanted = only === void 0 ? all : all.filter((metric) => only.includes(metric.label));
+  if (leg === void 0) {
+    return wanted;
+  }
+  const atFirstStop = budget.toolCallsAtFirstStop;
+  let ownCalls;
+  if (leg.n === 1 && atFirstStop !== void 0) {
+    ownCalls = String(atFirstStop);
+  } else if (leg.n === 2 && leg.m === 2 && atFirstStop !== void 0) {
+    ownCalls = String(Math.max(0, budget.toolCalls.used - atFirstStop));
+  }
+  const resumedAt = parseTime(agent.resumedAt);
+  const ownTime = leg.n === leg.m && resumedAt !== void 0 ? elapsed(endedAt - resumedAt) : void 0;
+  return wanted.map((metric) => {
+    if (metric.label === "Calls") {
+      return legMetric(metric, countText4(budget.toolCalls), ownCalls);
+    }
+    if (metric.label === "Time") {
+      return legMetric(metric, totalTime, ownTime);
+    }
+    return { ...metric, sub: "in all" };
+  });
+};
+var nowBlock = (parts) => {
+  const { session, agent, leg } = parts;
+  const row2 = sessionAgentRow(session, agent, parts.config);
+  if (parts.running && isNewest(leg)) {
+    const now = row2.now;
+    return { kind: "now", label: "Now", tool: now.tool, text: now.text, failed: now.failed };
+  }
+  const at = timeOfDay(parseTime(parts.end));
+  const text2 = at === "" ? STATE_TEXT[parts.state] : `${STATE_TEXT[parts.state]} at ${at}`;
+  const block = { kind: "now", label: "Ended", tool: "", text: text2, failed: false };
+  if (isNewest(leg) && row2.now.kind === "report") {
+    block.report = row2.now.text;
+  }
+  return block;
+};
+var filesBlock = (agent) => {
+  if (agent.filesChanged.length === 0) {
+    return { kind: "note", text: "No files changed." };
+  }
+  return { kind: "files", files: [...agent.filesChanged] };
+};
+var stateChip = (state, nodeColor) => ({ text: STATE_TEXT[state], color: STATE_COLORS[state] ?? nodeColor, solid: false });
+var nodeState = (session, target) => {
+  const ref = target.ref;
+  if (ref.kind === "fix") {
+    return fixOf(session, ref.branch, ref.fixId)?.state;
+  }
+  if (ref.kind === "pr") {
+    return session.rows.find((row2) => row2.branch === ref.branch)?.pr?.state;
+  }
+  if (ref.kind === "docs") {
+    return session.docs?.state;
+  }
+  const start = parseTime(target.startedAt);
+  const drawn = session.rows.flatMap((row2) => [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]);
+  const nodes = drawn.filter((node) => node.agentId === target.agentId);
+  return (nodes.find((node) => parseTime(node.startedAt) === start) ?? nodes[0])?.state;
+};
+var fixOf = (session, branch, fixId) => {
+  return session.rows.find((row2) => row2.branch === branch)?.fixes.find((fix) => fix.id === fixId);
+};
+var baseName = (path) => path.split("/").filter((part) => part !== "").at(-1) ?? path;
+var roleOf = (session, agentId) => ownValue(session.agents, agentId)?.role ?? agentId;
+var reviewersOf = (session, fix) => {
+  const ids = (fix.items ?? []).map((item2) => item2.reviewerAgentId);
+  if (ids.length === 0 && fix.reviewerAgentId !== void 0) {
+    ids.push(fix.reviewerAgentId);
+  }
+  return [...new Set(ids)].map((id) => roleOf(session, id));
+};
+var markOf2 = (item2, index, working) => {
+  if (item2.edited) {
+    return "edited";
+  }
+  return index === working ? "working" : "todo";
+};
+var countsText = (items) => {
+  const words = { fix: "fixes", improve: "improvements" };
+  return KINDS2.map((kind) => {
+    const ofKind = items.filter((item2) => item2.kind === kind);
+    const edited = ofKind.filter((item2) => item2.edited).length;
+    return ofKind.length === 0 ? "" : `${words[kind]} ${edited}/${ofKind.length}`;
+  }).filter((text2) => text2 !== "").join(" \xB7 ");
+};
+var phaseText = (agent) => {
+  const phase = agent.progress?.kind === "fixes" ? agent.progress.phase : void 0;
+  const name = phase === void 0 ? void 0 : PHASE_NAMES.implement[phase];
+  return phase === void 0 || name === void 0 ? "" : `Phase ${phase + 1} of ${PHASE_NAMES.implement.length}: ${name}`;
+};
+var fixCard = (parts, fix) => {
+  const { session, agent, leg } = parts;
+  const chips = [{ text: "Fix", color: "var(--st-fix)", solid: true }, ...leg ? [legChip(leg)] : []];
+  const reviewers = reviewersOf(session, fix);
+  const from = reviewers.length > 0 ? `from ${reviewers.join(", ")}` : "";
+  const phase = parts.running ? phaseText(agent) : "";
+  const meta = joinMeta([modelName(fix.model ?? agent.model ?? ""), phase === "" ? timesText(parts.start, parts.end) : phase, from]);
+  const metrics = { kind: "metrics", metrics: metricsOf(parts, ["Calls", "Verify", "Time"]) };
+  const items = fix.items ?? [];
+  if (items.length === 0) {
+    const note = fix.reviewerAgentId === void 0 ? NO_ITEMS_CONTINUED : NO_ITEMS;
+    return { kind: "fix", role: agent.role, chips, meta, blocks: [metrics, { kind: "note", text: note }] };
+  }
+  const working = parts.running && fix.state === "running" ? fix.working : void 0;
+  const rows = items.map((item2, index) => ({
+    index,
+    kind: item2.kind,
+    mark: markOf2(item2, index, working),
+    text: item2.text,
+    file: baseName(item2.file),
+    path: item2.file,
+    reviewer: roleOf(session, item2.reviewerAgentId)
+  }));
+  const edited = items.filter((item2) => item2.edited).length;
+  const segments = rows.map((entry) => ({ kind: entry.kind, mark: entry.mark }));
+  const progress = { kind: "progress", edited, total: items.length, counts: countsText(items), segments };
+  const blocks = [progress, metrics];
+  for (const type of KINDS2) {
+    const ofType = rows.filter((entry) => entry.kind === type);
+    if (ofType.length > 0) {
+      blocks.push({ kind: "items", type, rows: ofType });
+    }
+  }
+  return { kind: "fix", role: agent.role, chips, meta, blocks };
+};
+var NO_ITEMS = "No items: the review named no file.";
+var NO_ITEMS_CONTINUED = "No items.";
+var byBlockPlace = (agentId) => {
+  const prefix = `f-${agentId}-`;
+  const place2 = (followup) => {
+    const n2 = followup.id.startsWith(prefix) ? Number(followup.id.slice(prefix.length)) : Number.NaN;
+    return Number.isInteger(n2) ? n2 : Number.POSITIVE_INFINITY;
+  };
+  return (a, b) => place2(a) - place2(b) || (place2(a) === Number.POSITIVE_INFINITY ? compareFollowups(a, b) : 0);
+};
+var reviewerCard = (parts) => {
+  const { session, agent, leg } = parts;
+  const verdict = VERDICTS2[parts.state] ?? stateChip(parts.state, "var(--rev)");
+  const chips = [verdict, ...leg ? [legChip(leg)] : []];
+  const reportedAt = agent.report === void 0 ? "" : timeOfDay(parseTime(agent.report.at ?? agent.endedAt));
+  const time2 = elapsed(totalMs(parts).ms);
+  const meta = joinMeta([modelName(agent.model ?? ""), time2, reportedAt === "" ? "" : `reported ${reportedAt}`, cost(agent.budget.costUsd)]);
+  const own = session.followups.filter((followup) => followup.origin.agentId === agent.id).sort(byBlockPlace(agent.id));
+  const blocks = [];
+  if (parts.running) {
+    blocks.push(nowBlock(parts));
+  }
+  for (const type of KINDS2) {
+    const ofType = own.filter((followup) => followup.type === type);
+    const items = ofType.map((followup) => ({ id: followup.id, text: followup.text, file: followup.file, category: followup.category }));
+    if (items.length > 0) {
+      blocks.push({ kind: "followups", type, items });
+    }
+  }
+  const issues = own.filter((followup) => followup.type === "issue").length;
+  if (own.length === 0 && !parts.running) {
+    blocks.push({ kind: "note", text: "No follow-ups." });
+  }
+  if (issues > 0) {
+    blocks.push({ kind: "issues", count: issues });
+  }
+  return { kind: "reviewer", role: agent.role, chips, meta, blocks };
+};
+var CHECKS = {
+  pending: { text: "checks running" },
+  passed: { text: "checks passing", tone: "ok" },
+  failed: { text: "checks failing", tone: "bad" }
+};
+var REVIEWS = {
+  approved: { text: "approved", tone: "ok" },
+  "changes-requested": { text: "changes requested", tone: "bad" },
+  required: { text: "review required" }
+};
+var prBlock = (pr) => {
+  const facts = [{ text: pr.state }];
+  if (pr.checks !== void 0) {
+    facts.push(CHECKS[pr.checks]);
+  }
+  if (pr.review !== void 0) {
+    facts.push(REVIEWS[pr.review]);
+  }
+  if (pr.additions !== void 0) {
+    facts.push({ text: `+${pr.additions}`, tone: "add" });
+  }
+  if (pr.deletions !== void 0) {
+    facts.push({ text: `-${pr.deletions}`, tone: "del" });
+  }
+  return { kind: "pr", number: pr.number, title: pr.title, facts };
+};
+var agentCard = (parts, kind, pr) => {
+  const { session, agent, leg } = parts;
+  let nodeColor = "var(--st-plan)";
+  let place2 = `Plan \xB7 ${PLAN_WORK[agent.stage]}`;
+  if (kind === "docs") {
+    nodeColor = "var(--st-docs)";
+    place2 = "Docs";
+  } else if (agent.branch !== void 0) {
+    nodeColor = kind === "pr" ? "var(--st-pr)" : colorValue2(branchCell(session, agent).color);
+    place2 = agent.branch;
+  }
+  const chips = [stateChip(parts.state, nodeColor), ...leg ? [legChip(leg)] : []];
+  const meta = joinMeta([modelName(agent.model ?? ""), place2, timesText(parts.start, parts.end)]);
+  const blocks = [];
+  if (pr !== void 0) {
+    blocks.push(prBlock(pr));
+  }
+  if (agent.description !== void 0 && agent.description.trim() !== "") {
+    blocks.push({ kind: "task", text: agent.description.trim() });
+  }
+  blocks.push(nowBlock(parts), { kind: "metrics", metrics: metricsOf(parts) }, filesBlock(agent));
+  const model = { kind, role: agent.role, chips, meta, blocks };
+  if (pr !== void 0) {
+    model.pr = { number: pr.number, url: pr.url };
+  }
+  return model;
+};
+var isReviewer = (session, agent) => {
+  return agent.stage === "review" || session.rows.some((row2) => row2.reviewers.some((reviewer) => reviewer.agentId === agent.id));
+};
+var nodeCardModel = (session, target, config, clock) => {
+  const agent = ownValue(session.agents, target.agentId);
+  if (agent === void 0 || agent.id === MAIN_AGENT) {
+    return void 0;
+  }
+  const leg = legOf(session, target);
+  const newest2 = isNewest(leg);
+  const rowState = sessionAgentRow(session, agent, config).state;
+  const state = newest2 ? rowState : nodeState(session, target) ?? rowState;
+  const running = newest2 && isRunning(rowState);
+  const start = leg === void 0 ? agent.startedAt : target.startedAt ?? agent.startedAt;
+  const end = newest2 && !running ? agent.endedAt : void 0;
+  const parts = { session, agent, leg, state, running, start, end, clock, config };
+  const ref = target.ref;
+  let card;
+  if (ref.kind === "fix") {
+    const fix = fixOf(session, ref.branch, ref.fixId);
+    card = fix === void 0 ? void 0 : fixCard(parts, fix);
+  } else if (ref.kind === "pr") {
+    const pr = session.rows.find((row2) => row2.branch === ref.branch)?.pr;
+    card = pr === void 0 ? void 0 : agentCard(parts, "pr", pr.pr);
+  } else if (ref.kind === "docs") {
+    card = agentCard(parts, "docs", void 0);
+  } else if (ref.kind === "agent") {
+    card = isReviewer(session, agent) ? reviewerCard(parts) : agentCard(parts, "agent", void 0);
+  }
+  if (card === void 0) {
+    return void 0;
+  }
+  const label = [card.role, ...card.chips.map((chip) => chip.text)].join(", ");
+  return { ...card, agentId: agent.id, label };
+};
+
+// src/ui/node-card.ts
+var OPEN_MS2 = 160;
+var CLOSE_MS2 = 120;
+var OPEN_FRAMES = [{ opacity: 0, transform: "translateY(4px) scale(.98)" }, { opacity: 1, transform: "none" }];
+var CLOSE_FRAMES = [{ opacity: 1 }, { opacity: 0 }];
+var CHECK_MS = 300;
+var CHECK_EASE = "cubic-bezier(.3, 1.45, .5, 1)";
+var CHECK_FRAMES = [{ transform: "scale(.4)" }, { transform: "none" }];
+var CHECK_STROKE = [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }];
+var SIDE_GAP = 16;
+var RAISE = 12;
+var BELOW_GAP = 14;
+var EDGE = 8;
+var MAX_HEIGHT = 440;
+var MAX_SHARE = 0.6;
+var BORDERS = 2;
+var shown;
+var isCardDetail = (detail) => {
+  if (typeof detail !== "object" || detail === null) {
+    return false;
+  }
+  const value2 = detail;
+  const ref = value2.ref;
+  return typeof value2.key === "string" && typeof value2.agentId === "string" && typeof ref?.kind === "string" && typeof value2.keyboard === "boolean";
+};
+var reconcile = (container, parts, drawn, lists) => {
+  const before = drawn.get(container) ?? /* @__PURE__ */ new Map();
+  const after = /* @__PURE__ */ new Map();
+  for (const part of parts) {
+    const old = before.get(part.key);
+    after.set(part.key, old !== void 0 && old.sig === part.sig ? old : { element: part.make(), sig: part.sig });
+  }
+  for (const [key, entry] of before) {
+    if (after.get(key) !== entry) {
+      entry.element.remove();
+    }
+  }
+  parts.forEach((part, index) => {
+    const entry = after.get(part.key);
+    const at = container.children[index];
+    if (at !== entry.element) {
+      container.insertBefore(entry.element, at ?? null);
+    }
+    const list = lists.get(entry.element);
+    if (part.items !== void 0 && list !== void 0) {
+      reconcile(list, part.items, drawn, lists);
+    }
+  });
+  drawn.set(container, after);
+};
+var LIST_PATH = "M2 3h8M2 6h8M2 9h5";
+var OUT_PATH = "M5 2.5H2.5v7h7V7M7 2.5h2.5V5M9.3 2.7 5.5 6.5";
+var lineIcon = (d) => {
+  const icon2 = svgEl("svg", { viewBox: "0 0 12 12", "aria-hidden": "true" });
+  icon2.append(svgEl("path", { d, fill: "none", stroke: "currentColor", "stroke-width": 1.4, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  return icon2;
+};
+var markIcon2 = (mark) => {
+  const icon2 = svgEl("svg", { class: "nc-mark", viewBox: "0 0 14 14", "aria-hidden": "true" });
+  if (mark === "edited") {
+    const check2 = svgEl("path", { class: "nc-mark-check", d: "M4.3 7.2l1.8 1.8 3.6-3.8", pathLength: 1 });
+    icon2.append(svgEl("circle", { class: "nc-mark-disc", cx: 7, cy: 7, r: 6 }), check2);
+    return { icon: icon2, check: check2 };
+  }
+  if (mark === "working") {
+    icon2.append(svgEl("circle", { class: "nc-mark-track", cx: 7, cy: 7, r: 5.4 }), svgEl("path", { class: "nc-mark-spin", d: "M7 1.6A5.4 5.4 0 0 1 12.4 7" }));
+  } else {
+    icon2.append(svgEl("circle", { class: "nc-mark-todo", cx: 7, cy: 7, r: 5.4 }));
+  }
+  return { icon: icon2 };
+};
+var WEB_URL = /^https?:\/\//i;
+var CARD_NODE = '.session-graph [aria-haspopup="dialog"]';
+var MARK_WORDS = { edited: "edited", working: "working on", todo: "to do" };
+var SECTION_TITLES = { fix: "Fixes", improve: "Improvements" };
+var sectionOf = (type, count, lists) => {
+  const section2 = el("div", "nc-section");
+  setVars(section2, { "--c": flyColor(type) });
+  const heading2 = el("h4");
+  heading2.append(followupIcon(type), el("span", "nc-section-title", SECTION_TITLES[type]), el("span", "nc-count", String(count)));
+  const list = el("ul", "nc-list");
+  lists.set(section2, list);
+  section2.append(heading2, list);
+  return section2;
+};
+var chipOf = (chip) => {
+  const element = el("span", chip.solid ? "nc-chip solid" : "nc-chip", chip.text);
+  setVars(element, { "--c": chip.color });
+  return element;
+};
+var metricOf = (metric) => {
+  const element = el("div", "nc-metric");
+  element.dataset.level = metric.level;
+  const value2 = el("b", void 0, metric.value);
+  if (metric.limit !== void 0) {
+    value2.append(el("i", void 0, `/${metric.limit}`));
+  }
+  element.append(el("span", "nc-metric-label", metric.label), value2);
+  if (metric.pips !== void 0 && metric.pips.length > 0) {
+    const pips = el("span", "verify-pips");
+    for (const pip of metric.pips) {
+      const mark = el("i", pip.over ? "over" : void 0);
+      mark.dataset.state = pip.state;
+      pips.append(mark);
+    }
+    element.append(pips);
+  } else if (metric.ratio !== void 0) {
+    const bar = el("span", "nc-bar");
+    const fill = el("i");
+    fill.style.width = `${Math.round(metric.ratio * 100)}%`;
+    bar.append(fill);
+    element.append(bar);
+  }
+  if (metric.sub !== void 0) {
+    element.append(el("small", void 0, metric.sub));
+  }
+  return element;
+};
+var createNodeCard = (context, options) => {
+  const element = el("div", "node-card");
+  element.setAttribute("role", "dialog");
+  element.tabIndex = -1;
+  element.hidden = true;
+  const head = el("div", "nc-head");
+  const title = el("div", "nc-title");
+  const role = el("b", "nc-role");
+  const chips = el("span", "nc-chips");
+  title.append(role, chips);
+  const meta = el("p", "nc-meta");
+  head.append(title, meta);
+  const body = el("div", "nc-body");
+  const foot = el("div", "nc-foot");
+  const agentList = el("button", "nc-link");
+  agentList.type = "button";
+  agentList.append(lineIcon(LIST_PATH), "Agent list");
+  const github = el("a", "nc-link");
+  github.target = "_blank";
+  github.rel = "noopener noreferrer";
+  const githubText = el("span");
+  github.append(githubText, lineIcon(OUT_PATH));
+  github.hidden = true;
+  foot.append(agentList, github);
+  element.append(head, body, foot);
+  const drawn = /* @__PURE__ */ new WeakMap();
+  const lists = /* @__PURE__ */ new WeakMap();
+  let current;
+  let target;
+  let marks = /* @__PURE__ */ new Map();
+  let lastSecond = Number.NaN;
+  let placed = { left: Number.NaN, top: Number.NaN, cap: "" };
+  const inlineLinks = /* @__PURE__ */ new Set();
+  let listening = false;
+  const reduced = () => context.reducedMotion();
+  const modelOf = (session, detail, clock) => {
+    return nodeCardModel(session, detail, context.config, clock);
+  };
+  const rowOf2 = (row2, fresh) => {
+    const item2 = el("li", "nc-row");
+    item2.dataset.mark = row2.mark;
+    const { icon: mark, check: check2 } = markIcon2(row2.mark);
+    const file = el("p", "nc-file");
+    const name = el("code", void 0, row2.file);
+    name.title = row2.path;
+    file.append(name, el("span", void 0, row2.reviewer));
+    if (row2.mark === "working") {
+      const tag = el("span", "nc-tag", "working on");
+      tag.setAttribute("aria-hidden", "true");
+      file.append(tag);
+    }
+    const text2 = el("p", "nc-text");
+    text2.append(el("span", "visually-hidden", `${MARK_WORDS[row2.mark]}: `), row2.text);
+    item2.append(mark, text2, file);
+    if (fresh && !reduced()) {
+      mark.animate(CHECK_FRAMES, { duration: CHECK_MS, easing: CHECK_EASE });
+      check2?.animate(CHECK_STROKE, { duration: CHECK_MS, easing: EASE4 });
+    }
+    return item2;
+  };
+  const issuesOf = (count) => {
+    const note = el("p", "nc-note");
+    const link = el("button", "nc-inline", "Follow-ups");
+    link.type = "button";
+    inlineLinks.add(link);
+    link.addEventListener("click", () => {
+      close(false);
+      options.revealFollowups("issue");
+    });
+    note.append(`${plural(count, "open issue")} \xB7 in `, link);
+    return note;
+  };
+  const blockMake = (block) => {
+    switch (block.kind) {
+      case "task":
+        return () => el("p", "nc-task", block.text);
+      case "note":
+        return () => el("p", "nc-note", block.text);
+      case "issues":
+        return () => issuesOf(block.count);
+      case "pr":
+        return () => {
+          const box = el("div", "nc-pr");
+          const line = el("p", "nc-pr-title");
+          line.append(el("b", void 0, `#${block.number}`), block.title);
+          const facts = el("p", "nc-pr-facts");
+          for (const fact of block.facts) {
+            const item2 = el("span", void 0, fact.text);
+            if (fact.tone !== void 0) {
+              item2.dataset.tone = fact.tone;
+            }
+            facts.append(item2);
+          }
+          box.append(line, facts);
+          return box;
+        };
+      case "now":
+        return () => {
+          const box = el("div", "nc-now");
+          const text2 = el("span", "nc-now-text");
+          text2.classList.toggle("failed", block.failed);
+          text2.classList.toggle("ended", block.label === "Ended");
+          if (block.tool !== "") {
+            text2.append(el("b", void 0, block.tool), " ");
+          }
+          text2.append(block.text);
+          box.append(el("span", "nc-now-label", block.label), text2);
+          if (block.report === void 0) {
+            return box;
+          }
+          const wrap = el("div", "nc-ended");
+          wrap.append(box, el("p", "nc-report", block.report));
+          return wrap;
+        };
+      case "files":
+        return () => {
+          const section2 = el("div", "nc-section");
+          const heading2 = el("h4");
+          heading2.append(el("span", "nc-section-title", "Changed files"), el("span", "nc-count", String(block.files.length)));
+          const list = el("ul", "nc-files");
+          for (const file of block.files) {
+            list.append(el("li", void 0, file));
+          }
+          section2.append(heading2, list);
+          return section2;
+        };
+      case "progress":
+        return () => {
+          const box = el("div", "nc-progress");
+          const line = el("p");
+          line.append(`${block.edited} of ${block.total} edited`, el("span", void 0, block.counts));
+          const segments = el("div", "nc-segs");
+          for (const segment of block.segments) {
+            const part = el("i");
+            part.dataset.mark = segment.mark;
+            setVars(part, { "--c": flyColor(segment.kind) });
+            segments.append(part);
+          }
+          box.append(line, segments);
+          return box;
+        };
+      case "metrics":
+        return () => {
+          const box = el("div", "nc-metrics");
+          lists.set(box, box);
+          return box;
+        };
+      case "followups":
+        return () => sectionOf(block.type, block.items.length, lists);
+      case "items":
+        return () => sectionOf(block.type, block.rows.length, lists);
+    }
+  };
+  const blockPart = (block, fresh) => {
+    const make = blockMake(block);
+    if (block.kind === "metrics") {
+      const items = block.metrics.map((metric) => ({ key: metric.label, sig: JSON.stringify(metric), make: () => metricOf(metric) }));
+      return { key: "metrics", sig: "", make, items };
+    }
+    if (block.kind === "followups") {
+      const items = block.items.map((item2) => ({ key: item2.id, sig: JSON.stringify(item2), make: () => followupItem(item2) }));
+      return { key: `followups:${block.type}`, sig: String(block.items.length), make, items };
+    }
+    if (block.kind === "items") {
+      const items = block.rows.map((row2) => ({ key: `row:${row2.index}`, sig: JSON.stringify(row2), make: () => rowOf2(row2, fresh.has(row2.index)) }));
+      return { key: `items:${block.type}`, sig: String(block.rows.length), make, items };
+    }
+    return { key: block.kind, sig: JSON.stringify(block), make };
+  };
+  const followupItem = (item2) => {
+    const entry = el("li", "nc-item");
+    entry.append(el("p", "nc-text", item2.text));
+    if (item2.file !== void 0 || item2.category !== void 0) {
+      const file = el("p", "nc-file");
+      if (item2.file !== void 0) {
+        file.append(el("code", void 0, item2.file));
+      }
+      if (item2.category !== void 0) {
+        file.append(el("span", void 0, item2.category));
+      }
+      entry.append(file);
+    }
+    return entry;
+  };
+  const fade = () => {
+    const top = body.scrollTop;
+    body.classList.toggle("more-above", top > 2);
+    body.classList.toggle("more-below", top + body.clientHeight < body.scrollHeight - 2);
+  };
+  body.addEventListener("scroll", fade, { passive: true });
+  const render = (model, opening) => {
+    element.dataset.kind = model.kind;
+    element.setAttribute("aria-label", model.label);
+    setText(role, model.role);
+    setText(meta, model.meta);
+    reconcile(chips, model.chips.map((chip, index) => ({ key: String(index), sig: JSON.stringify(chip), make: () => chipOf(chip) })), drawn, lists);
+    const rows = model.blocks.flatMap((block) => block.kind === "items" ? block.rows : []);
+    const turned = rows.filter((row2) => row2.mark === "edited" && marks.has(row2.index) && marks.get(row2.index) !== "edited");
+    const fresh = new Set(opening ? [] : turned.map((row2) => row2.index));
+    marks = new Map(rows.map((row2) => [row2.index, row2.mark]));
+    reconcile(body, model.blocks.map((block) => blockPart(block, fresh)), drawn, lists);
+    if (opening) {
+      body.scrollTop = 0;
+    }
+    const pr = model.pr !== void 0 && WEB_URL.test(model.pr.url) ? model.pr : void 0;
+    github.hidden = pr === void 0;
+    if (pr !== void 0) {
+      github.href = pr.url;
+      setText(githubText, `#${pr.number} on GitHub`);
+    }
+    fade();
+  };
+  const place2 = (node) => {
+    const anchor = node.querySelector?.(".node-outline") ?? node;
+    const rect = anchor.getBoundingClientRect();
+    const right = rect.left + rect.width;
+    const bottom = rect.top + rect.height;
+    const width = element.offsetWidth;
+    const { innerWidth, innerHeight } = window;
+    const content = head.offsetHeight + body.scrollHeight + foot.offsetHeight + BORDERS;
+    const height = Math.min(MAX_HEIGHT, innerHeight * MAX_SHARE, content);
+    let left = right + SIDE_GAP;
+    let top = rect.top - RAISE;
+    let cap;
+    if (left + width > innerWidth - EDGE) {
+      left = rect.left - SIDE_GAP - width;
+    }
+    if (left < EDGE) {
+      left = Math.max(EDGE, Math.min(innerWidth - width - EDGE, rect.left + rect.width / 2 - width / 2));
+      const below = bottom + BELOW_GAP;
+      const roomBelow = innerHeight - EDGE - below;
+      const roomAbove = rect.top - BELOW_GAP - EDGE;
+      top = below;
+      if (height > roomBelow && height <= roomAbove) {
+        top = rect.top - BELOW_GAP - height;
+      } else if (height > roomBelow && roomAbove > roomBelow) {
+        top = EDGE;
+        cap = roomAbove;
+      } else if (height > roomBelow) {
+        cap = roomBelow;
+      }
+    } else {
+      top = Math.max(Math.min(top, innerHeight - EDGE - height), bottom + RAISE - height);
+    }
+    const next = { left: Math.round(left), top: Math.round(top), cap: cap === void 0 ? "" : `${Math.max(0, Math.floor(cap))}px` };
+    if (next.left !== placed.left || next.top !== placed.top) {
+      element.style.left = `${next.left}px`;
+      element.style.top = `${next.top}px`;
+    }
+    const capChanged = next.cap !== placed.cap;
+    if (capChanged) {
+      element.style.maxHeight = next.cap;
+    }
+    placed = next;
+    if (capChanged) {
+      fade();
+    }
+  };
+  const focusables = () => {
+    for (const link of inlineLinks) {
+      if (!element.contains(link)) {
+        inlineLinks.delete(link);
+      }
+    }
+    return [...inlineLinks, agentList, ...github.hidden ? [] : [github]];
+  };
+  element.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab" || target === void 0) {
+      return;
+    }
+    const order = focusables();
+    const at = document.activeElement;
+    const leaving2 = event.shiftKey ? at === element || at === body || at === order[0] : at === order.at(-1);
+    const node = leaving2 ? options.graph()?.node?.(target.key) : void 0;
+    if (node?.focus !== void 0) {
+      event.preventDefault();
+      node.focus({ preventScroll: true });
+    }
+  });
+  const onKey = (event) => {
+    if (event.key === "Escape" && target !== void 0) {
+      close(true);
+    }
+  };
+  const onPointer = (event) => {
+    const at = event.target;
+    if (target === void 0 || element.contains(at)) {
+      return;
+    }
+    const cardNode = at?.closest?.(CARD_NODE);
+    const node = options.graph()?.node?.(target.key);
+    if (node?.contains(at) !== true && (cardNode === null || cardNode === void 0)) {
+      close(false);
+    }
+  };
+  const listen = (on) => {
+    if (on === listening) {
+      return;
+    }
+    listening = on;
+    if (on) {
+      document.addEventListener("keydown", onKey);
+      document.addEventListener("pointerdown", onPointer);
+    } else {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    }
+  };
+  const open2 = (detail) => {
+    const model = current === void 0 ? void 0 : modelOf(current, detail, context.now());
+    if (model === void 0) {
+      return;
+    }
+    if (shown !== void 0 && shown !== card) {
+      shown.close(false);
+    }
+    shown = card;
+    target = detail;
+    marks = /* @__PURE__ */ new Map();
+    lastSecond = Math.floor(context.now() / 1e3);
+    for (const animation of element.getAnimations()) {
+      animation.cancel();
+    }
+    element.classList.remove("closing");
+    if (!element.isConnected) {
+      options.layer().append(element);
+    }
+    element.hidden = false;
+    render(model, true);
+    listen(true);
+    const graph = options.graph();
+    graph?.markCard?.(detail.key);
+    const node = graph?.node?.(detail.key);
+    placed = { ...placed, left: Number.NaN, top: Number.NaN };
+    if (node !== void 0) {
+      place2(node);
+    }
+    if (!reduced()) {
+      element.animate(OPEN_FRAMES, { duration: OPEN_MS2, easing: EASE4 });
+    }
+    if (detail.keyboard) {
+      element.focus({ preventScroll: true });
+    }
+  };
+  const close = (returnFocus) => {
+    if (target === void 0) {
+      return;
+    }
+    const key = target.key;
+    target = void 0;
+    if (shown === card) {
+      shown = void 0;
+    }
+    listen(false);
+    const graph = options.graph();
+    graph?.markCard?.(void 0);
+    if (returnFocus) {
+      graph?.node?.(key)?.focus?.({ preventScroll: true });
+    }
+    if (reduced()) {
+      element.hidden = true;
+      return;
+    }
+    element.classList.add("closing");
+    const done = () => {
+      if (target === void 0) {
+        element.hidden = true;
+        element.classList.remove("closing");
+      }
+    };
+    const fadeOut = element.animate(CLOSE_FRAMES, { duration: CLOSE_MS2, easing: "ease-in", fill: "forwards" });
+    fadeOut.finished.then(done, () => void 0);
+  };
+  agentList.addEventListener("click", () => {
+    const agentId = target?.agentId;
+    if (agentId === void 0) {
+      return;
+    }
+    close(false);
+    const detail = { agentId };
+    agentList.dispatchEvent(new CustomEvent(SESSION_AGENT, { bubbles: true, detail }));
+  });
+  const card = {
+    element,
+    toggle(detail) {
+      if (target !== void 0 && target.key === detail.key) {
+        close(false);
+        return;
+      }
+      open2(detail);
+    },
+    update(session) {
+      current = session;
+      if (target === void 0) {
+        return;
+      }
+      const model = modelOf(session, target, context.now());
+      if (model === void 0) {
+        close(false);
+        return;
+      }
+      render(model, false);
+    },
+    frame(clock) {
+      if (target === void 0) {
+        return;
+      }
+      const node = options.graph()?.node?.(target.key);
+      if (node === void 0) {
+        close(false);
+        return;
+      }
+      place2(node);
+      const second = Math.floor(clock / 1e3);
+      if (second !== lastSecond && current !== void 0) {
+        lastSecond = second;
+        const model = modelOf(current, target, clock);
+        if (model !== void 0) {
+          render(model, false);
+        }
+      }
+    },
+    close,
+    destroy() {
+      close(false);
+      listen(false);
+      element.remove();
+      current = void 0;
+    }
+  };
+  return card;
+};
+
 // src/ui/session-id.ts
 var SESSION_ID_LENGTH = 8;
 var COPIED_TEXT2 = "copied";
@@ -14965,38 +16740,46 @@ var createStripCore = (host, context, open2) => {
   strip.hidden = true;
   strip.title = "Open the main-thread messages";
   strip.setAttribute("aria-haspopup", "dialog");
+  const line = el("span", "main-strip-line");
   const text2 = el("span", "main-strip-text");
+  const typing = createTyping(true);
+  line.append(text2, typing);
   const kind = el("span", "main-strip-kind");
   const time2 = el("time", "main-strip-time");
   const count = el("span", "main-strip-count");
-  strip.append(mainTag(), text2, kind, time2, count, chevronIcon());
+  strip.append(mainTag(), line, kind, time2, count, chevronIcon());
   host.append(strip);
   strip.addEventListener("click", () => open2(strip));
   let first = true;
   let key = "";
   let at;
+  let working;
   let lastSecond = Number.NaN;
   const tick = (clock) => {
     if (at !== void 0) {
       setText(time2, ago(clock - at));
     }
   };
+  const fades2 = () => !context.reducedMotion() && mainThreadModalFrom() !== strip;
   return {
-    update({ model, at: dateTime }) {
+    update({ model, at: dateTime, working: worksAt }) {
       const appears = strip.hidden && model !== void 0;
       strip.hidden = model === void 0;
+      working = model === void 0 ? void 0 : worksAt;
       if (model === void 0) {
         key = "";
         at = void 0;
         first = false;
+        setTyping(typing, false, false);
         return;
       }
       const slides = appears && !first && !context.reducedMotion();
-      first = false;
       strip.dataset.waiting = String(model.waiting);
       setText(kind, model.label);
       kind.hidden = model.label === "";
       setText(count, model.count);
+      const writing = worksAt(context.now());
+      setTyping(typing, writing, !first && fades2() && (writing || model.id === key));
       if (model.id !== key) {
         const swap = key !== "" && !context.reducedMotion() && mainThreadModalFrom() !== strip;
         key = model.id;
@@ -15009,11 +16792,13 @@ var createStripCore = (host, context, open2) => {
         tick(context.now());
         if (swap) {
           const frames = [{ opacity: 0, transform: "translateY(3px)" }, { opacity: 1, transform: "none" }];
-          for (const part of [text2, kind]) {
+          const parts = typing.hidden ? [text2, kind] : [text2, kind, typing];
+          for (const part of parts) {
             part.animate(frames, { duration: SWAP_MS2, easing: EASE11 });
           }
         }
       }
+      first = false;
       if (slides) {
         slide(host, true, false);
       }
@@ -15023,10 +16808,14 @@ var createStripCore = (host, context, open2) => {
       if (second !== lastSecond) {
         lastSecond = second;
         tick(clock);
+        if (working) {
+          setTyping(typing, working(clock), fades2());
+        }
       }
     },
     destroy() {
       at = void 0;
+      working = void 0;
     }
   };
 };
@@ -15042,7 +16831,7 @@ var createSessionStripView = (host, context) => {
   return {
     update(session) {
       current = session;
-      core.update({ model: sessionStripModel(session), at: session.messages.at(-1)?.at ?? "" });
+      core.update({ model: sessionStripModel(session), at: session.messages.at(-1)?.at ?? "", working: (clock) => sessionWorking(session, clock) });
     },
     frame: core.frame,
     destroy() {
@@ -15082,18 +16871,18 @@ var valuesOf = (counts) => {
   const { runs, requests, cacheRead, output, peakContext, usd } = counts;
   return [String(runs), String(requests), tokens(cacheRead), tokens(output), tokens(peakContext), cost(usd)];
 };
-var marksOf = (models, markOf2) => {
+var marksOf = (models, markOf3) => {
   const byMark = /* @__PURE__ */ new Map();
   for (const model of models) {
-    const mark = markOf2(model);
+    const mark = markOf3(model);
     if (mark !== "") {
       byMark.set(mark, [...byMark.get(mark) ?? [], model]);
     }
   }
   return [...byMark].map(([mark, marked]) => ({ mark, models: marked.join(", ") }));
 };
-var agentRows = (metrics, markOf2) => {
-  return metrics.roles.map((role) => ({ name: role.role, marks: marksOf(role.models, markOf2), values: valuesOf(role) }));
+var agentRows = (metrics, markOf3) => {
+  return metrics.roles.map((role) => ({ name: role.role, marks: marksOf(role.models, markOf3), values: valuesOf(role) }));
 };
 var totalRow = (metrics) => ({ name: "Total", marks: [], values: valuesOf(metrics.total) });
 var share = (part, whole) => {
@@ -15154,6 +16943,7 @@ var verifyRows = (verification) => {
     return { role: entry.role, cells, mean, title: plural(entry.runs, "run") };
   });
 };
+var RESUMES_SHOWN = 5;
 var cacheText = (expired) => {
   if (expired === void 0) {
     return "";
@@ -15174,18 +16964,46 @@ var resumeRow = (entry) => {
     title: [when, entry.source, ...estimate].join(" \xB7 ")
   };
 };
+var resumeRows = (items) => {
+  let before;
+  return items.map((entry) => {
+    const row2 = resumeRow(entry);
+    if (parseTime(entry.at) === void 0) {
+      return row2;
+    }
+    const day = localDay(entry.at);
+    if (before !== void 0 && day !== before) {
+      row2.day = day;
+    }
+    before = day;
+    return row2;
+  });
+};
 var resumesView = (resumes) => {
   if (resumes.items.length === 0) {
-    return { head: NO_RESUMES, rows: [] };
+    return { head: NO_RESUMES, rows: [], hidden: 0 };
   }
-  const parts = [plural(resumes.count, "resume")];
+  const forks = resumes.items.filter((entry) => entry.source === "fork").length;
+  const parts = [];
+  if (resumes.items.length > forks) {
+    parts.push(plural(resumes.items.length - forks, "resume"));
+  }
+  if (forks > 0) {
+    parts.push(plural(forks, "fork"));
+  }
   if (resumes.expired > 0) {
     parts.push(`${resumes.expired} likely expired`);
   }
   if (resumes.items.some((entry) => entry.cacheWriteUsd !== void 0)) {
     parts.push(`\u2248\xA0${overheadCost(resumes.cacheWriteUsd)}`);
   }
-  return { head: parts.join(" \xB7 "), rows: resumes.items.map(resumeRow) };
+  return { head: parts.join(" \xB7 "), rows: resumeRows(resumes.items), hidden: Math.max(0, resumes.items.length - RESUMES_SHOWN) };
+};
+var resumesToggle = (view, open2) => {
+  if (view.hidden === 0) {
+    return "";
+  }
+  return open2 ? "Show fewer" : `Show all ${view.rows.length} (${view.hidden} earlier)`;
 };
 var createBarList = (list, empty) => {
   const entries = /* @__PURE__ */ new Map();
@@ -15247,9 +17065,9 @@ var barSection = (parent, emptyText, modifier = "") => {
   return createBarList(list, empty);
 };
 var ENTER_MS4 = 500;
-var OPEN_MS2 = 450;
+var OPEN_MS3 = 450;
 var summaryCount = 0;
-var createSessionSummaryView = (host, context, metricsOf, options) => {
+var createSessionSummaryView = (host, context, metricsOf2, options) => {
   summaryCount += 1;
   const panelId = `session-summary-${summaryCount}`;
   const button = el("button", "button summary-button", "Summary");
@@ -15307,8 +17125,18 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
   overhead.body.append(overheadHead, overheadList, overheadNote);
   const resumes = section("Resumes");
   const resumesHead = el("p", "summary-overhead-head");
+  const resumesMore = el("button", "show-all");
+  resumesMore.type = "button";
+  resumesMore.hidden = true;
+  const olderWrap = el("div", "agent-rows-more");
+  const olderList = el("div", "summary-verify resumes older");
+  olderList.id = `${panelId}-resumes`;
+  olderList.inert = true;
+  olderWrap.append(olderList);
+  resumesMore.setAttribute("aria-controls", olderList.id);
+  resumesMore.setAttribute("aria-expanded", "false");
   const resumeList = el("div", "summary-verify resumes");
-  resumes.body.append(resumesHead, resumeList);
+  resumes.body.append(resumesHead, resumesMore, olderWrap, resumeList);
   left.append(agents.element, verification.element, resumes.element);
   right.append(branches.element, tools.element, overhead.element);
   const health = el("div", "hsum");
@@ -15359,6 +17187,10 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     element.append(cache, el("span", "summary-verify-mean", row2.usd));
     return element;
   };
+  const resumeLines = (row2) => {
+    const line = resumeLine(row2);
+    return row2.day === void 0 ? [line] : [el("h5", "summary-subheading", row2.day), line];
+  };
   const healthChip = (chip) => {
     const element = el("span", "hchip");
     const dot = el("i");
@@ -15373,10 +17205,12 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     health.hidden = chips.length === 0;
     health.replaceChildren(...chips.length > 0 ? [el("h4", "details-heading", "In workflow health"), ...chips.map(healthChip)] : []);
   };
+  let continued = { head: NO_RESUMES, rows: [], hidden: 0 };
+  let resumesOpen = false;
   const draw2 = (session) => {
-    const metrics = metricsOf(session);
-    const markOf2 = (model) => modelMark(model, context.config.modelLetters);
-    tbody.replaceChildren(...agentRows(metrics, markOf2).map((row2) => agentRowElement(row2)));
+    const metrics = metricsOf2(session);
+    const markOf3 = (model) => modelMark(model, context.config.modelLetters);
+    tbody.replaceChildren(...agentRows(metrics, markOf3).map((row2) => agentRowElement(row2)));
     tfoot.replaceChildren(agentRowElement(totalRow(metrics)));
     const rows = verifyRows(metrics.verification);
     verifyList.replaceChildren(...rows.map(verifyRow));
@@ -15392,15 +17226,27 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     overheadList.hidden = nurselog.bars.length === 0;
     overheadBars.set(nurselog.bars);
     setText(overheadNote, nurselog.note);
-    const continued = resumesView(metrics.resumes);
+    continued = resumesView(metrics.resumes);
     setText(resumesHead, continued.head);
     resumesHead.className = continued.rows.length > 0 ? "summary-overhead-head" : "summary-empty";
-    resumeList.replaceChildren(...continued.rows.map(resumeLine));
+    olderList.replaceChildren(...continued.rows.slice(0, continued.hidden).flatMap(resumeLines));
+    resumeList.replaceChildren(...continued.rows.slice(continued.hidden).flatMap(resumeLines));
     resumeList.hidden = continued.rows.length === 0;
+    resumesMore.hidden = continued.hidden === 0;
+    setText(resumesMore, resumesToggle(continued, resumesOpen));
     drawHealth(session);
   };
+  const setResumesOpen = (next) => {
+    resumesOpen = next;
+    olderWrap.classList.toggle("open", next);
+    olderList.inert = !next;
+    resumesMore.setAttribute("aria-expanded", String(next));
+    setText(resumesMore, resumesToggle(continued, next));
+  };
+  const onResumesMore = () => setResumesOpen(!resumesOpen);
+  resumesMore.addEventListener("click", onResumesMore);
   let current;
-  let shown = false;
+  let shown2 = false;
   let open2 = false;
   let first = true;
   let destroyed = false;
@@ -15431,7 +17277,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
         if (!destroyed && open2) {
           panel.scrollIntoView({ block: "nearest", behavior });
         }
-      }, OPEN_MS2);
+      }, OPEN_MS3);
     });
   };
   const onClick = () => {
@@ -15457,8 +17303,8 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
     update(session) {
       current = session;
       panel.setAttribute("aria-label", `Summary of ${sessionHeading(session)}`);
-      if (!shown && summaryShown(session)) {
-        shown = true;
+      if (!shown2 && summaryShown(session)) {
+        shown2 = true;
         button.hidden = false;
         if (!first && !context.reducedMotion()) {
           button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE4 });
@@ -15478,6 +17324,7 @@ var createSessionSummaryView = (host, context, metricsOf, options) => {
       destroyed = true;
       window.clearTimeout(scrollTimer);
       button.removeEventListener("click", onClick);
+      resumesMore.removeEventListener("click", onResumesMore);
       current = void 0;
     }
   };
@@ -15677,9 +17524,9 @@ var createSessionTokensView = (host, context) => {
       const view = rowViews[i];
       setText(view.value, model.value);
       view.row.classList.toggle("off", model.total === 0);
-      const shown = new Set(model.segments.map((segment) => segment.stage));
+      const shown2 = new Set(model.segments.map((segment) => segment.stage));
       for (const [stage, item2] of view.segments) {
-        if (!shown.has(stage)) {
+        if (!shown2.has(stage)) {
           item2.style.width = "0%";
         }
       }
@@ -15898,6 +17745,7 @@ var createSessionCard = (context, onToggle, onHover) => {
   const questions = createSessionQuestionsView(hosts.questions, context, { layer: element, flySource: bubbleOf });
   const listed = SESSION_VIEWS.map(({ host, make }) => ({ host: hosts[host], view: make(hosts[host], context) }));
   const nodeView = listed.find((entry) => entry.view.agentNode)?.view;
+  const cardView = listed.find((entry) => entry.view.node)?.view;
   const agentNodeOf = (agentId) => nodeView?.agentNode?.(agentId) ?? hosts.graph;
   const followups = createSessionFollowupsView(hosts.followups, context, { layer: element, flySource: agentNodeOf, collapsed: () => collapsed ?? false });
   const summary = createSessionSummaryView(hosts.summary, context, sessionMetrics, { collapsed: () => collapsed ?? false, expand: () => onToggle(true) });
@@ -15930,6 +17778,9 @@ var createSessionCard = (context, onToggle, onHover) => {
       return;
     }
     collapsed = next;
+    if (next) {
+      nodeCard.close(false);
+    }
     element.classList.toggle("collapsed", next);
     toggle.set(next);
     for (const region of regions) {
@@ -15957,6 +17808,7 @@ var createSessionCard = (context, onToggle, onHover) => {
     return ids === "" ? [] : ids.split(" ");
   };
   element.addEventListener(SESSION_MAIN, (event) => {
+    nodeCard.close(false);
     const from = event.target;
     if (!current || !(from instanceof HTMLElement || from instanceof SVGElement)) {
       return;
@@ -15985,23 +17837,44 @@ var createSessionCard = (context, onToggle, onHover) => {
     }
     routeFocus(void 0, event.target);
   });
-  element.addEventListener(SESSION_AGENT, (event) => {
-    const agentId = event.detail?.agentId;
-    if (typeof agentId !== "string") {
-      return;
-    }
-    const reveal = () => {
-      for (const view of views) {
-        view.revealAgent?.(agentId);
-      }
-    };
+  const expandThen = (reveal) => {
     if (collapsed) {
       onToggle(true);
       window.requestAnimationFrame(reveal);
     } else {
       reveal();
     }
+  };
+  const nodeCard = createNodeCard(context, {
+    layer: () => document.body,
+    graph: () => cardView,
+    revealFollowups(type) {
+      expandThen(() => {
+        for (const view of views) {
+          view.revealFollowups?.(type);
+        }
+      });
+    }
   });
+  element.addEventListener(SESSION_CARD, (event) => {
+    const detail = event.detail;
+    if (isCardDetail(detail)) {
+      nodeCard.toggle(detail);
+    }
+  });
+  const onAgent = (event) => {
+    const agentId = event.detail?.agentId;
+    if (typeof agentId !== "string") {
+      return;
+    }
+    expandThen(() => {
+      for (const view of views) {
+        view.revealAgent?.(agentId);
+      }
+    });
+  };
+  element.addEventListener(SESSION_AGENT, onAgent);
+  nodeCard.element.addEventListener(SESSION_AGENT, onAgent);
   element.addEventListener("animationend", (event) => {
     if (event.target === element && event.animationName === "card-flash") {
       element.classList.remove("flash");
@@ -16038,6 +17911,7 @@ var createSessionCard = (context, onToggle, onHover) => {
       for (const view of views) {
         view.update(session, previous);
       }
+      nodeCard.update(session);
       chips.update(session, folded());
       if (!previous && linkFocus !== void 0) {
         focusLink(linkFocus);
@@ -16051,6 +17925,7 @@ var createSessionCard = (context, onToggle, onHover) => {
       for (const view of views) {
         view.frame(clock, time2);
       }
+      nodeCard.frame(clock);
     },
     flash() {
       window.clearTimeout(flashTimer);
@@ -16088,6 +17963,7 @@ var createSessionCard = (context, onToggle, onHover) => {
       sessionId.destroy();
       fixtureLink?.destroy();
       current = void 0;
+      nodeCard.destroy();
       chips.destroy();
       for (const view of views) {
         view.destroy();
@@ -16195,8 +18071,8 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   };
   const updateFootnote = () => {
     const ids = [...stack.ids(), ...panel.visibleCards()];
-    const shown = ids.map((id) => cardOf(id)?.session).filter((session) => session !== void 0);
-    footnote.hidden = !shown.some((session) => showsSubagentCost(session, isSessionCollapsed(collapses.get(session.id))));
+    const shown2 = ids.map((id) => cardOf(id)?.session).filter((session) => session !== void 0);
+    footnote.hidden = !shown2.some((session) => showsSubagentCost(session, isSessionCollapsed(collapses.get(session.id))));
   };
   const toggle = (sessionId, collapsed) => {
     const found = cardOf(sessionId);
@@ -16434,6 +18310,70 @@ var createSignInNotice = () => {
   return notice;
 };
 
+// src/ui/changelog-button.ts
+var changelogIcon = () => {
+  const icon2 = svgEl("svg", { viewBox: "0 0 14 14", "aria-hidden": "true" });
+  const stroke2 = { fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round" };
+  icon2.append(svgEl("path", { d: "M3 3.5h8M3 7h8M3 10.5h5", ...stroke2 }));
+  return icon2;
+};
+var createChangelogButton = () => {
+  const button = el("button", "button changelog-button");
+  button.type = "button";
+  button.hidden = true;
+  button.setAttribute("aria-haspopup", "dialog");
+  const version = el("span", "changelog-version");
+  const dot = el("i", "changelog-dot");
+  dot.setAttribute("aria-hidden", "true");
+  dot.hidden = true;
+  const unseen = el("span", "visually-hidden", " new");
+  unseen.hidden = true;
+  button.append(changelogIcon(), el("span", "changelog-label", "Changelog"), version, unseen, dot);
+  let changelog = null;
+  let notice;
+  const seen = (current) => {
+    const stored = readValue(SEEN_KEY, true);
+    const value2 = seenVersion(stored, current);
+    if (stored !== value2) {
+      writeValue(SEEN_KEY, value2, true);
+    }
+    return value2;
+  };
+  const render = () => {
+    button.hidden = changelog === null;
+    if (changelog === null) {
+      return;
+    }
+    setText(version, changelog.current);
+    button.title = `Changelog \xB7 you have ${changelog.current}`;
+    dot.hidden = !hasUnseen(changelog, notice, seen(changelog));
+    unseen.hidden = dot.hidden;
+  };
+  const open2 = (opener, flash) => {
+    if (changelog === null) {
+      return;
+    }
+    const before = seen(changelog);
+    openChangelog({ opener, rail: changelogRail(changelog, notice, before), flash });
+    const newest2 = newestKnown(changelog, notice);
+    writeValue(SEEN_KEY, compareVersions(newest2, before) > 0 ? newest2 : before, true);
+    render();
+  };
+  button.addEventListener("click", () => open2(button));
+  return {
+    element: button,
+    setChangelog(next) {
+      changelog = next;
+      render();
+    },
+    setNotice(next) {
+      notice = next;
+      render();
+    },
+    open: open2
+  };
+};
+
 // src/ui/update.ts
 var SKIP_KEY = "nurselog.skipVersion";
 var NOTES_SHOWN = 6;
@@ -16447,18 +18387,18 @@ var ROOM_GAP = 12;
 var ENTER_MS5 = 420;
 var DOT_MS2 = 520;
 var DOT_DELAY_MS = 220;
-var OPEN_MS3 = 220;
-var CLOSE_MS2 = 140;
+var OPEN_MS4 = 220;
+var CLOSE_MS3 = 140;
 var LEAVE_MS = 220;
 var GLIDE_ENTER = { duration: ENTER_MS5, easing: EASE4 };
 var GLIDE_LEAVE = { duration: LEAVE_MS, easing: "ease-in" };
 var ENTER_FRAMES2 = [{ opacity: 0, transform: "translateX(12px) scale(.96)" }, { opacity: 1, transform: "none" }];
 var DOT_FRAMES = [{ transform: "scale(0)" }, { transform: "scale(1.5)", offset: 0.6 }, { transform: "none" }];
-var OPEN_FRAMES = [{ opacity: 0, transform: "translateY(-6px) scale(.97)" }, { opacity: 1, transform: "none" }];
-var CLOSE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px) scale(.98)" }];
+var OPEN_FRAMES2 = [{ opacity: 0, transform: "translateY(-6px) scale(.97)" }, { opacity: 1, transform: "none" }];
+var CLOSE_FRAMES2 = [{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px) scale(.98)" }];
 var LEAVE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateX(8px) scale(.96)" }];
 var versionParts = (version) => version.split(".").map(Number);
-var newestFirst2 = (a, b) => {
+var newestFirst3 = (a, b) => {
   const left = versionParts(a.version);
   const right = versionParts(b.version);
   for (let index = 0; index < 3; index += 1) {
@@ -16469,10 +18409,7 @@ var newestFirst2 = (a, b) => {
   }
   return 0;
 };
-var noteItems = (notes) => {
-  const all = [...notes].sort(newestFirst2).flatMap((note) => note.items);
-  return { items: all.slice(0, NOTES_SHOWN), more: all.length > NOTES_SHOWN };
-};
+var noteItems = (notes) => [...notes].sort(newestFirst3).flatMap((note) => note.items).slice(0, NOTES_SHOWN);
 var restartNote = () => {
   const note = el("p", "update-restart");
   const first = "The board closes itself within 10 seconds; the next session start, or ";
@@ -16507,9 +18444,9 @@ var createUpdateButton = (options) => {
   head.append(title, current);
   const notesHeading = el("p", "update-heading", "What's new");
   const notes = el("ul", "update-notes");
-  const allChanges = el("a", "update-all", "All changes");
-  allChanges.target = "_blank";
-  allChanges.rel = "noopener";
+  const fullChangelog = el("button", "update-full", "Full changelog");
+  fullChangelog.type = "button";
+  fullChangelog.hidden = true;
   const command = el("code");
   const copy = el("button", "button update-copy", COPY_TEXT);
   copy.type = "button";
@@ -16521,31 +18458,24 @@ var createUpdateButton = (options) => {
   skipButton.type = "button";
   const actions = el("div", "update-actions");
   actions.append(laterButton, skipButton);
-  popover.append(head, notesHeading, notes, allChanges, el("p", "update-heading", "Update"), commandBox, restartNote(), actions);
+  popover.append(head, notesHeading, notes, fullChangelog, el("p", "update-heading", "Update"), commandBox, restartNote(), actions);
   element.append(button, popover);
   let notice = null;
   let noticeKey = "";
   let deferred = false;
-  let shown = false;
+  let shown2 = false;
   let open2 = false;
-  let leaving;
+  let leaving2;
   let glides = [];
   let copyReset;
   const draw2 = (next) => {
     setText(version, next.latest);
     setText(title, `Nurselog ${next.latest}`);
     setText(current, `You have ${next.current}`);
-    const { items, more } = noteItems(next.notes);
+    const items = noteItems(next.notes);
     notes.replaceChildren(...items.map((item2) => el("li", void 0, item2)));
     notesHeading.hidden = items.length === 0;
     notes.hidden = items.length === 0;
-    const url = more ? next.changesUrl : void 0;
-    allChanges.hidden = url === void 0;
-    if (url === void 0) {
-      allChanges.removeAttribute("href");
-    } else {
-      allChanges.href = url;
-    }
     setText(command, next.command);
   };
   const setOpen2 = (next) => {
@@ -16562,7 +18492,7 @@ var createUpdateButton = (options) => {
       const room = window.innerHeight - popover.getBoundingClientRect().top - ROOM_GAP;
       popover.style.maxHeight = room > 0 ? `${Math.floor(room)}px` : "";
       if (!options.reducedMotion()) {
-        popover.animate(OPEN_FRAMES, { duration: OPEN_MS3, easing: EASE4 });
+        popover.animate(OPEN_FRAMES2, { duration: OPEN_MS4, easing: EASE4 });
       }
       title.focus({ preventScroll: true });
       return;
@@ -16576,7 +18506,7 @@ var createUpdateButton = (options) => {
       done();
       return;
     }
-    const fade = popover.animate(CLOSE_FRAMES, { duration: CLOSE_MS2, easing: "ease-in", fill: "forwards" });
+    const fade = popover.animate(CLOSE_FRAMES2, { duration: CLOSE_MS3, easing: "ease-in", fill: "forwards" });
     fade.finished.then(done, () => void 0);
   };
   const place2 = (hidden, timing) => {
@@ -16601,9 +18531,9 @@ var createUpdateButton = (options) => {
     }
   };
   const enter = () => {
-    shown = true;
-    leaving?.cancel();
-    leaving = void 0;
+    shown2 = true;
+    leaving2?.cancel();
+    leaving2 = void 0;
     if (element.hidden) {
       place2(false, GLIDE_ENTER);
     }
@@ -16614,10 +18544,10 @@ var createUpdateButton = (options) => {
     dot.animate(DOT_FRAMES, { duration: DOT_MS2, delay: DOT_DELAY_MS, easing: EASE4, fill: "backwards" });
   };
   const leave = () => {
-    shown = false;
+    shown2 = false;
     setOpen2(false);
     const gone = () => {
-      if (shown) {
+      if (shown2) {
         return;
       }
       if (element.contains(document.activeElement)) {
@@ -16632,21 +18562,30 @@ var createUpdateButton = (options) => {
       gone();
       return;
     }
-    leaving = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS, easing: "ease-in", fill: "forwards" });
-    leaving.finished.then(gone, gone);
+    leaving2 = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS, easing: "ease-in", fill: "forwards" });
+    leaving2.finished.then(gone, gone);
   };
   const sync = () => {
     const wanted = notice !== null && !deferred && readValue(SKIP_KEY, true) !== notice.latest;
-    if (wanted && !shown) {
+    if (wanted && !shown2) {
       enter();
-    } else if (!wanted && shown) {
+    } else if (!wanted && shown2) {
       leave();
     }
+    options.shownChanged?.();
   };
   button.addEventListener("click", () => {
-    if (shown) {
+    if (shown2) {
       setOpen2(!open2);
     }
+  });
+  fullChangelog.addEventListener("click", () => {
+    const version2 = notice?.latest;
+    if (version2 === void 0 || !options.openChangelog) {
+      return;
+    }
+    setOpen2(false);
+    options.openChangelog(button, version2);
   });
   copy.addEventListener("click", () => {
     const text2 = notice?.command;
@@ -16705,6 +18644,10 @@ var createUpdateButton = (options) => {
         draw2(next);
       }
       sync();
+    },
+    shownNotice: () => shown2 && notice ? notice : void 0,
+    setChangelog(ready) {
+      fullChangelog.hidden = !ready;
     }
   };
 };
@@ -16712,7 +18655,6 @@ var createUpdateButton = (options) => {
 // src/ui/topbar.ts
 var WARNINGS_SHOWN = 10;
 var EASE12 = "cubic-bezier(.2,.8,.2,1)";
-var TAB_MARGIN = 24;
 var INCHWORM_MS = 460;
 var INCHWORM_EASE = "cubic-bezier(.3,.7,.2,1)";
 var TAB_ENTER = [{ opacity: 0, transform: "scale(.9)" }, { opacity: 1, transform: "none" }];
@@ -16772,8 +18714,13 @@ var createTopBar = (host, options) => {
   warnings.append(button, list);
   status.append(connection, github, warnings);
   appendLegend(status, host);
-  const update = createUpdateButton({ reducedMotion: options.reducedMotion });
-  status.append(update.element);
+  const changelog = createChangelogButton();
+  const update = createUpdateButton({
+    reducedMotion: options.reducedMotion,
+    shownChanged: () => changelog.setNotice(update.shownNotice()),
+    openChangelog: (opener, version) => changelog.open(opener, version)
+  });
+  status.append(update.element, changelog.element);
   host.replaceChildren(brand, status);
   const sentinel = el("div", "topbar-sentinel");
   sentinel.setAttribute("aria-hidden", "true");
@@ -16784,7 +18731,7 @@ var createTopBar = (host, options) => {
       host.dataset.stuck = String(!entry.isIntersecting && entry.boundingClientRect.top < 0);
     }
   }).observe(sentinel);
-  let shown = [];
+  let shown2 = [];
   let shownKey = "";
   const times = [];
   const tabs = /* @__PURE__ */ new Map();
@@ -16977,6 +18924,8 @@ var createTopBar = (host, options) => {
       previous = element;
     }
   };
+  let markerStart = false;
+  let markerEnd = false;
   const reveal = (element, instant) => {
     if (!element) {
       return;
@@ -16984,14 +18933,7 @@ var createTopBar = (host, options) => {
     if (element === selectedTab()) {
       selectedInView = true;
     }
-    const start = element.offsetLeft - TAB_MARGIN;
-    const end = element.offsetLeft + element.offsetWidth + TAB_MARGIN - strip.clientWidth;
-    let left;
-    if (strip.scrollLeft > start) {
-      left = Math.max(0, start);
-    } else if (strip.scrollLeft < end) {
-      left = end;
-    }
+    const left = revealScroll({ left: element.offsetLeft, width: element.offsetWidth }, strip.scrollLeft, strip.clientWidth, markerStart, markerEnd);
     if (left !== void 0) {
       const behavior = instant || options.reducedMotion() ? "auto" : "smooth";
       strip.scrollTo({ left, behavior });
@@ -17040,11 +18982,13 @@ var createTopBar = (host, options) => {
         selectedInView = inView(start, end, viewStart, viewEnd);
       }
     }
-    const clearStart = moreStart ? viewStart + TAB_MARGIN : viewStart;
-    const clearEnd = moreEnd ? viewEnd - TAB_MARGIN : viewEnd;
-    const hidden = hiddenWaiting(boxes, clearStart, clearEnd);
+    const hidden = edgeMarkers(boxes, viewStart, viewEnd, moreStart, moreEnd);
     drawMarker(startMarker, hidden.start);
     drawMarker(endMarker, hidden.end);
+    markerStart = !startMarker.hidden;
+    markerEnd = !endMarker.hidden;
+    strip.dataset.markerStart = String(markerStart);
+    strip.dataset.markerEnd = String(markerEnd);
   };
   for (const marker of [startMarker, endMarker]) {
     marker.addEventListener("click", () => {
@@ -17119,7 +19063,7 @@ var createTopBar = (host, options) => {
   };
   const renderList = (clock) => {
     times.length = 0;
-    const items = shown.map((line) => {
+    const items = shown2.map((line) => {
       const item2 = el("li");
       const at = parseTime(line.at);
       const time2 = el("time", "warning-time", at === void 0 ? "" : ago(clock - at));
@@ -17138,9 +19082,19 @@ var createTopBar = (host, options) => {
     setOpen2(open2);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !list.hidden) {
-      setOpen2(false);
+    if (event.key !== "Escape" || list.hidden) {
+      return;
+    }
+    const focused = document.activeElement;
+    const inside = focused === button || focused !== null && list.contains(focused);
+    setOpen2(false);
+    if (inside) {
       button.focus();
+    }
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!list.hidden && !warnings.contains(event.target)) {
+      setOpen2(false);
     }
   });
   return {
@@ -17166,7 +19120,7 @@ var createTopBar = (host, options) => {
       const newest2 = board.warnings.slice(-WARNINGS_SHOWN).reverse();
       const key = newest2.map((line) => `${line.at} ${line.text}`).join("\n");
       const changed = key !== shownKey;
-      shown = newest2;
+      shown2 = newest2;
       shownKey = key;
       if (count === 0) {
         setOpen2(false);
@@ -17221,6 +19175,10 @@ var createTopBar = (host, options) => {
     },
     setUpdate(notice) {
       update.show(notice);
+    },
+    setChangelog(next) {
+      changelog.setChangelog(next);
+      update.setChangelog(next !== null);
     }
   };
 };
@@ -17301,11 +19259,11 @@ var startBoard = async (source, options = {}) => {
   const reducedMotion = () => motion.matches;
   let repositories = Array.isArray(firstList) ? firstList : [];
   let selected;
-  let shown;
+  let shown2;
   let drawn;
   let drewStack = false;
   let travel = 1;
-  let leaving;
+  let leaving2;
   let generation = 0;
   let events;
   let retry;
@@ -17403,6 +19361,17 @@ var startBoard = async (source, options = {}) => {
       topBar.setUpdate(notice);
     }
   };
+  let changelogKnown = false;
+  const checkChangelog = async () => {
+    if (!source.changelog || signedOut || changelogKnown) {
+      return;
+    }
+    const answer = await source.changelog();
+    if (answer !== void 0 && !signedOut && !changelogKnown) {
+      changelogKnown = true;
+      topBar.setChangelog(answer);
+    }
+  };
   const checkList = async (own) => {
     const list = await source.repositories();
     if (list === SIGNED_OUT) {
@@ -17416,12 +19385,13 @@ var startBoard = async (source, options = {}) => {
   };
   const connect = (own) => {
     retry = void 0;
-    const stream = source.openStream(shown?.id, {
+    const stream = source.openStream(shown2?.id, {
       open() {
         if (failed) {
           failed = false;
           void checkRestart();
           void checkUpdate();
+          void checkChangelog();
         }
       },
       message(data) {
@@ -17477,7 +19447,7 @@ var startBoard = async (source, options = {}) => {
     }
     const frames = [from, { opacity: 0, transform: `translateX(${-travel * OUT_SHIFT}px)` }];
     const out = host.animate(frames, { duration: OUT_MS, easing: OUT_EASE, fill: "forwards" });
-    leaving = out;
+    leaving2 = out;
     const remove = () => host.remove();
     out.finished.then(remove, remove);
   };
@@ -17507,7 +19477,7 @@ var startBoard = async (source, options = {}) => {
   };
   const enter = (current, host) => {
     const own = generation;
-    const out = leaving?.playState === "running" ? leaving : void 0;
+    const out = leaving2?.playState === "running" ? leaving2 : void 0;
     const moves = [];
     if (!reducedMotion()) {
       const slide2 = [{ opacity: 0, transform: `translateX(${travel * IN_SHIFT}px)` }, { opacity: 1, transform: "none" }];
@@ -17570,7 +19540,7 @@ var startBoard = async (source, options = {}) => {
     }
     const context = createContext({ ...FALLBACK_CONFIG, ...config }, now, source);
     context.repositoryId = next?.id ?? "";
-    shown = { id: next?.id, context };
+    shown2 = { id: next?.id, context };
     connect(own);
   };
   const makeStack = (current, host, link) => {
@@ -17710,16 +19680,16 @@ var startBoard = async (source, options = {}) => {
   const tick = (time2) => {
     requestAnimationFrame(tick);
     let drew = false;
-    if (pending && latest && shown && handOff === void 0) {
+    if (pending && latest && shown2 && handOff === void 0) {
       pending = false;
       drew = true;
       const board = latest;
-      takeSnapshot(shown.context, board);
+      takeSnapshot(shown2.context, board);
       topBar.update(board);
-      drawStack(shown, board);
-      shown.board = board;
-      if (shown.linkSource) {
-        relink(shown);
+      drawStack(shown2, board);
+      shown2.board = board;
+      if (shown2.linkSource) {
+        relink(shown2);
       }
       waitFrom ??= Date.now();
       settleSessionLink();
@@ -17748,7 +19718,7 @@ var startBoard = async (source, options = {}) => {
       retire(drawn);
       drawn = void 0;
     }
-    shown = void 0;
+    shown2 = void 0;
     repositories = [];
     selected = void 0;
     drawTabs();
@@ -17865,6 +19835,7 @@ var startBoard = async (source, options = {}) => {
   if (options.linkHandOff) {
     guardHandOff(consumeLaunches);
   }
+  void checkChangelog();
   if (source.update) {
     void checkUpdate();
     window.setTimeout(() => void checkUpdate(), UPDATE_FOLLOW_UP_MS);
@@ -17904,36 +19875,44 @@ var isNamedLines = (value2) => isPlainObject3(value2) && Array.isArray(value2.li
 var isClaudeMd = (value2) => isPlainObject3(value2) && Object.values(value2).every(isNamedLines);
 var isWorkflowSetup = (value2) => isPlainObject3(value2) && Array.isArray(value2.roles) && value2.roles.every(isSetupRole) && Array.isArray(value2.verification) && value2.verification.every((kind) => VERIFICATION_KINDS2.includes(kind)) && (value2.mergeBy === "developer" || value2.mergeBy === "agent") && (value2.agents === void 0 || Array.isArray(value2.agents) && value2.agents.every(isSetupAgent)) && (value2.accepted === void 0 || isAccepted(value2.accepted)) && (value2.claudeMd === void 0 || isClaudeMd(value2.claudeMd));
 var isInsightReport = (value2) => isPlainObject3(value2) && typeof value2.generatedAt === "string" && Array.isArray(value2.insights) && Array.isArray(value2.sessions) && isPlainObject3(value2.basis) && isPlainObject3(value2.options);
-var VERSION = /^\d+\.\d+\.\d+$/;
-var isVersion = (value2) => typeof value2 === "string" && VERSION.test(value2);
+var VERSION2 = /^\d+\.\d+\.\d+$/;
+var isVersion = (value2) => typeof value2 === "string" && VERSION2.test(value2);
 var isStringList = (value2) => Array.isArray(value2) && value2.every((item2) => typeof item2 === "string");
-var isReleaseNotes = (value2) => isPlainObject3(value2) && isVersion(value2.version) && isStringList(value2.items);
-var isWebUrl = (value2) => {
-  if (typeof value2 !== "string") {
+var DATE = /^\d{4}-\d{2}-\d{2}$/;
+var isReleaseDate = (value2) => {
+  if (typeof value2 !== "string" || !DATE.test(value2)) {
     return false;
   }
-  try {
-    const protocol = new URL(value2).protocol;
-    return protocol === "https:" || protocol === "http:";
-  } catch {
-    return false;
+  const day = /* @__PURE__ */ new Date(`${value2}T00:00:00Z`);
+  return !Number.isNaN(day.getTime()) && day.toISOString().startsWith(value2);
+};
+var isReleaseGroups = (value2) => isPlainObject3(value2) && isStringList(value2.new) && isStringList(value2.fixed);
+var isReleaseNotes = (value2) => isPlainObject3(value2) && isVersion(value2.version) && isStringList(value2.items) && (value2.date === void 0 || isReleaseDate(value2.date)) && (value2.groups === void 0 || isReleaseGroups(value2.groups));
+var copyNotes = (notes) => {
+  const copy = { version: notes.version, items: [...notes.items] };
+  if (notes.date !== void 0) {
+    copy.date = notes.date;
   }
+  if (notes.groups !== void 0) {
+    copy.groups = { new: [...notes.groups.new], fixed: [...notes.groups.fixed] };
+  }
+  return copy;
 };
 var readUpdateNotice = (body) => {
   if (!isPlainObject3(body) || !isVersion(body.current) || !isVersion(body.latest)) {
     return null;
   }
-  const { command, notes, changesUrl } = body;
-  const valid = typeof command === "string" && command !== "" && Array.isArray(notes) && notes.every(isReleaseNotes);
-  if (!valid || changesUrl !== void 0 && !isWebUrl(changesUrl)) {
+  const { command, notes } = body;
+  if (typeof command !== "string" || command === "" || !Array.isArray(notes) || !notes.every(isReleaseNotes)) {
     return null;
   }
-  const releaseNotes = notes.map((note) => ({ version: note.version, items: [...note.items] }));
-  const notice = { current: body.current, latest: body.latest, command, notes: releaseNotes };
-  if (changesUrl !== void 0) {
-    notice.changesUrl = changesUrl;
+  return { current: body.current, latest: body.latest, command, notes: notes.map(copyNotes) };
+};
+var readChangelog = (body) => {
+  if (!isPlainObject3(body) || !isVersion(body.current) || !Array.isArray(body.releases) || !body.releases.every(isReleaseNotes)) {
+    return null;
   }
-  return notice;
+  return { current: body.current, releases: body.releases.map(copyNotes) };
 };
 var serverSource = () => ({
   label: "Nurselog",
@@ -17977,6 +19956,10 @@ var serverSource = () => ({
   async update() {
     const body = await getJson("/api/update");
     return body === null ? null : readUpdateNotice(body) ?? void 0;
+  },
+  async changelog() {
+    const body = await getJson("/api/changelog");
+    return body === null ? null : readChangelog(body) ?? void 0;
   }
 });
 

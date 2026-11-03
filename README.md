@@ -117,7 +117,8 @@ it is off for marketplaces outside Anthropic's. From a clone: `git pull`, then r
 A board from a marketplace install shows an Update button in its top bar when a newer version is out, with what is new
 and the command above. It checks the marketplace's GitHub repository a few seconds after it starts and every 6 hours,
 reading only the version and the changelog; `NURSELOG_UPDATE_CHECK=0` turns the check off. A board from a clone never
-checks.
+checks. The Changelog button, the top bar's last item, lists what each version brought, newest first, and carries a dot
+while a version you have not looked at is out; a board from a clone has no changelog to show.
 
 </details>
 
@@ -227,7 +228,7 @@ alias nurselog='node ~/github/nurselog/bin/nurselog'
 | Questions | Questions waiting for you, blocking ones marked, with their options. |
 | Follow-ups | Open issues, improvements and fix suggestions from the agents' reports. |
 | Agent table | One row per agent: state, current tool, calls against budget, verification passes and fails, context, cost, time. A row expands to its recent calls and report. |
-| Main thread and log | The newest main-thread message (all of them in a dialog) and the newest log line. |
+| Main thread and log | The newest main-thread message, a progress message it wrote between tool calls included, with typing dots after it while the main thread works in a turn (all of them in a dialog, each turn's progress messages as a time rail above its reply), and the newest log line. |
 | Tokens by stage | A stacked chart per stage and package. |
 | Summary | Per agent totals, cost by branch, tool output, verification commands, and each resume after a pause with its context, whether the prompt cache likely expired and Claude Code's cache write estimate. |
 | Conversations | Sessions that only chat, one row each. |
@@ -256,7 +257,8 @@ Claude Code --hook--> spool (NDJSON day files) --read--> board server (reducer) 
 - **Board server**: one process for every repository on `127.0.0.1:6767`. It reads the last 7 days, follows new lines,
   reduces them to session state and pushes snapshots over Server-Sent Events.
 - **Facts**: branches and fork points from `git`, PRs from `gh`, tokens and cost from the transcripts and
-  `prices.json`. Written back to the spool, so a replay rebuilds the same board.
+  `prices.json`, and the main thread's progress messages (the texts it writes between its tool calls, redacted and cut
+  at 2,000 characters) from its transcript. Written back to the spool, so a replay rebuilds the same board.
 - **Markers**: what hooks cannot see (the plan, hand-overs to you, questions asked in prose), added by the main thread
   through the plugin's tools.
 - **UI**: vanilla TypeScript and SVG, no framework. Node 24 built-ins only, no runtime dependencies.
@@ -515,7 +517,7 @@ nurselog emit question --run acme-shop-3762 --answer <question id>
 | `nurselog init [--write] [--repo-file] [--from -]` | Proposes a config, or writes it. Never overwrites a file. |
 | `nurselog emit plan\|gate\|question ...` | Adds a marker. |
 | `nurselog insights [--json \| --prompt [--finding <id>]]` | Workflow health report; `--prompt` prints it as a prompt for an AI assistant, with `--finding` the prompt of one finding to change or to consider. |
-| `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, answers, commands and reports included, so check it before you share it). |
+| `nurselog fixture <session id> [--out <file>]` | Exports a session as a replay fixture (prompts, answers, commands, reports and the main thread's texts included, so check it before you share it). |
 | `nurselog purge [--before <day>] [--all] [--yes]` | Deletes recorded data. |
 | `nurselog install-cli [--remove]` | Writes the [terminal command](#terminal-command) `~/.local/bin/nurselog`, or deletes it. |
 | `nurselog uninstall [--yes] [--keep-data]` | Removes Nurselog from this machine and lists what you added by hand ("Remove the plugin" under [Load the plugin](#load-the-plugin)). |
@@ -651,7 +653,8 @@ board.
 - **Token**: every API route but the health check needs the board token (a bearer header or a cookie derived from it),
   so other users of the machine cannot read the board. The browser signs in with a single-use ticket.
 - **Minimal recording**: the hook drops file contents, edit bodies and tool output, and redacts secrets before
-  anything is written.
+  anything is written. The main thread's own texts (its final replies and its progress messages) are kept, redacted
+  by shape only; there is no switch to leave them out.
 - **Private files**: directories 0700, files 0600, opened without following symlinks.
 - **No telemetry**: nothing leaves the machine except the `gh` calls of a repository whose config sets `github.repo`
   and the update check of a board from a marketplace install, which reads two files of the marketplace and sends
@@ -661,8 +664,10 @@ board.
 <details>
 <summary>What the hook keeps, drops and redacts</summary>
 
-Kept: prompts, commands, file paths, tool names, agent types and reports, timings, token counts, and your answers and
-notes to the main thread's AskUserQuestion calls (up to 10 per call, 500 characters each, redacted by shape).
+Kept: prompts, commands, file paths, tool names, agent types and reports, timings, token counts, your answers and
+notes to the main thread's AskUserQuestion calls (up to 10 per call, 500 characters each, redacted by shape), and the
+main thread's texts: the final text of each turn (up to 8,000 characters) and its progress messages, the texts it
+writes between its tool calls (up to 2,000 characters each, read from its transcript), both redacted by shape only.
 
 Dropped:
 

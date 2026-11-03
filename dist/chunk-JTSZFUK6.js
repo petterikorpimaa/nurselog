@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-DRDUSXK5.js";
+} from "./chunk-3LOJCZZY.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
@@ -47,6 +47,7 @@ import {
   expandHome,
   findConfig,
   gitCommonDir,
+  isPlainObject,
   isSessionDone,
   isSetupEntry,
   listSpoolFiles,
@@ -92,7 +93,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-NNCN4HNI.js";
+} from "./chunk-TGKDM7PV.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -831,6 +832,8 @@ ${message}`);
       openStream(request, response, repository);
     } else if (key === "GET /api/update") {
       sendJson(response, 200, options.update?.() ?? null);
+    } else if (key === "GET /api/changelog") {
+      sendJson(response, 200, options.changelog?.() ?? null);
     } else if (key === "GET /api/health") {
       sendHealth(request, response, target.nonce);
     } else if (key === "POST /api/signin") {
@@ -1014,16 +1017,167 @@ var replayFixtures = (paths, speed, onLine) => replayFixtureTexts(paths.map((pat
 // src/server/start.ts
 import { randomBytes as randomBytes2 } from "crypto";
 import { existsSync, linkSync, lstatSync as lstatSync4, mkdirSync, renameSync as renameSync2, rmSync as rmSync2, statSync, writeFileSync } from "fs";
-import { dirname, join as join7, resolve as resolve3 } from "path";
+import { dirname, join as join8, resolve as resolve3 } from "path";
 import { setTimeout as delay } from "timers/promises";
+
+// src/server/changelog.ts
+import { join as join2 } from "path";
+var MAX_CHANGELOG_BYTES = 256 * 1024;
+var MAX_ITEM_CHARS = 300;
+var MAX_CHANGELOG_VERSIONS = 100;
+var MAX_CHANGELOG_ITEMS = 1e3;
+var CHANGELOG_FILE = "CHANGELOG.md";
+var UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+var VERSION = /^(\d{1,9})\.(\d{1,9})\.(\d{1,9})$/;
+var SECTION_HEAD = /^## (\d{1,9}\.\d{1,9}\.\d{1,9})(?:\s|$)/;
+var DATED_HEAD = /^## \d{1,9}\.\d{1,9}\.\d{1,9} \((\d{4}-\d{2}-\d{2})\)[ \t]*$/;
+var GROUP_HEADS = /* @__PURE__ */ new Map([["### New", "new"], ["### Fixed", "fixed"]]);
+var TRAILING_SPACES = /[ \t]+$/;
+var parseVersion = (value) => {
+  const match = typeof value === "string" ? VERSION.exec(value) : null;
+  return match === null ? void 0 : match.slice(1).map(Number);
+};
+var compareVersions = (a, b) => {
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) {
+      return a[index] - b[index];
+    }
+  }
+  return 0;
+};
+var versionIn = (text, what) => {
+  const manifest = JSON.parse(text);
+  const version = isPlainObject(manifest) ? manifest.version : void 0;
+  if (typeof version !== "string" || parseVersion(version) === void 0) {
+    throw new Error(`${what} holds no x.y.z version`);
+  }
+  return version;
+};
+var isCalendarDate = (date) => {
+  const time2 = Date.parse(`${date}T00:00:00Z`);
+  return !Number.isNaN(time2) && new Date(time2).toISOString().slice(0, 10) === date;
+};
+var dateOf = (head) => {
+  const date = DATED_HEAD.exec(head)?.[1];
+  return date !== void 0 && isCalendarDate(date) ? date : void 0;
+};
+var cleanItem = (text) => {
+  const plain = text.replace(UNSAFE_CHARS, "").trim();
+  if (plain.length <= MAX_ITEM_CHARS) {
+    return plain;
+  }
+  const lastKept = plain.charCodeAt(MAX_ITEM_CHARS - 2);
+  const end = lastKept >= 55296 && lastKept <= 56319 ? MAX_ITEM_CHARS - 2 : MAX_ITEM_CHARS - 1;
+  return `${plain.slice(0, end)}\u2026`;
+};
+var parseChangelog = (text) => {
+  const drafts = [];
+  const seen = /* @__PURE__ */ new Set();
+  let draft;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith("## ")) {
+      const version = SECTION_HEAD.exec(line)?.[1];
+      draft = void 0;
+      if (version !== void 0 && !seen.has(version)) {
+        seen.add(version);
+        const date = dateOf(line);
+        const notes = { version, ...date === void 0 ? {} : { date }, items: [] };
+        draft = { notes, groups: { new: [], fixed: [] }, group: void 0, headed: false, loose: false };
+        drafts.push(draft);
+      }
+      continue;
+    }
+    if (draft && line.startsWith("### ")) {
+      draft.group = GROUP_HEADS.get(line.replace(TRAILING_SPACES, ""));
+      draft.headed ||= draft.group !== void 0;
+      continue;
+    }
+    const item = draft && line.startsWith("- ") ? cleanItem(line.slice(2)) : "";
+    if (draft && item !== "") {
+      draft.notes.items.push(item);
+      if (draft.group === void 0) {
+        draft.loose = true;
+      } else {
+        draft.groups[draft.group].push(item);
+      }
+    }
+  }
+  return drafts.map(({ notes, groups, headed, loose }) => headed && !loose ? { ...notes, groups } : notes);
+};
+var keptItems = (notes, room) => {
+  const date = notes.date === void 0 ? {} : { date: notes.date };
+  if (notes.items.length > room) {
+    return { version: notes.version, ...date, items: notes.items.slice(0, room) };
+  }
+  const groups = notes.groups === void 0 ? {} : { groups: { new: [...notes.groups.new], fixed: [...notes.groups.fixed] } };
+  return { version: notes.version, ...date, items: [...notes.items], ...groups };
+};
+var releasesBetween = (changelog, above, upTo, maxVersions, maxItems) => {
+  const seen = /* @__PURE__ */ new Set();
+  const between = [];
+  for (const notes of changelog) {
+    const parsed = parseVersion(notes.version);
+    if (parsed === void 0 || seen.has(notes.version)) {
+      continue;
+    }
+    if ((above === void 0 || compareVersions(parsed, above) > 0) && compareVersions(parsed, upTo) <= 0) {
+      seen.add(notes.version);
+      between.push({ notes, parsed });
+    }
+  }
+  between.sort((a, b) => compareVersions(b.parsed, a.parsed));
+  let room = maxItems;
+  return between.slice(0, maxVersions).map(({ notes }) => {
+    const kept = keptItems(notes, room);
+    room -= kept.items.length;
+    return kept;
+  });
+};
+var readChangelog = (packageRoot, log) => {
+  let text;
+  try {
+    text = readSmallFile(join2(packageRoot, CHANGELOG_FILE), MAX_CHANGELOG_BYTES, { head: true });
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      log("warning", `the changelog was not read: ${describeError(error)}`);
+    }
+    return null;
+  }
+  try {
+    const current = versionIn(readSmallFile(join2(packageRoot, "package.json"), MAX_CHANGELOG_BYTES), "the package.json of the running copy");
+    const upTo = parseVersion(current);
+    const releases = upTo === void 0 ? [] : releasesBetween(parseChangelog(text), void 0, upTo, MAX_CHANGELOG_VERSIONS, MAX_CHANGELOG_ITEMS);
+    if (releases.length === 0) {
+      log("warning", `the changelog was not served: ${join2(packageRoot, CHANGELOG_FILE)} holds no version up to ${current}`);
+      return null;
+    }
+    return { current, releases };
+  } catch (error) {
+    log("warning", `the changelog was not served: ${describeError(error)}`);
+    return null;
+  }
+};
+var ownChangelog = (options = {}) => {
+  const packageRoot = options.packageRoot ?? PACKAGE_ROOT;
+  const log = options.log ?? (() => void 0);
+  let read = false;
+  let answer = null;
+  return () => {
+    if (!read) {
+      read = true;
+      answer = readChangelog(packageRoot, log);
+    }
+    return answer;
+  };
+};
 
 // src/server/context.ts
 import { readFileSync as readFileSync5 } from "fs";
-import { join as join4, resolve } from "path";
+import { join as join5, resolve } from "path";
 
 // src/agent-files.ts
 import { lstatSync, readdirSync, realpathSync } from "fs";
-import { basename, isAbsolute, join as join2, relative, sep } from "path";
+import { basename, isAbsolute, join as join3, relative, sep } from "path";
 var AGENT_NAME = /^[\w.-]{1,64}$/;
 var AGENT_HEAD_BYTES = 4096;
 var MAX_AGENT_FILES = 200;
@@ -1122,7 +1276,7 @@ var setupAgentOf = (dir, entry) => {
   }
   let head;
   try {
-    head = readSmallFile(join2(dir, entry.name), AGENT_HEAD_BYTES, { head: true });
+    head = readSmallFile(join3(dir, entry.name), AGENT_HEAD_BYTES, { head: true });
   } catch {
     return void 0;
   }
@@ -1144,8 +1298,8 @@ var setupAgentOf = (dir, entry) => {
   return agent;
 };
 var readAgentFiles = (root) => {
-  const dir = join2(root, ".claude", "agents");
-  if (!realDirectory(join2(root, ".claude")) || !realDirectory(dir)) {
+  const dir = join3(root, ".claude", "agents");
+  if (!realDirectory(join3(root, ".claude")) || !realDirectory(dir)) {
     return [];
   }
   let entries;
@@ -1167,7 +1321,7 @@ var readAgentFiles = (root) => {
   return agents;
 };
 var claudeMdPath = (root) => {
-  const path = join2(root, CLAUDE_MD);
+  const path = join3(root, CLAUDE_MD);
   try {
     if (!lstatSync(path).isSymbolicLink()) {
       return path;
@@ -1281,7 +1435,7 @@ var lineAt = (text) => readLine(text).at;
 
 // src/spool/aggregates.ts
 import { closeSync, lstatSync as lstatSync2, readdirSync as readdirSync2, readFileSync as readFileSync4, readSync, renameSync, rmSync, unlinkSync } from "fs";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 
 // src/insights/percentile.ts
 var percentile = (values, p) => {
@@ -1340,13 +1494,13 @@ var typicalLengths = (entries) => {
 };
 
 // src/spool/aggregate-parse.ts
-var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isPlainObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isString = (value) => typeof value === "string";
 var isBoolean = (value) => typeof value === "boolean";
 var isDate = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value));
 var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 var isNullOr = (valid) => (value) => value === null || valid(value);
-var isCommands = (value) => isPlainObject(value) && isCount(value.typecheck) && isCount(value.lint) && isCount(value.test);
+var isCommands = (value) => isPlainObject2(value) && isCount(value.typecheck) && isCount(value.lint) && isCount(value.test);
 var CATEGORIES = FOLLOWUP_CATEGORIES;
 var isCategoryCount = (category, value) => CATEGORIES.includes(category) && isCount(value);
 var OPTIONAL_FIELDS = [
@@ -1354,16 +1508,16 @@ var OPTIONAL_FIELDS = [
   ["title", isString],
   ["kind", isString],
   ["endedAt", isString],
-  ["metrics", isPlainObject],
-  ["main", isPlainObject],
-  ["developerWait", isPlainObject],
+  ["metrics", isPlainObject2],
+  ["main", isPlainObject2],
+  ["developerWait", isPlainObject2],
   ["builds", Array.isArray],
   ["reviews", Array.isArray],
   ["rows", Array.isArray],
   ["questions", Array.isArray],
   ["agents", Array.isArray],
   ["pipelines", isCount],
-  ["setupHashes", isNullOr(isPlainObject)]
+  ["setupHashes", isNullOr(isPlainObject2)]
 ];
 var MAIN_FIELDS = [
   ["wholeReads", isCount],
@@ -1376,7 +1530,7 @@ var ENTRY_FIELDS = [
   ["agents", "outputChars", isCount],
   ["agents", "wholeReads", isCount],
   ["agents", "wholeReadChars", isCount],
-  ["reviews", "fixCategories", isNullOr(isPlainObject)]
+  ["reviews", "fixCategories", isNullOr(isPlainObject2)]
 ];
 var dropFields = (object, rules) => {
   let dropped = false;
@@ -1390,7 +1544,7 @@ var dropFields = (object, rules) => {
 };
 var objectsIn = (entry, list) => {
   const items = Object.hasOwn(entry, list) ? entry[list] : void 0;
-  return Array.isArray(items) ? items.filter(isPlainObject) : [];
+  return Array.isArray(items) ? items.filter(isPlainObject2) : [];
 };
 var dropEntryFields = (entry) => {
   let dropped = false;
@@ -1406,7 +1560,7 @@ var dropEntryFields = (entry) => {
 };
 var keepMapEntries = (holder, field, valid, max = Infinity) => {
   const map = Object.hasOwn(holder, field) ? holder[field] : void 0;
-  if (!isPlainObject(map)) {
+  if (!isPlainObject2(map)) {
     return false;
   }
   const kept = {};
@@ -1432,7 +1586,7 @@ var completeLines = (text) => text.split("\n").slice(0, -1).filter((line) => lin
 var parseObject = (line) => {
   try {
     const value = JSON.parse(line);
-    return isPlainObject(value) ? value : void 0;
+    return isPlainObject2(value) ? value : void 0;
   } catch {
     return void 0;
   }
@@ -1446,7 +1600,7 @@ var storedAggregate = (line) => {
     return void 0;
   }
   let repaired = dropFields(entry, OPTIONAL_FIELDS);
-  if (Object.hasOwn(entry, "main") && isPlainObject(entry.main)) {
+  if (Object.hasOwn(entry, "main") && isPlainObject2(entry.main)) {
     repaired = dropFields(entry.main, MAIN_FIELDS) || repaired;
   }
   repaired = dropEntryFields(entry) || repaired;
@@ -1471,6 +1625,11 @@ var parseAggregates = (text) => {
 };
 
 // src/ui/format.ts
+var pad = (value) => String(value).padStart(2, "0");
+var localDay2 = (iso) => {
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
 var cost = (usd) => `$${(Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)}`;
 var tokens = (count2) => {
   const value = Number.isFinite(count2) ? Math.max(0, count2) : 0;
@@ -1895,8 +2054,8 @@ var readSession = (aggregate, finished, entryOf) => {
     checkChars: readChars(agents, (entry) => isCheck(entry, entryOf))
   };
 };
-var pad = (value) => String(value).padStart(2, "0");
-var localDay2 = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+var pad2 = (value) => String(value).padStart(2, "0");
+var localDay3 = (date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 var sum = (values) => values.reduce((total, value) => total + value, 0);
 var median = (values) => percentile(values, 50);
 var count = (value, noun) => `${value} ${value === 1 ? noun[0] : noun[1]}`;
@@ -2860,8 +3019,8 @@ var reportSessionId = (id) => id.length >= 1 && id.length <= MAX_SESSION_ID2 && 
 var selectSessions = (aggregates, options, now, entryOf) => {
   const at = time(now);
   const today = new Date(at);
-  const oldest = localDay2(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
-  const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay2(new Date(finished)) >= oldest;
+  const oldest = localDay3(new Date(today.getFullYear(), today.getMonth(), today.getDate() - options.keepDays));
+  const kept = (finished) => Number.isFinite(finished) && finished <= at && localDay3(new Date(finished)) >= oldest;
   const selected = aggregates.filter((aggregate) => aggregate.work === true && reportSessionId(aggregate.id)).map((aggregate) => ({ aggregate, finished: timeOf2(aggregate.finishedAt) })).filter((entry) => kept(entry.finished)).sort((a, b) => b.finished - a.finished || compareText(a.aggregate.id, b.aggregate.id));
   return selected.slice(0, options.window + options.baseline).map((entry) => readSession(entry.aggregate, entry.finished, entryOf));
 };
@@ -2903,8 +3062,8 @@ var insightsOf = (aggregates, options, now, roles = {}) => {
   const basis = { window: window.length, baseline: baseline.length };
   let closing = `Based on ${count(0, WORK_SESSION)}.`;
   if (read.length > 0) {
-    basis.from = localDay2(new Date(read[read.length - 1].finished));
-    basis.to = localDay2(new Date(read[0].finished));
+    basis.from = localDay3(new Date(read[read.length - 1].finished));
+    basis.to = localDay3(new Date(read[0].finished));
     closing = `Based on ${count(read.length, WORK_SESSION)} from ${basis.from} to ${basis.to}.`;
   }
   const guidelines = guidelinesOf(options.guidelines);
@@ -3060,7 +3219,7 @@ var readText = (path) => withOpened(path, ({ fd, stat }) => {
   }
 });
 var readAggregates = (dir, onError) => {
-  const path = join3(dir, AGGREGATES_FILE);
+  const path = join4(dir, AGGREGATES_FILE);
   let text;
   try {
     text = readText(path);
@@ -3094,7 +3253,7 @@ ${line}`;
 }) ?? line;
 var appendAggregate = (dir, aggregate) => {
   ensurePrivateDir(dir);
-  const path = join3(dir, AGGREGATES_FILE);
+  const path = join4(dir, AGGREGATES_FILE);
   appendPrivate(path, appendText(path, `${JSON.stringify(aggregate)}
 `));
 };
@@ -3140,15 +3299,15 @@ var removeTemps = (dir) => {
     throw error;
   }
   for (const name of names.filter((entry) => TEMP_FILE.test(entry))) {
-    const stat = lstatSync2(join3(dir, name), { throwIfNoEntry: false });
+    const stat = lstatSync2(join4(dir, name), { throwIfNoEntry: false });
     if ((stat?.isFile() || stat?.isSymbolicLink()) && leftOver(name, stat)) {
-      rmSync(join3(dir, name), { force: true });
+      rmSync(join4(dir, name), { force: true });
     }
   }
 };
 var rewrite = (dir, keep) => {
   removeTemps(dir);
-  const path = join3(dir, AGGREGATES_FILE);
+  const path = join4(dir, AGGREGATES_FILE);
   if (countLines(path, (line) => !keep(line)) === 0) {
     return 0;
   }
@@ -3196,7 +3355,7 @@ var countForPurge = (path, stat) => {
   }
 };
 var purgeableAggregates = (dir, before2) => {
-  const path = join3(dir, AGGREGATES_FILE);
+  const path = join4(dir, AGGREGATES_FILE);
   if (!spoolDirExists(dir)) {
     return 0;
   }
@@ -3214,7 +3373,7 @@ var purgeAggregates = (dir, before2) => {
   if (!spoolDirExists(dir)) {
     return 0;
   }
-  const path = join3(dir, AGGREGATES_FILE);
+  const path = join4(dir, AGGREGATES_FILE);
   const stat = lstatSync2(path, { throwIfNoEntry: false });
   if (before2 !== void 0) {
     const taken = stat?.isFile() ? rewrite(dir, finishedFrom(dayStart(before2))) : 0;
@@ -3244,7 +3403,7 @@ var createAggregateLog = (options) => {
   const settleMs = options.settleMs ?? AGGREGATE_SETTLE_MS;
   const now = options.now ?? (() => /* @__PURE__ */ new Date());
   const onInfo = options.onInfo ?? (() => void 0);
-  const path = join3(dir, AGGREGATES_FILE);
+  const path = join4(dir, AGGREGATES_FILE);
   const known = /* @__PURE__ */ new Map();
   const pending = /* @__PURE__ */ new Map();
   let appendFailure;
@@ -3525,7 +3684,7 @@ var createSampleReport = (options) => {
 
 // src/server/context.ts
 var TICK_MS = 60 * 1e3;
-var SAMPLE_AGGREGATES = join4(PACKAGE_ROOT, "fixtures", "aggregates.ndjson");
+var SAMPLE_AGGREGATES = join5(PACKAGE_ROOT, "fixtures", "aggregates.ndjson");
 var AGGREGATE_CHECK_MS = 60 * 1e3;
 var LATE_PR_MS = 24 * 60 * 60 * 1e3;
 var branchOpen = (run, recent) => {
@@ -3557,6 +3716,10 @@ var stopEach = (stops, warn) => {
   }
 };
 var SLOW_REPLAY_MS = 30 * 1e3;
+var progressMessagesFrom = (windowStart, now, keepDays) => {
+  const kept = new Date(now.getFullYear(), now.getMonth(), now.getDate() - keepDays);
+  return Math.max(windowStart.getTime(), kept.getTime());
+};
 var createSpoolContext = (options) => {
   const { config, root, spoolDir, log } = options;
   let name = options.name;
@@ -3568,9 +3731,9 @@ var createSpoolContext = (options) => {
   const onFinish = (sessionId, finishedAt) => aggregates.noteFinish(sessionId, finishedAt);
   const store = createStore(config, { onFinish, onOutcome: (sessionId, at) => aggregates.noteOutcome(sessionId, at) });
   const write = (line) => appendEvent(spoolDir, line, config.spool.maxLineBytes);
-  const fixtureWorker = options.fixtureWorker ?? join4(PACKAGE_ROOT, "dist", "fixture-worker.js");
+  const fixtureWorker = options.fixtureWorker ?? join5(PACKAGE_ROOT, "dist", "fixture-worker.js");
   const slowReplayMs = options.slowReplayMs ?? SLOW_REPLAY_MS;
-  const replayWorker = options.replayWorker || join4(PACKAGE_ROOT, "dist", "replay-worker.js");
+  const replayWorker = options.replayWorker || join5(PACKAGE_ROOT, "dist", "replay-worker.js");
   const stops = [];
   const observers = [];
   let lastLineAt2 = options.lastLineAt;
@@ -3582,7 +3745,8 @@ var createSpoolContext = (options) => {
   const repoCommonDir = options.facts ? gitCommonDir(root) : void 0;
   const prices = options.facts ? loadPrices(resolve(root, expandHome(config.pricesFrom)), log) : {};
   const git = options.facts ? createGitFacts({ config, write, run: options.run, log, repoCommonDir, diffTarget }) : void 0;
-  const usage = options.facts ? createUsageFacts({ prices, write, log }) : void 0;
+  const messagesFrom = progressMessagesFrom(windowStart, /* @__PURE__ */ new Date(), config.spool.keepDays);
+  const usage = options.facts ? (options.usageFacts ?? createUsageFacts)({ prices, write, log, messagesFrom }) : void 0;
   if (git && usage) {
     observers.push((event) => git.observe(event), (event, payload) => usage.observe(event, payload));
     stops.push(() => git.stop(), () => usage.stop());
@@ -3808,7 +3972,7 @@ var createReplayContext = (options) => {
 
 // src/server/repositories.ts
 import { closeSync as closeSync2, constants, lstatSync as lstatSync3, openSync, readdirSync as readdirSync3, readSync as readSync2 } from "fs";
-import { join as join5, relative as relative2, resolve as resolve2, sep as sep2 } from "path";
+import { join as join6, relative as relative2, resolve as resolve2, sep as sep2 } from "path";
 var HASH_DIRECTORY = /^[0-9a-f]{12}$/;
 var RECORD_FILE = "repository.json";
 var CONFIG_FILE = "nurselog.config.json";
@@ -3825,7 +3989,7 @@ var hashDirectories = (base) => {
   return entries.filter((entry) => entry.isDirectory() && HASH_DIRECTORY.test(entry.name)).map((entry) => entry.name);
 };
 var recordedRoot = (base, hash) => {
-  const root = readRepositoryRecord(join5(base, hash, RECORD_FILE))?.root;
+  const root = readRepositoryRecord(join6(base, hash, RECORD_FILE))?.root;
   return root !== void 0 && recordedRootValid(root, hash) ? root : void 0;
 };
 var NEWLINE2 = 10;
@@ -3966,7 +4130,7 @@ var newestDayIn = (dir, onError) => {
 };
 var holdsAggregates = (dir, onError) => {
   try {
-    return spoolDirExists(dir) && lstatSync3(join5(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
+    return spoolDirExists(dir) && lstatSync3(join6(dir, AGGREGATES_FILE), { throwIfNoEntry: false })?.isFile() === true;
   } catch (error) {
     reportLookup(dir, error, onError);
     return false;
@@ -3988,8 +4152,8 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = proce
   const today = localDay(now);
   const orphans = [];
   for (const hash of hashDirectories(base).sort()) {
-    const dir = join5(base, hash);
-    const root = readRepositoryRecord(join5(dir, RECORD_FILE))?.root;
+    const dir = join6(base, hash);
+    const root = readRepositoryRecord(join6(dir, RECORD_FILE))?.root;
     if (root !== void 0 && recordedRootValid(root, hash)) {
       continue;
     }
@@ -4013,7 +4177,7 @@ var listOrphanedSpools = (now = /* @__PURE__ */ new Date(), onError, uid = proce
 var pruneOrphanedSpools = (now, onError) => {
   const deleted = [];
   for (const orphan of listOrphanedSpools(now, onError)) {
-    const config = join5(orphan.dir, CONFIG_FILE);
+    const config = join6(orphan.dir, CONFIG_FILE);
     const shown = tildeHome(orphan.dir);
     try {
       const keepDays = configKeepDays(config) ?? HOOK_DEFAULTS.spool.keepDays;
@@ -4054,7 +4218,7 @@ var pruneRecordedAggregates = (now, onError) => {
     if (root === void 0) {
       continue;
     }
-    const dir = join5(base, hash);
+    const dir = join6(base, hash);
     let keepDays = DEFAULT_CONFIG.insights.keepDays;
     try {
       keepDays = configKeepDays(userConfigPath(root), "insights") ?? keepDays;
@@ -4103,89 +4267,30 @@ var dailyOrphanPrune = (onError, now = () => /* @__PURE__ */ new Date()) => {
 };
 
 // src/server/update-check.ts
-import { isAbsolute as isAbsolute2, join as join6 } from "path";
+import { isAbsolute as isAbsolute2, join as join7 } from "path";
 var UPDATE_COMMAND = "claude plugin update nurselog@nurselog";
 var MARKETPLACE = "nurselog";
 var FIRST_CHECK_MS = 5 * 1e3;
 var CHECK_EVERY_MS = 6 * 60 * 60 * 1e3;
 var REQUEST_TIMEOUT_MS = 10 * 1e3;
-var MAX_FILE_BYTES = 256 * 1024;
-var MAX_ITEM_CHARS = 300;
+var MAX_FILE_BYTES = MAX_CHANGELOG_BYTES;
 var MAX_NOTICE_ITEMS = 60;
 var MAX_NOTICE_VERSIONS = 20;
 var MAX_REDIRECTS = 3;
 var RAW_HOST = "raw.githubusercontent.com";
 var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
-var VERSION = /^(\d{1,9})\.(\d{1,9})\.(\d{1,9})$/;
-var SECTION_HEAD = /^## (\d{1,9}\.\d{1,9}\.\d{1,9})(?:\s|$)/;
 var GITHUB_OWNER = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
 var GITHUB_NAME = /^[A-Za-z0-9._-]{1,100}$/;
 var GIT_REF = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
 var MAX_REF_CHARS = 200;
-var parseVersion = (value) => {
-  const match = typeof value === "string" ? VERSION.exec(value) : null;
-  return match === null ? void 0 : match.slice(1).map(Number);
-};
-var compareVersions = (a, b) => {
-  for (let index = 0; index < 3; index += 1) {
-    if (a[index] !== b[index]) {
-      return a[index] - b[index];
-    }
-  }
-  return 0;
-};
-var cleanItem = (text) => {
-  const plain = text.replace(UNSAFE_CHARS, "").trim();
-  if (plain.length <= MAX_ITEM_CHARS) {
-    return plain;
-  }
-  const lastKept = plain.charCodeAt(MAX_ITEM_CHARS - 2);
-  const end = lastKept >= 55296 && lastKept <= 56319 ? MAX_ITEM_CHARS - 2 : MAX_ITEM_CHARS - 1;
-  return `${plain.slice(0, end)}\u2026`;
-};
-var parseChangelog = (text) => {
-  const notes = [];
-  let section;
-  for (const line of text.split(/\r?\n/)) {
-    if (line.startsWith("## ")) {
-      const version = SECTION_HEAD.exec(line)?.[1];
-      section = version === void 0 ? void 0 : { version, items: [] };
-      if (section) {
-        notes.push(section);
-      }
-      continue;
-    }
-    const item = section && line.startsWith("- ") ? cleanItem(line.slice(2)) : "";
-    if (section && item !== "") {
-      section.items.push(item);
-    }
-  }
-  return notes;
-};
-var noticeOf = (current, latest, changelog, changesUrl) => {
+var noticeOf = (current, latest, changelog) => {
   const from = parseVersion(current);
   const to = parseVersion(latest);
   if (!from || !to || compareVersions(to, from) <= 0) {
     return null;
   }
-  const seen = /* @__PURE__ */ new Set();
-  const between = [];
-  for (const notes of changelog) {
-    const parsed = parseVersion(notes.version);
-    if (parsed && !seen.has(notes.version) && compareVersions(parsed, from) > 0 && compareVersions(parsed, to) <= 0) {
-      seen.add(notes.version);
-      between.push({ notes, parsed });
-    }
-  }
-  between.sort((a, b) => compareVersions(b.parsed, a.parsed));
-  let room = MAX_NOTICE_ITEMS;
-  const kept = between.slice(0, MAX_NOTICE_VERSIONS).map(({ notes }) => {
-    const items = notes.items.slice(0, room);
-    room -= items.length;
-    return { version: notes.version, items };
-  });
-  return { current, latest, command: UPDATE_COMMAND, notes: kept, ...changesUrl === void 0 ? {} : { changesUrl } };
+  const kept = releasesBetween(changelog, from, to, MAX_NOTICE_VERSIONS, MAX_NOTICE_ITEMS);
+  return { current, latest, command: UPDATE_COMMAND, notes: kept };
 };
 var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var refValid = (ref) => ref.length <= MAX_REF_CHARS && GIT_REF.test(ref) && !ref.includes("..");
@@ -4213,14 +4318,6 @@ var marketplaceSourceOf = (text) => {
     return { kind: "directory", path: source.path };
   }
   return { kind: "other", source: stripControl(source.source).slice(0, 40) };
-};
-var versionIn = (text, what) => {
-  const manifest = JSON.parse(text);
-  const version = isRecord2(manifest) ? manifest.version : void 0;
-  if (typeof version !== "string" || parseVersion(version) === void 0) {
-    throw new Error(`${what} holds no x.y.z version`);
-  }
-  return version;
 };
 var readCapped = async (response, maxBytes) => {
   if (!response.body) {
@@ -4277,13 +4374,12 @@ var githubFiles = (source, fetcher, signal) => {
   const ref = source.ref ?? "HEAD";
   return {
     plugin: () => fetchText(fetcher, `https://${RAW_HOST}/${repository}/${ref}/.claude-plugin/plugin.json`, signal()),
-    changelog: () => fetchText(fetcher, `https://${RAW_HOST}/${repository}/${ref}/CHANGELOG.md`, signal()),
-    changesUrl: `https://github.com/${repository}/blob/${ref}/CHANGELOG.md`
+    changelog: () => fetchText(fetcher, `https://${RAW_HOST}/${repository}/${ref}/CHANGELOG.md`, signal())
   };
 };
 var directoryFiles = (path) => ({
-  plugin: () => readSmallFile(join6(path, ".claude-plugin", "plugin.json"), MAX_FILE_BYTES),
-  changelog: () => readSmallFile(join6(path, "CHANGELOG.md"), MAX_FILE_BYTES, { head: true })
+  plugin: () => readSmallFile(join7(path, ".claude-plugin", "plugin.json"), MAX_FILE_BYTES),
+  changelog: () => readSmallFile(join7(path, "CHANGELOG.md"), MAX_FILE_BYTES, { head: true })
 });
 var isNewer = (latest, current) => noticeOf(current, latest, []) !== null;
 var startUpdateCheck = (options = {}) => {
@@ -4293,7 +4389,7 @@ var startUpdateCheck = (options = {}) => {
   if (cacheDir === void 0 || env.NURSELOG_UPDATE_CHECK === "0") {
     return void 0;
   }
-  const recordFile = options.recordFile ?? join6(cacheDir, "..", "..", "..", "known_marketplaces.json");
+  const recordFile = options.recordFile ?? join7(cacheDir, "..", "..", "..", "known_marketplaces.json");
   const fetcher = options.fetch ?? fetch;
   const log = options.log ?? (() => void 0);
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
@@ -4319,7 +4415,7 @@ var startUpdateCheck = (options = {}) => {
     }
   };
   const run = async () => {
-    const current = versionIn(readSmallFile(join6(packageRoot, "package.json"), MAX_FILE_BYTES), "the package.json of the running copy");
+    const current = versionIn(readSmallFile(join7(packageRoot, "package.json"), MAX_FILE_BYTES), "the package.json of the running copy");
     const source = marketplaceSourceOf(readSmallFile(recordFile, MAX_FILE_BYTES));
     if (source.kind === "other") {
       notice = null;
@@ -4333,7 +4429,7 @@ var startUpdateCheck = (options = {}) => {
       return;
     }
     const earlier = notice?.latest === latest ? notice.notes : [];
-    notice = noticeOf(current, latest, changelog ?? earlier, files.changesUrl);
+    notice = noticeOf(current, latest, changelog ?? earlier);
     reported.delete("check");
   };
   const check = () => {
@@ -4412,8 +4508,8 @@ var START_TICKET_MS = 10 * 60 * 1e3;
 var LOCK_STALE_MS = 10 * 1e3;
 var LOCK_RETRY_MS = 25;
 var SCAN_MS = 10 * 1e3;
-var PACKAGE_FILE = join7(PACKAGE_ROOT, "src", "ui", "index.html");
-var ORPHAN_MARKER = join7(PACKAGE_ROOT, ".orphaned_at");
+var PACKAGE_FILE = join8(PACKAGE_ROOT, "src", "ui", "index.html");
+var ORPHAN_MARKER = join8(PACKAGE_ROOT, ".orphaned_at");
 var packageGone = (path) => {
   try {
     statSync(path);
@@ -4511,7 +4607,7 @@ var startNurselog = async (options = {}) => {
   if (live && existsSync(orphanMarker)) {
     throw new OrphanedCopyError(orphanMarker);
   }
-  const token = live ? ensureBoardToken(join7(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
+  const token = live ? ensureBoardToken(join8(dirname(stateFile), "token")) : randomBytes2(32).toString("base64url");
   const speed = options.replay?.speed ?? 1;
   const contexts = /* @__PURE__ */ new Map();
   const setups = /* @__PURE__ */ new Map();
@@ -4520,6 +4616,7 @@ var startNurselog = async (options = {}) => {
   const repositories = () => [...contexts.values()].sort((a, b) => a.name.localeCompare(b.name));
   const lines = () => [...contexts.values()].reduce((sum2, context) => sum2 + context.lines(), 0);
   let updates;
+  const changelog = live ? ownChangelog({ log, ...options.changelog }) : void 0;
   const create = (port2) => createBoardServer({
     host: "127.0.0.1",
     port: port2,
@@ -4527,6 +4624,7 @@ var startNurselog = async (options = {}) => {
     repositories,
     health: () => ({ startedAt, mode: live ? "spool" : "replay", lines: lines(), ...live ? {} : { speed } }),
     update: () => updates?.notice() ?? null,
+    changelog: () => changelog?.() ?? null,
     onClient: () => {
       for (const context of contexts.values()) {
         context.nudge();
@@ -4747,7 +4845,7 @@ var startNurselog = async (options = {}) => {
 // hooks/markers.mjs
 import { randomBytes as randomBytes3 } from "crypto";
 import { closeSync as closeSync3, constants as constants2, existsSync as existsSync2, fstatSync, openSync as openSync2, readFileSync as readFileSync6, readSync as readSync3 } from "fs";
-import { join as join8, resolve as resolve4 } from "path";
+import { join as join9, resolve as resolve4 } from "path";
 import { parseArgs } from "util";
 var USAGE = `Usage: nurselog <command> [--repo <path>]
   start [--replay <fixture>] [--speed <n>] [--port <n>]  start the one board for every repository, or print the repository's tab while it runs (the default command; builds the package once when dist/ is missing)
@@ -5027,7 +5125,7 @@ ${USAGE}`);
   const stateFile = serverStatePath();
   const state = readServerState(stateFile);
   const dir = spoolDirFor(config, root);
-  const today = join8(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
+  const today = join9(dir, `events-${localDay(/* @__PURE__ */ new Date())}.ndjson`);
   const lines = linesToday(today);
   const board = await checkBoard(stateFile, RUNNING_CHECK_MS);
   const running = state !== void 0 && board.status !== "none";
@@ -5118,6 +5216,7 @@ export {
   readClaudeMd,
   claudeMdNames,
   percentile,
+  localDay2 as localDay,
   cost,
   tokens,
   duration,

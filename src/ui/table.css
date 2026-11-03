@@ -151,7 +151,7 @@
 /* the rows beyond the visible set: they open with a height transition under "Show all" */
 .agent-rows-more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease); }
 .agent-rows-more.open { grid-template-rows: 1fr; }
-.agent-rows-more > .agent-rows { overflow: hidden; min-height: 0; }
+.agent-rows-more > :is(.agent-rows, .summary-verify) { overflow: hidden; min-height: 0; }
 .agent-table-foot { display: flex; flex-direction: column; align-items: flex-start; margin: 0 10px; }
 .show-all { border: 0; background: transparent; color: var(--fg-3); font-size: 12px; cursor: pointer; padding: 6px 8px; text-align: left; }
 .show-all:hover { color: var(--fg); }
@@ -218,13 +218,15 @@
 
 /* the session card's Summary panel (summary.ts; the demo's .sum, .suminner, .dh, .tblw, .bars and .brr): the panel opens
    with the demo's grid-rows transition (the global reduced-motion rule turns it and the bar easing off), its two
-   columns stack at 860 px as the demo's, the section headings are .details-heading and the bars .meter-bar, kept per
+   columns stack at 1000 px (the demo's 860, moved so the Agents table keeps its USD column), the section headings are .details-heading and the bars .meter-bar, kept per
    key so a changed width eases; a collapsed card folds it with the tokens region */
-.summary-panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease); }
+/* --agents-min is the Agents table's minimum width and the left column's minimum track, so the column never drops below
+   the table and its USD column never scrolls out, whatever the scrollbar takes from the page */
+.summary-panel { --agents-min: 560px; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease); }
 .summary-panel.open { grid-template-rows: 1fr; }
 .summary-clip { overflow: hidden; min-height: 0; }
 .summary-inner {
-  display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 20px;
+  display: grid; grid-template-columns: minmax(var(--agents-min), 1.7fr) minmax(0, 1fr); gap: 20px;
   border-top: 1px solid var(--border); padding: 14px 16px 16px;
 }
 .summary-column { min-width: 0; }
@@ -236,7 +238,7 @@
 .summary-overhead-head { margin: 0 0 8px; font: 500 12px var(--f-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
 .summary-note { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--fg-3); }
 .summary-table-wrap { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
-.summary-table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 12px; }
+.summary-table { border-collapse: collapse; width: 100%; min-width: var(--agents-min); font-size: 12px; }
 .summary-table th, .summary-table td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .summary-table th { font: 600 10px var(--f-mono); color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; }
 .summary-table td { font-family: var(--f-mono); color: var(--fg-2); font-variant-numeric: tabular-nums; }
@@ -271,7 +273,13 @@
 .summary-verify.resumes .summary-verify-row { grid-template-columns: minmax(min-content, .6fr) repeat(3, minmax(min-content, 1fr)) var(--amount-w); }
 .summary-verify.resumes .summary-verify-row > span { white-space: nowrap; }
 .summary-verify-mean { text-align: right; color: var(--fg-3); white-space: nowrap; }
-@media (max-width: 860px) {
+/* the day before a resume line whose day differs from the line before (a .summary-subheading), and the oldest lines under
+   "Show all" (a .show-all of the agent table, its text aligned with the section; the part opens as .agent-rows-more does):
+   an empty last item of that part keeps the gap to the newest lines inside the clipped part, so it closes to no height */
+.summary-verify.resumes .summary-subheading { margin: 4px 0 0; }
+.summary-verify.resumes.older::after { content: ""; }
+.summary-body .show-all { display: block; margin-inline-start: -8px; }
+@media (max-width: 1000px) {
   .summary-inner { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {

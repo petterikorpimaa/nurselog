@@ -17,6 +17,7 @@ import {
   isWorseThanBefore,
   listOrphanedSpools,
   listRepositories,
+  localDay as localDay2,
   percentile,
   plainText,
   plural,
@@ -35,11 +36,11 @@ import {
   startNurselog,
   tokens,
   unquote
-} from "./chunk-NOCN4J5B.js";
+} from "./chunk-JTSZFUK6.js";
 import {
   sessionFixture,
   spoolSessionIds
-} from "./chunk-KDB7EOWI.js";
+} from "./chunk-5MJBN44J.js";
 import {
   DEFAULT_CONFIG,
   PACKAGE_ROOT,
@@ -49,7 +50,7 @@ import {
   mergeOverDefaults,
   runCommand,
   validateConfig
-} from "./chunk-DRDUSXK5.js";
+} from "./chunk-3LOJCZZY.js";
 import {
   BRANCH_KEY_PATTERN,
   LINUX_APP_BROWSERS,
@@ -108,7 +109,7 @@ import {
   waitForBoard,
   workflowSetupOf,
   writeSignInFile
-} from "./chunk-NNCN4HNI.js";
+} from "./chunk-TGKDM7PV.js";
 
 // src/cli.ts
 import { existsSync as existsSync3 } from "fs";
@@ -1693,11 +1694,6 @@ var readPoints = (series) => {
     const agentChars = Number.isSafeInteger(item.agentChars) && Number(item.agentChars) >= 0 ? Number(item.agentChars) : void 0;
     return [{ session: item.session, number: pointNumber(item.value, k, n), window: item.window === true, k, n, steps: readSteps(item.steps), setupChange, agentChars }];
   });
-};
-var localDay2 = (iso) => {
-  const date = new Date(iso);
-  const pad = (part) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 var readSetupChanges = (value) => {
   const entries = Array.isArray(value) ? value : [];
