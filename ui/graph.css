@@ -45,6 +45,13 @@
 .node .node-wrench { stroke-width: 1.5; }
 .node .node-count { font: 700 10px var(--f-mono); fill: var(--warm); text-anchor: middle; }
 .node .node-count.long { font-size: 8px; }
+/* a reviewer's improvement badge at its node's top right (nodes.ts, decision 229): a knockout in the card colour cuts
+   the outline, the body 18 % --rev on --card with a 1.1 --rev stroke, the count in 700 7.5 px mono; its core pops
+   (stop-motion.ts) around its own box */
+.node .node-badge-core { transform-box: fill-box; transform-origin: center; }
+.node .node-badge-knockout { fill: var(--card); }
+.node .node-badge-body { fill: color-mix(in srgb, var(--rev) 18%, var(--card)); stroke: var(--rev); stroke-width: 1.1; }
+.node .node-badge-text { font: 700 7.5px var(--f-mono); fill: var(--rev); text-anchor: middle; }
 .node.waiting .node-icon { stroke: var(--you); }
 .node .node-letter { font: 700 10px var(--f-mono); fill: var(--ink); text-anchor: middle; }
 /* a running node's model icon (model-icons.ts): its glyph follows `color`; its strokes scale with the graph like the
@@ -159,6 +166,10 @@
 .session-graph .node-progress path, .session-graph .node-progress circle { fill: none; stroke-linecap: butt; }
 .session-graph .progress-part, .session-graph .progress-track, .session-graph .progress-done, .session-graph .progress-light { stroke: var(--c); stroke-width: 1.8; }
 .session-graph .progress-part, .session-graph .progress-track { stroke-opacity: .2; }
+/* a fixer with improvements (decision 229): each part, or each of its two arcs, in its item's kind, fixes --warm and
+   improvements --rev; the light keeps the node's colour */
+.session-graph .progress-part.fix, .session-graph .progress-track.fix, .session-graph .progress-done.fix { stroke: var(--warm); }
+.session-graph .progress-part.improve, .session-graph .progress-track.improve, .session-graph .progress-done.improve { stroke: var(--rev); }
 .session-graph .progress-part { transition: stroke-opacity .3s; }
 .session-graph .progress-part.done { stroke-opacity: 1; }
 .session-graph .progress-done { transition: stroke-dasharray .3s var(--ease), stroke-opacity .3s; }
@@ -179,10 +190,18 @@
 .session-graph .node-sheen { pointer-events: none; }
 .session-graph .node-sheen-light { fill: var(--fg); }
 /* a node's hit area, 5 wider than the node; its stroke is the linked ring: the nodes of one agent drawn more than once
-   (its resumed legs, decision 187) ring each other while one is pointed at or focused, fading with the dimming; the
-   ring lies just outside a running node's progress ring, and no line joins the nodes */
-.session-graph .node .node-hit { fill: transparent; stroke: var(--fg-2); stroke-width: 1.4; stroke-opacity: 0; transition: stroke-opacity .2s; }
+   (its resumed legs, decision 187) ring each other while one is pointed at, and every node of an agent whose table row
+   is pointed at rings, the main thread's Plan node and Fixes for its row (decision 229); the ring lies just outside a running node's progress ring, and no line joins the
+   nodes. Nothing dims. A node with a card (a button that opens a dialog, scene.ts) shows the hand pointer and fades its
+   hit ring in at .75 in 120 ms while pointed at, with no change of size (C1), unless it rings already (open or
+   linked), which pointing leaves at its full opacity; the open card's node rings in --fg at 1.6
+   (markCard), and the keyboard focus in --focus at 1.6, in place of the outline */
+.session-graph .node .node-hit { fill: transparent; stroke: var(--fg-2); stroke-width: 1.4; stroke-opacity: 0; transition: stroke-opacity .12s, stroke .12s; }
 .session-graph .node.linked .node-hit { stroke-opacity: 1; }
+.session-graph .node[aria-haspopup] { outline: none; }
+.session-graph .node[aria-haspopup]:hover:not(.open):not(.linked) .node-hit { stroke-opacity: .75; }
+.session-graph .node.open .node-hit { stroke: var(--fg); stroke-opacity: 1; stroke-width: 1.6; }
+.session-graph .node[aria-haspopup]:focus-visible .node-hit { stroke: var(--focus); stroke-opacity: 1; stroke-width: 1.6; }
 /* a folded pipeline's compact row: lighter pills with 10 px text */
 .session-graph .pill.compact rect { fill: color-mix(in srgb, var(--c) 8%, var(--card)); }
 .session-graph .pill.compact text { font-size: 10px; }
@@ -192,11 +211,8 @@
 .session-graph .graph-text.group { font: 600 10px var(--f-mono); letter-spacing: .02em; fill: var(--fg-3); }
 .session-graph .graph-text.toggle, .session-graph .graph-text.link { cursor: pointer; }
 .session-graph .graph-text.toggle:hover, .session-graph .graph-text.link:hover { fill: var(--fg); }
-/* the nodes and gates that open an agent's table row or the main-thread modal (SESSION_AGENT, SESSION_MAIN) */
+/* the nodes and gates that open a node card, an agent's table row or the main-thread modal (SESSION_CARD, SESSION_AGENT, SESSION_MAIN) */
 .session-graph .node.clickable, .session-graph .gate.clickable { cursor: pointer; }
 /* the still "You" pill above Plan from the first prompt */
 .session-graph .gate.prompt rect { fill: var(--card-2); stroke: var(--you); stroke-dasharray: none; }
 .session-graph .gate.prompt text { fill: var(--you); }
-/* hover: the items of other agents and branches dim; the opacity moves only around a change of focus */
-.session-graph .graph.dimming > g > * { transition: opacity .2s; }
-.session-graph .graph.focused .dim { opacity: .16 !important; }
