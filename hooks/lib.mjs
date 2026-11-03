@@ -9,11 +9,11 @@ import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DEFAULT_ROLES, escapeRegExp, LEGACY_ROLE_STAGE, stripControl } from './browser-safe.mjs';
+import { DEFAULT_ROLES, escapeRegExp, isTaskId, LEGACY_ROLE_STAGE, stripControl, TASK_ID_CHARS } from './browser-safe.mjs';
 import { FAILURE_ERROR_CHARS, keptStdout, SAFE_ASSIGNMENT_NAMES } from './verification.mjs';
 
 // The default roles and the text helpers live in `browser-safe.mjs`, which the browser-safe core of `src/` imports.
-export { DEFAULT_ROLES, escapeRegExp, LEGACY_ROLE_STAGE, stripControl };
+export { DEFAULT_ROLES, escapeRegExp, isTaskId, LEGACY_ROLE_STAGE, stripControl, TASK_ID_CHARS };
 
 export const HOOK_DEFAULTS = { spool: { dir: '~/.local/share/nurselog', maxLineBytes: 65536, keepDays: 14 } };
 
@@ -1106,7 +1106,8 @@ const keptAnswers = (input, response) => {
 };
 
 /**
- * Keeps `responseChars`, the scalars the mapping reads, the first error line, what `keptStdout` (`hooks/verification.mjs`)
+ * Keeps `responseChars`, the scalars the mapping reads, a background Bash command's task id (`backgroundTaskId`, a
+ * plain word, `isTaskId`), the first error line, what `keptStdout` (`hooks/verification.mjs`)
  * keeps of a Bash stdout after redaction (a verification tail or a PR URL), the short text of a marker tool (a
  * string, a content list or an object with `content`) and the answers of an AskUserQuestion call (`keptAnswers`).
  */
@@ -1127,6 +1128,10 @@ const slimResponse = (response, tool, input, sensitive) => {
     if (typeof value === 'boolean' || typeof value === 'number' || (typeof value === 'string' && value.length <= 200)) {
       slim[field] = value;
     }
+  }
+  // The task id of a Bash command run in the background, which its read-back names: a plain word only (`isTaskId`).
+  if (tool === 'Bash' && isTaskId(response.backgroundTaskId)) {
+    slim.backgroundTaskId = response.backgroundTaskId;
   }
   if (sensitive) {
     slim.sensitive = true;
@@ -1162,12 +1167,14 @@ const slimFailureError = (error, sensitive) => {
  * What the hook keeps of a payload (design section 2.2): tool inputs without file bodies (lengths instead),
  * tool responses reduced to `slimResponse`, a failure's `error` cut to its start (none for a sensitive call) with
  * `errorChars`, the length of the whole error text (kept for a sensitive call too, never the text; a stray one beside
- * an `error` that is no string is dropped), and nothing but paths and the command for a tool that touches a denylisted path or prints secrets. Other fields
- * pass unchanged; redaction runs on the result.
+ * an `error` that is no string is dropped), nothing but paths and the command for a tool that touches a denylisted path or prints secrets, and a
+ * PermissionDenied's `reason` redacted by the command rule, as it may quote the command it refused. Other fields pass unchanged; redaction runs on the
+ * result.
  */
 export const minimizePayload = (payload) => {
   const failure = payload.error !== undefined || payload.errorChars !== undefined;
-  if (payload.tool_input === undefined && payload.tool_response === undefined && !failure) {
+  const denial = payload.hook_event_name === 'PermissionDenied' && typeof payload.reason === 'string';
+  if (payload.tool_input === undefined && payload.tool_response === undefined && !failure && !denial) {
     return payload;
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
@@ -1191,6 +1198,9 @@ export const minimizePayload = (payload) => {
   }
   if (payload.tool_response !== undefined) {
     slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === 'string' ? payload.tool_name : '', input, sensitive);
+  }
+  if (denial) {
+    slim.reason = redactString(payload.reason, true);
   }
   return slim;
 };

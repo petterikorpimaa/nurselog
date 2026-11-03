@@ -645,6 +645,17 @@ var VERIFICATION_FAIL_PATTERNS = Object.freeze({
   lint: "\\([1-9]\\d* errors?, \\d+ warnings?\\)",
   test: "\\b[1-9]\\d* fail(?:ed)?\\b|\\bErrors +[1-9]\\d* errors?\\b"
 });
+var whereOptions = (flags, values) => ({ flags: new Set(flags), values: new Map(Object.entries(values)) });
+var pnpmFlags = ["-r", "--recursive", "-w", "--workspace-root", "-s", "--silent"];
+var pnpmValues = { "--filter": "name", "-F": "name", "--dir": "directory", "-C": "directory" };
+var npmFlags = ["--workspaces", "-ws", "--silent", "-s"];
+var npmValues = { "--workspace": "name", "-w": "name", "--prefix": "directory" };
+var WHERE_OPTIONS = /* @__PURE__ */ new Map([
+  ["pnpm", whereOptions(pnpmFlags, pnpmValues)],
+  ["npm", whereOptions(npmFlags, npmValues)],
+  ["yarn", whereOptions([], { "--cwd": "directory" })],
+  ["bun", whereOptions([], { "--filter": "name", "--cwd": "directory" })]
+]);
 var SAFE_ASSIGNMENT_NAMES = Object.freeze(["CI", "NODE_ENV", "FORCE_COLOR", "NO_COLOR", "TZ", "DEBUG", "LANG", "LC_ALL"]);
 var SAFE_NAME_ALTERNATIVES = SAFE_ASSIGNMENT_NAMES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 var SAFE_ASSIGNMENT = new RegExp(`^(?:${SAFE_NAME_ALTERNATIVES})=(?:[A-Za-z0-9_.:,/-]*|\\[redacted\\])$`);
@@ -2850,6 +2861,8 @@ var toolMetrics = (agents) => {
   }
   return [...tools.values()].sort((a, b) => b.chars - a.chars || compareText(a.tool, b.tool));
 };
+var coveredEditCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.coveredEdits ?? 0), 0);
+var denialCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.denials ?? 0), 0);
 var verificationMetrics = (role, agents) => {
   const commands = { typecheck: 0, lint: 0, test: 0 };
   const failed = { typecheck: 0, lint: 0, test: 0 };
@@ -2875,14 +2888,17 @@ var sessionMetrics = (session) => {
     entryOf(byRole, agent.role, () => []).push(agent);
   }
   const groups2 = [...mainGroup, ...byRole.entries()];
-  const roles = groups2.map(([role, agents]) => roleMetrics(role, agents));
-  const verification = groups2.flatMap(([role, agents]) => verificationMetrics(role, agents) ?? []);
+  const roles = groups2.map(([role, agents2]) => roleMetrics(role, agents2));
+  const verification = groups2.flatMap(([role, agents2]) => verificationMetrics(role, agents2) ?? []);
   const byStage = Object.fromEntries(Object.entries(session.tokens.byStage).map(([key, counts]) => [key, counts ? processedTokens(counts) : 0]));
   const tokens2 = { byStage, total: processedTokens(session.tokens.total), usd: session.tokens.total.usd };
   const tools = { main: toolMetrics(main ? [main] : []), subagents: toolMetrics(subagents) };
   const total = totalOf(roles);
   const resumes = resumeMetrics(session.resumes ?? []);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens: tokens2, resumes };
+  const agents = main ? [main, ...subagents] : subagents;
+  const coveredEdits = coveredEditCount(agents);
+  const denials = denialCount(agents);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, coveredEdits, denials, verification, tokens: tokens2, resumes };
   if (session.overhead) {
     metrics.overhead = overheadMetrics(session.overhead, total.usd);
   }

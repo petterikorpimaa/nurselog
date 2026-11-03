@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.20 (2026-11-03)
+
+### New
+
+- Scheduled and peer prompts are no developer prompts
+- An auto-mode denial ends its call at once
+- A backgrounded command's read-back counts in the command's step
+- Keep the stdout tail of a verification command with a where option
+- Only edits a check covers make a session unchecked
+
+### Fixed
+
+- The trimmed report keeps its time
+
 ## 0.1.19 (2026-11-03)
 
 ### New

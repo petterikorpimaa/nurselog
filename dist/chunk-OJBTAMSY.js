@@ -12,10 +12,20 @@ import {
   sessionRunIds,
   sessionsAffected,
   time
-} from "./chunk-TGKDM7PV.js";
+} from "./chunk-2S7VCMPW.js";
 
 // src/spool/fixture.ts
 var MET_SESSION_LINES = /* @__PURE__ */ new Set(["session.start", "session.end", "prompt"]);
+var keptStop = (event, pending) => {
+  if (event.event !== "turn.stop" || event.agentId) {
+    return false;
+  }
+  if ((event.data.crons ?? []).length > 0) {
+    pending.add(event.sessionId);
+    return true;
+  }
+  return pending.delete(event.sessionId);
+};
 var spawnOf = (event, agents, spawns) => {
   if (event.event === "agent.start") {
     return agents.has(event.agentId ?? "");
@@ -126,8 +136,10 @@ var replaySpool = (days, config) => {
       const sessions = new Set(met.map((item) => item.event.sessionId));
       const agents = new Set(met.flatMap((item) => item.event.agentId ? [item.event.agentId] : []));
       const spawns = spawnCalls(ordered, agents);
+      const pending = /* @__PURE__ */ new Set();
       for (const item of ordered) {
-        const whole = MET_SESSION_LINES.has(item.event.event) && sessions.has(item.event.sessionId);
+        const metSession = sessions.has(item.event.sessionId);
+        const whole = metSession && (MET_SESSION_LINES.has(item.event.event) || keptStop(item.event, pending));
         if (whole || spawnOf(item.event, agents, spawns)) {
           kept.add(item.line);
         }

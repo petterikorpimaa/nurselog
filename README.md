@@ -250,7 +250,7 @@ Claude Code --hook--> spool (NDJSON day files) --read--> board server (reducer) 
                                    git, gh, transcripts -------+  (facts, written back to the spool)
 ```
 
-- **Hook** (`hooks/nurselog-hook.mjs`): runs on 19 Claude Code events, drops file and output bodies, redacts the rest
+- **Hook** (`hooks/nurselog-hook.mjs`): runs on 20 Claude Code events, drops file and output bodies, redacts the rest
   and appends one line. It always exits 0, so it never fails a session.
 - **Spool**: one NDJSON file per day under `~/.local/share/nurselog/<repo-hash>/`, shared by every worktree of a clone.
   It is the source of truth: while the board is down nothing is lost, and the next start replays it.
@@ -627,7 +627,7 @@ Arrays such as `packages` replace the default list whole.
 | `insights.guidelines.budgetFirstStop` / `quietReviewer` / `overheadShare` | `0.3` / `0.3` / `0.01` | Guideline shares: implement runs at their budget by the first stop (flags at or above), a review role's last 10 runs with a fix (flags below), Nurselog's share of the cost (flags above). `null` turns one off. |
 | `insights.guidelines.mainPeakContext` / `mainLargeOutputs` | `0.4` / `2` | Guidelines of the main thread: the median peak context as a share of the context limit, the median count of outputs over 20,000 characters per session. |
 | `insights.guidelines.mainReadChars` / `mainCheckChars` | `100000` / `20000` | Guidelines of the main thread's own work, per session: the median characters of its reads and searches (about 25,000 tokens), and of its verification command output (one raw test run); flags above. |
-| `insights.guidelines.uncheckedSessions` | `0.8` | Guideline share of the work sessions with a file edit and no typecheck or test command (counted through `verification.kinds`); flags at or above. |
+| `insights.guidelines.uncheckedSessions` | `0.8` | Guideline share of the work sessions with a file edit (prose files such as `.md` and `.txt` do not count) and no typecheck or test command (counted through `verification.kinds`); flags at or above. |
 | `insights.guidelines.untestedFirstStop` | `0.3` | Guideline share of the implement runs that stopped before their tool-call budget with no test command up to that stop; flags at or above. `null` turns it off. |
 | `insights.guidelines.researchOverlap` | `0.5` | Guideline share of the implement runs that started while a research agent (a role of stage other) was still running; at or above it the finding is one to consider, never to change. `null` turns it off. |
 | `insights.guidelines.severalPipelines` | `0.5` | Guideline share of the work sessions with two or more pipelines (several tasks in one session); flags at or above. `null` turns it off. |
@@ -684,9 +684,12 @@ values and `NAME=value` pairs with a secret name. The home directory becomes `~`
 
 The stdout tail: a command made only of verification runs (default runners and kinds, such as `pnpm test:run`,
 `npm test` or `make test`) keeps its last 300 characters, and `gh pr create` its PR URL. The rule is an allowlist (no
-option between the runner and its tool word, only allowlisted environment names such as `CI` and `NODE_ENV`, no long
-`grep` option). The tail is redacted by shape only, so a value a test prints can survive in it, and a script that loads
-`.env` itself is not seen as touching a secret. A `make` tail holds make's echo of the recipe lines with their variables
+option between the runner and its tool word except the few that only select where or in which package the script runs,
+or only quiet its logging (`-s`, `--silent`), such as `pnpm --filter web test`, `pnpm -C packages/api lint` and `npm -w
+web run test`, with a plain package name or a relative directory; only allowlisted environment names such as `CI` and
+`NODE_ENV`, no long `grep` option). The tail is
+redacted by shape only, so a value a test prints can survive in it, and a script that loads `.env` itself is not seen as
+touching a secret. A `make` tail holds make's echo of the recipe lines with their variables
 expanded, so prefix a recipe line that carries a secret with `@`. `make` keeps no tail when an option or a `NAME=value`
 follows it (`make -j4 test`, `make test V=1`), and keeps none unless every target is a kind target (`test`, `lint`,
 `test:unit`, `lint-ci`); the verification round still counts.
@@ -837,9 +840,10 @@ numbers fed.
   commands that only read), implement (file edits) or verify (commands matching `verification.kinds`); a step no
   subagent did in the last sessions reads "main thread" with its share of the calls on the map, and three findings
   propose the first step to split off: reads that fill the context, raw check output, and sessions that edit files
-  without a typecheck or test. A stack whose commands `verification.kinds` does not match reads as unchecked, and so
-  does a session that edited only docs. The output of a failing command is not counted, nor is a background command's
-  output read back later, so the check output of a failing or backgrounded run reads low.
+  without a typecheck or test (an edit of a prose file, by extension `.md`, `.mdx`, `.txt`, `.rst` or `.adoc`, does not
+  count). A stack whose commands `verification.kinds` does not match reads as unchecked. The output of a failing
+  command is not counted, nor is a background command's output read back later, so the check output of a failing or
+  backgrounded run reads low.
 - Failed runs are a non-zero exit or a fail pattern matching the stdout tail; with other runners than the defaults
   only exit codes count.
 - `--json` prints the same lines with their numbers.

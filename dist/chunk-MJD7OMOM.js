@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-3LOJCZZY.js";
+} from "./chunk-DGVUHDJF.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
@@ -93,7 +93,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-TGKDM7PV.js";
+} from "./chunk-2S7VCMPW.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -146,6 +146,9 @@ var trimAgent = (agent) => {
   const trimmed = { ...rest, recent: rowCalls(agent), trimmed: true };
   if (report) {
     trimmed.report = { text: reportLine(report.text), via: report.via };
+    if (report.at !== void 0) {
+      trimmed.report.at = report.at;
+    }
   }
   return trimmed;
 };
@@ -1798,7 +1801,7 @@ var NO_PR = "no work session opened a PR (PRs come from the gh poll of github.re
 var NO_PR_AFTER_WORK = "no PR was opened after the session's first work on its branch";
 var NO_PR_SIZE = "no PR size is known (the gh poll of github.repo reads it)";
 var NO_CHANGED_LINE = "the PRs changed no line";
-var NO_EDIT = "no work session edited a file";
+var NO_EDIT = "no work session edited a file other than prose (.md, .mdx, .txt, .rst, .adoc)";
 var NO_STOP = "no implement run stopped";
 var NO_STOP_UNDER_BUDGET = "no implement run stopped before its tool-call budget";
 var NO_TEST = "no test command matched verification.kinds";
@@ -1990,7 +1993,8 @@ var checksOf = (metrics) => {
   if (main === void 0 || subagents === void 0 || verification === void 0) {
     return void 0;
   }
-  const edited = [...main, ...subagents].some(editedWith);
+  const coveredEdits = countOf(metrics.coveredEdits);
+  const edited = coveredEdits === null ? [...main, ...subagents].some(editedWith) : coveredEdits > 0;
   return { edited, checked: verification.some(ranCheck) };
 };
 var shownText = (value) => {

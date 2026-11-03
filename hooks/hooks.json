@@ -9,6 +9,7 @@
     "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5, "async": true }] }],
     "PostToolUseFailure":[{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5, "async": true }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5, "async": true }] }],
+    "PermissionDenied":  [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5, "async": true }] }],
     "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5 }] }],
     "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5, "async": true }] }],
     "TaskCreated":       [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nurselog-hook.mjs\" 2>/dev/null || true", "timeout": 5, "async": true }] }],

@@ -46,6 +46,27 @@ const EXEC_TOOLS = new Set(['tsc', 'eslint', 'vitest', 'typecheck', 'lint']);
 const UNSAFE_OPTIONS = ['script-shell', 'userconfig', 'preload'];
 /** bun's short `-r` (`--preload`), alone or in a group of short options. */
 const BUN_PRELOAD = /^-[A-Za-z]*r/;
+/** pnpm's `--config.<key>` options, which set any config key (older versions apply them after the tool word too). */
+const PNPM_CONFIG = /^--config\./;
+/** The option table entry of a runner: `flags` take no value, `values` map an option to the form of its value (`name` or `directory`). */
+const whereOptions = (flags, values) => ({ flags: new Set(flags), values: new Map(Object.entries(values)) });
+const pnpmFlags = ['-r', '--recursive', '-w', '--workspace-root', '-s', '--silent'];
+const pnpmValues = { '--filter': 'name', '-F': 'name', '--dir': 'directory', '-C': 'directory' };
+const npmFlags = ['--workspaces', '-ws', '--silent', '-s'];
+const npmValues = { '--workspace': 'name', '-w': 'name', '--prefix': 'directory' };
+/**
+ * The options a script runner may carry before its verb and before its tool word: the ones that only select where or
+ * in which package the script runs, or only quiet its logging (`-s`, `--silent`). A value is a package `name`
+ * (`PLAIN_WORD`) or a `directory` (`PLAIN_DIRECTORY`), given as the next word or, for a long option, after `=`
+ * (`--filter=web`). Any other option, a group of short options (`-rs`) and `--` fail closed, `UNSAFE_OPTIONS` stay
+ * refused in every position, and `turbo` and the other runners have none.
+ */
+const WHERE_OPTIONS = new Map([
+  ['pnpm', whereOptions(pnpmFlags, pnpmValues)],
+  ['npm', whereOptions(npmFlags, npmValues)],
+  ['yarn', whereOptions([], { '--cwd': 'directory' })],
+  ['bun', whereOptions([], { '--filter': 'name', '--cwd': 'directory' })],
+]);
 /**
  * A tool word: a bare name or one `@scope/name`, so no path (a `/` elsewhere, a leading `.` or `..` would reach any
  * binary through a directory named like a kind, `node_modules/vitest/../../bin/cat`; `owner/repo` is a GitHub
@@ -56,6 +77,8 @@ const PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 /** The script of `node`: a relative plain path without a `..` segment and with a `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts` extension. */
 const NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
+/** A directory an option of `WHERE_OPTIONS` selects: a relative plain path without a `..` segment (`.`, `packages/api`, `./packages/api`), by its text only. */
+const PLAIN_DIRECTORY = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*$/;
 /** The names of the environment assignments a verification command may carry; redaction (`hooks/lib.mjs`) also leaves their empty value (`CI= pnpm lint`) as it is. */
 export const SAFE_ASSIGNMENT_NAMES = Object.freeze(['CI', 'NODE_ENV', 'FORCE_COLOR', 'NO_COLOR', 'TZ', 'DEBUG', 'LANG', 'LC_ALL']);
 /** The names as the alternatives of a pattern, each escaped (this file imports nothing, so `escapeRegExp` is not at hand). */
@@ -204,18 +227,49 @@ const isSilentPrefix = (stages) => {
   return assignments.length > 0 && assignments.every((text) => SAFE_ASSIGNMENT.test(text));
 };
 
-/** A word that names an `UNSAFE_OPTIONS` entry, whole or by a prefix of at least three letters, or bun's `-r`. */
+/** A word that names an `UNSAFE_OPTIONS` entry, whole or by a prefix of at least three letters, bun's `-r` or a `--config.<key>` of pnpm. */
 const isUnsafeOption = (runner, text) => {
   const name = /^--([^=]{3,})/.exec(text)?.[1];
   if (name !== undefined && UNSAFE_OPTIONS.some((option) => option.startsWith(name))) {
     return true;
   }
-  return runner === 'bun' && BUN_PRELOAD.test(text);
+  return (runner === 'bun' && BUN_PRELOAD.test(text)) || (runner === 'pnpm' && PNPM_CONFIG.test(text));
 };
 
 /**
- * The tool word of a command, by an allowlist grammar with no option before it: for `pnpm`, `npm`, `yarn`, `bun` and
- * `turbo` their next word or the word after `run` or `exec` (for `pnpm` also `dlx`; none for `bun exec`, which runs
+ * The index of the first word of `args` from `from` on that is no option, skipping the options of `WHERE_OPTIONS` of the
+ * runner with their values; -1 when an option is none of those, its value is no `PLAIN_WORD` or `PLAIN_DIRECTORY` (so
+ * never a glob, `$` or a redirection) or it has none. A word that starts with `-` is an option.
+ */
+const skipWhereOptions = (runner, args, from) => {
+  const allowed = WHERE_OPTIONS.get(runner);
+  let index = from;
+  while (index < args.length && args[index].text.startsWith('-')) {
+    const { text, glob } = args[index];
+    const split = text.startsWith('--') ? text.indexOf('=') : -1;
+    const name = split === -1 ? text : text.slice(0, split);
+    if (allowed === undefined || glob) {
+      return -1;
+    }
+    if (split === -1 && allowed.flags.has(name)) {
+      index += 1;
+      continue;
+    }
+    const form = allowed.values.get(name);
+    const value = split === -1 ? args[index + 1] : { text: text.slice(split + 1), glob };
+    const pattern = form === 'directory' ? PLAIN_DIRECTORY : PLAIN_WORD;
+    if (form === undefined || value === undefined || value.glob || !pattern.test(value.text)) {
+      return -1;
+    }
+    index += split === -1 ? 2 : 1;
+  }
+  return index;
+};
+
+/**
+ * The tool word of a command, by an allowlist grammar with no option before it but the `WHERE_OPTIONS` of a script
+ * runner (`skipWhereOptions`, before its verb and between its verb and the tool word): for `pnpm`, `npm`, `yarn`, `bun`
+ * and `turbo` their next word or the word after `run` or `exec` (for `pnpm` also `dlx`; none for `bun exec`, which runs
  * its argument as a shell script), for `npx` and `bunx` their next word, for `make` its next word when every word after
  * it is a `KIND_TARGET` (no option, no `NAME=value`, which may override the recipes' `SHELL`, and no other target), for
  * `node` its next word when that is a `NODE_SCRIPT`, else the runner itself. A tool word is a `PLAIN_WORD`; one a
@@ -235,13 +289,15 @@ const toolWord = (runner, args) => {
   if (!script && !BINARY_RUNNERS.has(runner.text)) {
     return runner;
   }
-  const verb = script ? args[0]?.text : undefined;
+  const first = skipWhereOptions(runner.text, args, 0);
+  const verb = script ? args[first]?.text : undefined;
   const shellExec = runner.text === 'bun' && verb === 'exec';
-  if (shellExec || (script && args.some((arg) => isUnsafeOption(runner.text, arg.text)))) {
+  if (first === -1 || shellExec || (script && args.some((arg) => isUnsafeOption(runner.text, arg.text)))) {
     return undefined;
   }
   const hasVerb = SCRIPT_VERBS.has(verb) || (runner.text === 'pnpm' && verb === 'dlx');
-  const tool = hasVerb ? args[1] : args[0];
+  const toolIndex = hasVerb ? skipWhereOptions(runner.text, args, first + 1) : first;
+  const tool = toolIndex === -1 ? undefined : args[toolIndex];
   if (!tool || !PLAIN_WORD.test(tool.text)) {
     return undefined;
   }

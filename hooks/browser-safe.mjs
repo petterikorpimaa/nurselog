@@ -32,3 +32,17 @@ export const LEGACY_ROLE_STAGE = 'build';
 export const stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
 
 export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The characters a background task id keeps at most (`isTaskId`): below the 40 at which the hook's redaction takes a run
+ * of letters and digits for a token (`LONG_RUN` of `hooks/lib.mjs`), so the two limits agree; real ids are about 9.
+ */
+export const TASK_ID_CHARS = 39;
+
+/**
+ * A background task id as Claude Code writes it (a Bash response's `backgroundTaskId`, the `task_id` of `TaskOutput`,
+ * the `bash_id` of `BashOutput`, design section 2.2): a plain word of ASCII letters, digits, `_` and `-` that starts with
+ * a letter, at most `TASK_ID_CHARS`. Starting with a letter keeps it from reading as an array index, so a map keyed by
+ * it keeps its insertion order, and from being `__proto__`.
+ */
+export const isTaskId = (value) => typeof value === 'string' && value.length <= TASK_ID_CHARS && /^[A-Za-z][\w-]*$/.test(value);

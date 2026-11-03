@@ -43,7 +43,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-TGKDM7PV.js";
+} from "./chunk-2S7VCMPW.js";
 
 // src/config.ts
 import { existsSync } from "fs";
@@ -155,7 +155,7 @@ var createBashTracker = () => {
         open.set(event.data.toolUseId, { command: event.data.input.command, cwd: event.cwd });
         return void 0;
       }
-      if (event.event === "tool.post" || event.event === "tool.fail") {
+      if (event.event === "tool.post" || event.event === "tool.fail" || event.event === "tool.denied") {
         const finished = open.get(event.data.toolUseId);
         open.delete(event.data.toolUseId);
         return event.event === "tool.post" && finished ? { ...finished, interrupted: event.data.interrupted, exitCode: event.data.exitCode } : void 0;

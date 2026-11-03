@@ -18,9 +18,22 @@ var KIND_TARGET = /^(?:typecheck|tsc|lint|eslint|vitest|test)(?:[:._-]|$)/;
 var EXEC_TOOLS = /* @__PURE__ */ new Set(["tsc", "eslint", "vitest", "typecheck", "lint"]);
 var UNSAFE_OPTIONS = ["script-shell", "userconfig", "preload"];
 var BUN_PRELOAD = /^-[A-Za-z]*r/;
+var PNPM_CONFIG = /^--config\./;
+var whereOptions = (flags, values) => ({ flags: new Set(flags), values: new Map(Object.entries(values)) });
+var pnpmFlags = ["-r", "--recursive", "-w", "--workspace-root", "-s", "--silent"];
+var pnpmValues = { "--filter": "name", "-F": "name", "--dir": "directory", "-C": "directory" };
+var npmFlags = ["--workspaces", "-ws", "--silent", "-s"];
+var npmValues = { "--workspace": "name", "-w": "name", "--prefix": "directory" };
+var WHERE_OPTIONS = /* @__PURE__ */ new Map([
+  ["pnpm", whereOptions(pnpmFlags, pnpmValues)],
+  ["npm", whereOptions(npmFlags, npmValues)],
+  ["yarn", whereOptions([], { "--cwd": "directory" })],
+  ["bun", whereOptions([], { "--filter": "name", "--cwd": "directory" })]
+]);
 var PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
 var URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 var NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
+var PLAIN_DIRECTORY = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*$/;
 var SAFE_ASSIGNMENT_NAMES = Object.freeze(["CI", "NODE_ENV", "FORCE_COLOR", "NO_COLOR", "TZ", "DEBUG", "LANG", "LC_ALL"]);
 var SAFE_NAME_ALTERNATIVES = SAFE_ASSIGNMENT_NAMES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 var SAFE_ASSIGNMENT = new RegExp(`^(?:${SAFE_NAME_ALTERNATIVES})=(?:[A-Za-z0-9_.:,/-]*|\\[redacted\\])$`);
@@ -142,7 +155,31 @@ var isUnsafeOption = (runner, text) => {
   if (name !== void 0 && UNSAFE_OPTIONS.some((option) => option.startsWith(name))) {
     return true;
   }
-  return runner === "bun" && BUN_PRELOAD.test(text);
+  return runner === "bun" && BUN_PRELOAD.test(text) || runner === "pnpm" && PNPM_CONFIG.test(text);
+};
+var skipWhereOptions = (runner, args, from) => {
+  const allowed = WHERE_OPTIONS.get(runner);
+  let index = from;
+  while (index < args.length && args[index].text.startsWith("-")) {
+    const { text, glob } = args[index];
+    const split = text.startsWith("--") ? text.indexOf("=") : -1;
+    const name = split === -1 ? text : text.slice(0, split);
+    if (allowed === void 0 || glob) {
+      return -1;
+    }
+    if (split === -1 && allowed.flags.has(name)) {
+      index += 1;
+      continue;
+    }
+    const form = allowed.values.get(name);
+    const value = split === -1 ? args[index + 1] : { text: text.slice(split + 1), glob };
+    const pattern = form === "directory" ? PLAIN_DIRECTORY : PLAIN_WORD;
+    if (form === void 0 || value === void 0 || value.glob || !pattern.test(value.text)) {
+      return -1;
+    }
+    index += split === -1 ? 2 : 1;
+  }
+  return index;
 };
 var toolWord = (runner, args) => {
   if (runner.text === "node") {
@@ -156,13 +193,15 @@ var toolWord = (runner, args) => {
   if (!script && !BINARY_RUNNERS.has(runner.text)) {
     return runner;
   }
-  const verb = script ? args[0]?.text : void 0;
+  const first = skipWhereOptions(runner.text, args, 0);
+  const verb = script ? args[first]?.text : void 0;
   const shellExec = runner.text === "bun" && verb === "exec";
-  if (shellExec || script && args.some((arg) => isUnsafeOption(runner.text, arg.text))) {
+  if (first === -1 || shellExec || script && args.some((arg) => isUnsafeOption(runner.text, arg.text))) {
     return void 0;
   }
   const hasVerb = SCRIPT_VERBS.has(verb) || runner.text === "pnpm" && verb === "dlx";
-  const tool = hasVerb ? args[1] : args[0];
+  const toolIndex = hasVerb ? skipWhereOptions(runner.text, args, first + 1) : first;
+  const tool = toolIndex === -1 ? void 0 : args[toolIndex];
   if (!tool || !PLAIN_WORD.test(tool.text)) {
     return void 0;
   }
@@ -317,6 +356,8 @@ var DEFAULT_ROLES = {
 var LEGACY_ROLE_STAGE = "build";
 var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var TASK_ID_CHARS = 39;
+var isTaskId = (value) => typeof value === "string" && value.length <= TASK_ID_CHARS && /^[A-Za-z][\w-]*$/.test(value);
 
 // hooks/lib.mjs
 var HOOK_DEFAULTS = { spool: { dir: "~/.local/share/nurselog", maxLineBytes: 65536, keepDays: 14 } };
@@ -1032,6 +1073,9 @@ var slimResponse = (response, tool, input, sensitive) => {
       slim[field] = value;
     }
   }
+  if (tool === "Bash" && isTaskId(response.backgroundTaskId)) {
+    slim.backgroundTaskId = response.backgroundTaskId;
+  }
   if (sensitive) {
     slim.sensitive = true;
     return slim;
@@ -1061,7 +1105,8 @@ var slimFailureError = (error, sensitive) => {
 };
 var minimizePayload = (payload) => {
   const failure = payload.error !== void 0 || payload.errorChars !== void 0;
-  if (payload.tool_input === void 0 && payload.tool_response === void 0 && !failure) {
+  const denial = payload.hook_event_name === "PermissionDenied" && typeof payload.reason === "string";
+  if (payload.tool_input === void 0 && payload.tool_response === void 0 && !failure && !denial) {
     return payload;
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
@@ -1085,6 +1130,9 @@ var minimizePayload = (payload) => {
   }
   if (payload.tool_response !== void 0) {
     slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === "string" ? payload.tool_name : "", input, sensitive);
+  }
+  if (denial) {
+    slim.reason = redactString(payload.reason, true);
   }
   return slim;
 };
@@ -2693,6 +2741,8 @@ var isCount = (value) => typeof value === "number" && Number.isSafeInteger(value
 var isAmount = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
 // src/model/events.ts
+var PROMPT_TEXT_CAP = 4e3;
+var CRONS_CAP = 10;
 var MESSAGE_FACT_TEXT_CAP = 2e3;
 var MESSAGE_FACT_UUID = /^[\w-]{1,100}$/;
 var SPOOL_EVENT_NAMES = [
@@ -2705,6 +2755,7 @@ var SPOOL_EVENT_NAMES = [
   "tool.post",
   "tool.fail",
   "permission",
+  "tool.denied",
   "agent.start",
   "agent.stop",
   "task.created",
@@ -2744,11 +2795,11 @@ var stringFields = (data, required, optional = [], prefix = "data") => {
   const wrong = optional.find((key) => !isOptional(data[key], isString));
   return wrong ? `${prefix}.${wrong} must be a string` : void 0;
 };
-var INPUT_STRINGS = ["command", "description", "filePath", "pattern", "path", "glob", "subagentType", "model", "prompt", "message", "name", "pageId", "issueIdOrKey"];
+var INPUT_STRINGS = ["command", "description", "filePath", "pattern", "path", "glob", "subagentType", "model", "prompt", "message", "name", "pageId", "issueIdOrKey", "taskId"];
 var isQuestionList = (value) => Array.isArray(value) && value.every((item) => isFields(item) && isString(item.question) && isOptional(item.options, isStringList2));
 var isQuestionAnswer = (item) => isFields(item) && isString(item.question) && isString(item.answer) && isOptional(item.notes, isString);
 var toolPostProblem = (data) => {
-  const problem = stringFields(data, ["toolUseId", "tool"], ["stdoutTail", "agentId", "resolvedModel"]);
+  const problem = stringFields(data, ["toolUseId", "tool"], ["stdoutTail", "backgroundTaskId", "agentId", "resolvedModel"]);
   const answers = isOptional(data.answers, (value) => Array.isArray(value) && value.every(isQuestionAnswer));
   return problem ?? (answers ? void 0 : "data.answers must be a list of { question, answer, notes }");
 };
@@ -2775,7 +2826,16 @@ var promptProblem = (data) => {
   if (data.kind === "handback") {
     return stringFields(data, [], ["from"]);
   }
+  if (data.kind === "peer") {
+    return stringFields(data, ["line"], ["fromName"]);
+  }
   return `unknown prompt kind ${String(data.kind)}`;
+};
+var isCron = (item) => isFields(item) && isString(item.prompt) && item.prompt.length <= PROMPT_TEXT_CAP && isCount(item.length);
+var isCronList = (value) => Array.isArray(value) && value.length <= CRONS_CAP && value.every(isCron);
+var turnStopProblem = (data) => {
+  const problem = stringFields(data, ["lastMessage"]) ?? (isOptional(data.lastMessageTruncated, isBoolean2) ? void 0 : "data.lastMessageTruncated must be a boolean");
+  return problem ?? (isOptional(data.crons, isCronList) ? void 0 : `data.crons must be at most ${CRONS_CAP} of { prompt, length }`);
 };
 var GIT_OPTIONAL = { worktree: ["alias"] };
 var GIT_FIELDS = {
@@ -2912,8 +2972,9 @@ var DATA_CHECKS = {
   "tool.post": toolPostProblem,
   "tool.fail": (data) => stringFields(data, ["toolUseId", "tool"], ["error"]),
   permission: (data) => stringFields(data, ["tool"]) ?? toolInputProblem(data.input),
+  "tool.denied": (data) => stringFields(data, ["toolUseId", "tool", "reason"]),
   "agent.stop": (data) => stringFields(data, ["lastMessage"], ["transcriptPath"]),
-  "turn.stop": (data) => stringFields(data, ["lastMessage"]) ?? (isOptional(data.lastMessageTruncated, isBoolean2) ? void 0 : "data.lastMessageTruncated must be a boolean"),
+  "turn.stop": turnStopProblem,
   cwd: (data) => stringFields(data, ["to"]),
   "model.switch": (data) => stringFields(data, [], ["model"]),
   plan: planProblem,
@@ -2928,8 +2989,9 @@ var DATA_CHECKS = {
 var DATA_IDS = {
   prompt: ["taskId", "toolUseId", "from"],
   "tool.pre": ["toolUseId"],
-  "tool.post": ["toolUseId", "agentId"],
+  "tool.post": ["toolUseId", "agentId", "backgroundTaskId"],
   "tool.fail": ["toolUseId"],
+  "tool.denied": ["toolUseId"],
   "usage.fact": ["requestId"],
   "git.fact": ["agentId"]
 };
@@ -3145,8 +3207,10 @@ var cap = (value, max) => (str(value) ?? "").slice(0, max);
 var isObject3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var objects = (value) => Array.isArray(value) ? value.filter(isObject3) : [];
 var STOP_MESSAGE_CAP = 8e3;
-var PROMPT_TEXT_CAP = 4e3;
+var PEER_NAME_CAP = 100;
+var PEER_LINE_CHARS = 300;
 var ANSWER_TEXT_CAP = 500;
+var DENIAL_REASON_CAP = 500;
 var ANSWERS_CAP2 = 10;
 var REPORT_HEAD = 4e3;
 var CUT = "\n[...]\n";
@@ -3166,6 +3230,7 @@ var agentPrompt = (prompt) => {
 };
 var ABSOLUTE_PATH = /(?<![\w.~/-])(?:~\/|\/)(?:[\w.@-]+\/)+[\w.@-]*/g;
 var findAbsolutePaths = (text) => [...new Set(text.match(ABSOLUTE_PATH) ?? [])];
+var taskIdOf = (value) => isTaskId(value) && !isReservedKey(value) ? value : void 0;
 var FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 var summarizeToolInput = (tool, input) => {
   if (tool === "Bash") {
@@ -3208,6 +3273,9 @@ var summarizeToolInput = (tool, input) => {
   if (tool.startsWith("mcp__")) {
     return { pageId: str(input.pageId), issueIdOrKey: str(input.issueIdOrKey) };
   }
+  if (tool === "TaskOutput" || tool === "BashOutput") {
+    return { taskId: taskIdOf(input.task_id) ?? taskIdOf(input.bash_id) };
+  }
   return { keys: Object.keys(input) };
 };
 var tag = (text, name) => {
@@ -3218,10 +3286,33 @@ var tagNumber = (text, name) => {
   const value = tag(text, name);
   return value === void 0 ? void 0 : Number(value);
 };
+var peerData = (prompt) => {
+  const trimmed = prompt.trimStart();
+  const opening = /^<cross-session-message(?=[\s>/])((?:[^>"]|"[^"]*")*)>/.exec(trimmed);
+  if (!opening) {
+    return void 0;
+  }
+  const attributes = [...opening[1].matchAll(/(?:^|\s)([\w-]+)="([^"]*)"/g)];
+  const named = attributes.find((attribute) => attribute[1] === "from-name");
+  const name = named ? named[2].replace(/\s+/g, " ").trim().slice(0, PEER_NAME_CAP).trimEnd() : "";
+  const rest = trimmed.slice(opening[0].length);
+  const close2 = rest.indexOf("</cross-session-message>");
+  const body = (close2 >= 0 ? rest.slice(0, close2) : rest).slice(0, PEER_LINE_CHARS);
+  const line = body.split("\n").find((item) => item.trim() !== "")?.trim() ?? "";
+  const data = { kind: "peer", length: prompt.length, line };
+  if (name !== "") {
+    data.fromName = name;
+  }
+  return data;
+};
 var promptData = (prompt, keyConfig) => {
   const handback = /^<agent-message\b(?:[^>]*?\bfrom="([^"]*)")?/.exec(prompt.trimStart());
   if (handback) {
     return handback[1] ? { kind: "handback", from: handback[1], length: prompt.length } : { kind: "handback", length: prompt.length };
+  }
+  const peer = peerData(prompt);
+  if (peer) {
+    return peer;
   }
   if (prompt.trimStart().startsWith("<task-notification>")) {
     return {
@@ -3256,6 +3347,10 @@ var questionAnswers = (result) => {
   const listed = Array.isArray(result.answers) ? objects(result.answers).flatMap((item) => questionAnswer(item.question, item.answer, item.notes)) : void 0;
   const answers = (listed ?? rawAnswers(result)).slice(0, ANSWERS_CAP2);
   return answers.length > 0 ? answers : void 0;
+};
+var pendingCrons = (value) => {
+  const prompts = objects(value).flatMap((item) => typeof item.prompt === "string" ? [item.prompt] : []);
+  return prompts.slice(0, CRONS_CAP).map((prompt) => ({ prompt: prompt.slice(0, PROMPT_TEXT_CAP), length: prompt.length }));
 };
 var backgroundTasks = (value) => {
   const tasks = objects(value);
@@ -3323,7 +3418,8 @@ var hookPayloadToEvent = (payload, options) => {
       const text = str(payload.last_assistant_message) ?? "";
       const lastMessageTruncated = text.length > STOP_MESSAGE_CAP || options.truncated === true;
       const data = { ...base, lastMessage: text.slice(0, STOP_MESSAGE_CAP), lastMessageTruncated, backgroundTasks: tasks, cronCount };
-      return { ...envelope, src: "hook", event: "turn.stop", data };
+      const crons = pendingCrons(payload.session_crons);
+      return { ...envelope, src: "hook", event: "turn.stop", data: crons.length > 0 ? { ...data, crons } : data };
     }
     case "StopFailure":
       return { ...envelope, src: "hook", event: "turn.failure", data: { ...scalars(payload, COMMON), ...base } };
@@ -3347,6 +3443,7 @@ var hookPayloadToEvent = (payload, options) => {
         exitCode: tool === "Bash" ? num(result.exitCode ?? result.exit_code) : void 0,
         interrupted: tool === "Bash" ? result.interrupted === true : void 0,
         stdoutTail: tool === "Bash" && stdout !== void 0 ? keptStdout(command, stdout) : void 0,
+        backgroundTaskId: tool === "Bash" ? taskIdOf(result.backgroundTaskId) : void 0,
         agentId: agentTool ? str(result.agentId) : void 0,
         isAsync: agentTool ? result.isAsync === true : void 0,
         status: agentTool ? str(result.status) : void 0,
@@ -3368,6 +3465,10 @@ var hookPayloadToEvent = (payload, options) => {
     }
     case "PermissionRequest":
       return { ...envelope, src: "hook", event: "permission", data: { ...base, tool, input: summarizeToolInput(tool, input) } };
+    case "PermissionDenied": {
+      const toolUseId = str(payload.tool_use_id);
+      return toolUseId ? { ...envelope, src: "hook", event: "tool.denied", data: { ...base, toolUseId, tool, reason: cap(payload.reason, DENIAL_REASON_CAP) } } : void 0;
+    }
     case "SubagentStart":
       return { ...envelope, src: "hook", event: "agent.start", data: { ...base, injectedChars: options.injectedChars } };
     case "SubagentStop": {
@@ -3809,6 +3910,8 @@ var toolMetrics = (agents) => {
   }
   return [...tools.values()].sort((a, b) => b.chars - a.chars || compareText(a.tool, b.tool));
 };
+var coveredEditCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.coveredEdits ?? 0), 0);
+var denialCount = (agents) => agents.reduce((total, agent) => total + (agent.budget.denials ?? 0), 0);
 var verificationMetrics = (role, agents) => {
   const commands = { typecheck: 0, lint: 0, test: 0 };
   const failed = { typecheck: 0, lint: 0, test: 0 };
@@ -3834,14 +3937,17 @@ var sessionMetrics = (session) => {
     entryOf(byRole, agent.role, () => []).push(agent);
   }
   const groups = [...mainGroup, ...byRole.entries()];
-  const roles = groups.map(([role, agents]) => roleMetrics(role, agents));
-  const verification = groups.flatMap(([role, agents]) => verificationMetrics(role, agents) ?? []);
+  const roles = groups.map(([role, agents2]) => roleMetrics(role, agents2));
+  const verification = groups.flatMap(([role, agents2]) => verificationMetrics(role, agents2) ?? []);
   const byStage = Object.fromEntries(Object.entries(session.tokens.byStage).map(([key, counts]) => [key, counts ? processedTokens(counts) : 0]));
   const tokens = { byStage, total: processedTokens(session.tokens.total), usd: session.tokens.total.usd };
   const tools = { main: toolMetrics(main ? [main] : []), subagents: toolMetrics(subagents) };
   const total = totalOf(roles);
   const resumes = resumeMetrics(session.resumes ?? []);
-  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, verification, tokens, resumes };
+  const agents = main ? [main, ...subagents] : subagents;
+  const coveredEdits = coveredEditCount(agents);
+  const denials = denialCount(agents);
+  const metrics = { roles, total, branches: branchMetrics(subagents, session.rows), tools, coveredEdits, denials, verification, tokens, resumes };
   if (session.overhead) {
     metrics.overhead = overheadMetrics(session.overhead, total.usd);
   }
@@ -4945,6 +5051,7 @@ var RESUMES_WORK = /* @__PURE__ */ new Set([
   "tool.pre",
   "tool.post",
   "tool.fail",
+  "tool.denied",
   "permission",
   "agent.start",
   "agent.stop",
@@ -5069,11 +5176,30 @@ var subagentRuns = (state, session) => session.agentIds.some((agentId) => {
   const agent = runId === void 0 ? void 0 : state.branchStates[runId]?.agents[agentId];
   return agent?.state === "running" && agent.staleSince === void 0;
 });
+var isScheduledPrompt = (session, event) => {
+  const data = event.data;
+  if (event.agentId || data.kind !== "user") {
+    return false;
+  }
+  return (session.crons ?? []).some((cron) => cron.prompt === data.text && cron.length === data.length);
+};
+var noteCrons = (session, event) => {
+  if (event.event !== "turn.stop" || event.agentId) {
+    return;
+  }
+  const crons = event.data.crons ?? [];
+  if (crons.length > 0) {
+    session.crons = crons.map((cron) => ({ prompt: cron.prompt, length: cron.length }));
+  } else {
+    delete session.crons;
+  }
+};
 var noteWait = (state, session, event) => {
   if (event.event === "turn.stop" && !event.agentId) {
     const tasks = event.data.backgroundTasks;
     const background = Array.isArray(tasks) && tasks.some((task) => task?.status === "running");
-    if (background || subagentRuns(state, session)) {
+    const scheduled = (event.data.crons ?? []).length > 0;
+    if (background || scheduled || subagentRuns(state, session)) {
       delete session.waitFrom;
     } else {
       session.waitFrom = event.at;
@@ -5085,7 +5211,7 @@ var noteWait = (state, session, event) => {
     return;
   }
   delete session.waitFrom;
-  if (event.event !== "prompt" || event.data.kind !== "user" || event.agentId) {
+  if (event.event !== "prompt" || event.data.kind !== "user" || event.agentId || isScheduledPrompt(session, event)) {
     return;
   }
   const gap = time(event.at) - time(from);
@@ -5128,7 +5254,7 @@ var recordLine = (state, event, run) => {
     noteSessionStart(session, event.at, event.data);
     noteResume(session, event);
   }
-  if (event.event === "prompt" && event.data.kind === "user" && !event.agentId) {
+  if (event.event === "prompt" && event.data.kind === "user" && !event.agentId && !isScheduledPrompt(session, event)) {
     const earliest = session.prompts.length === 0 || time(event.at) < time(session.prompts[0].at);
     if (earliest && run) {
       noteBranchWork(state, event.sessionId, run, "start", event.at);
@@ -5150,6 +5276,7 @@ var recordLine = (state, event, run) => {
     session.agentIds.sort((a, b) => agentStartedAt(state, a) - agentStartedAt(state, b) || compareText(a, b));
   }
   noteWait(state, session, event);
+  noteCrons(session, event);
 };
 var noteSessionStart = (session, at, data) => {
   if (session.sourceAt !== void 0 && time(at) >= time(session.sourceAt)) {
@@ -8787,8 +8914,19 @@ var onPrompt = (state, event, config, answered) => {
     noteReport(session, data.from ?? "");
     return findStartRun(state, session);
   }
+  if (data.kind !== "user" && data.kind !== "peer") {
+    return findStartRun(state, session);
+  }
   answered.push(...handleHandbacks(state, session, event));
   const run = ensureStartRun(state, event, config);
+  if (data.kind === "peer") {
+    const from = `Message from ${data.fromName || "another session"}`;
+    logRun(state, run, event, data.line === "" ? from : `${from}: ${data.line}`);
+    return run;
+  }
+  if (isScheduledPrompt(session, event)) {
+    return run;
+  }
   const closed = [];
   for (const other of session.runIds.map((id) => state.branchStates[id])) {
     const open = (other?.questions ?? []).filter((question) => answeredByPrompt(state, question, event));
@@ -9463,6 +9601,8 @@ var updateRanking = (state, config) => {
 
 // src/model/tool-calls.ts
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+var PROSE_FILE = /\.(?:md|mdx|txt|rst|adoc)$/i;
+var isCoveredEdit = (tool, filePath) => EDIT_TOOLS.has(tool) && !(filePath !== void 0 && PROSE_FILE.test(filePath));
 var findCall = (agent, toolUseId) => agent.recent.find((call) => call.toolUseId === toolUseId);
 var endCall = (call, event) => {
   call.endedAt = event.at;
@@ -9493,7 +9633,7 @@ var outputChars = (event) => {
   const size = event.event === "tool.post" ? event.data.responseChars : event.data.errorChars;
   return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 0;
 };
-var countOutput = (agent, event, call, whole) => {
+var countOutput = (agent, event, call, whole, covered) => {
   const chars = outputChars(event);
   const output = ownEntry(agent.budget.toolOutput, event.data.tool, () => ({ calls: 0, chars: 0, maxChars: 0 }));
   output.calls += 1;
@@ -9504,6 +9644,9 @@ var countOutput = (agent, event, call, whole) => {
   if (whole) {
     agent.budget.wholeReads = (agent.budget.wholeReads ?? 0) + 1;
     agent.budget.wholeReadChars = (agent.budget.wholeReadChars ?? 0) + textChars;
+  }
+  if (covered) {
+    agent.budget.coveredEdits = (agent.budget.coveredEdits ?? 0) + 1;
   }
   if (isLargeOutput(event.data.tool, chars, call)) {
     agent.budget.largeOutputs += 1;
@@ -9517,8 +9660,8 @@ var bashStep = (command, match) => {
   }
   return command.trim() !== "" && readsOnly(command) ? "explore" : void 0;
 };
-var callStep = (tool, carried) => {
-  if (tool === "Bash") {
+var callStep = (tool, carried, readback) => {
+  if (tool === "Bash" || readback) {
     return carried;
   }
   if (EXPLORE_TOOLS.has(tool)) {
@@ -9526,10 +9669,10 @@ var callStep = (tool, carried) => {
   }
   return EDIT_TOOLS.has(tool) ? "implement" : void 0;
 };
-var countStep = (own, event, call, carried) => {
+var countStep = (own, event, call, index) => {
   const steps = own.mainSteps ??= newMainSteps();
   steps.calls += 1;
-  const step = callStep(event.data.tool, carried);
+  const step = callStep(event.data.tool, index?.mainStep, index?.readback === true);
   if (!step) {
     return;
   }
@@ -9539,6 +9682,39 @@ var countStep = (own, event, call, carried) => {
   use.chars += chars;
   if (isLargeOutput(event.data.tool, chars, call)) {
     use.largeOutputs += 1;
+  }
+};
+var TASK_STEPS_CAP = 20;
+var READBACK_TOOLS = /* @__PURE__ */ new Set(["TaskOutput", "BashOutput"]);
+var TASK_OUTPUT_FILE = /\/tasks\/([^/]+)\.output$/;
+var readbackTask = (tool, input) => {
+  if (READBACK_TOOLS.has(tool)) {
+    return input.taskId;
+  }
+  return tool === "Read" && input.filePath ? TASK_OUTPUT_FILE.exec(input.filePath)?.[1] : void 0;
+};
+var rememberTask = (session, taskId, step) => {
+  if (!isTaskId(taskId)) {
+    return;
+  }
+  const tasks = session.taskSteps ??= {};
+  const known = Object.keys(tasks);
+  if (!Object.hasOwn(tasks, taskId) && known.length >= TASK_STEPS_CAP) {
+    delete tasks[known[0]];
+  }
+  ownEntry(tasks, taskId, () => step ? { step } : {});
+};
+var noteReadback = (state, event, callIndex) => {
+  const taskId = readbackTask(event.data.tool, event.data.input);
+  const tasks = recordOf(state, event.sessionId)?.taskSteps;
+  const task = taskId !== void 0 && tasks ? ownValue(tasks, taskId) : void 0;
+  if (!task) {
+    return;
+  }
+  callIndex.readback = true;
+  delete callIndex.wholeRead;
+  if (task.step) {
+    callIndex.mainStep = task.step;
   }
 };
 var PROTOTYPE_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -9705,7 +9881,11 @@ var onToolPre2 = (state, event, config, touched) => {
   }
   const early = state.index.calls[toolUseId]?.early;
   const wholeRead = isWholeRead(tool, input) ? { wholeRead: true } : {};
-  state.index.calls[toolUseId] = { runId: run.id, agentKey, at: event.at, atMs: time(event.at), ...wholeRead };
+  const coveredEdit = isCoveredEdit(tool, input.filePath) ? { coveredEdit: true } : {};
+  state.index.calls[toolUseId] = { runId: run.id, agentKey, at: event.at, atMs: time(event.at), ...wholeRead, ...coveredEdit };
+  if (own) {
+    noteReadback(state, event, state.index.calls[toolUseId]);
+  }
   agent.budget.toolCalls.used += 1;
   updateMeter(state, run, agent, "tool calls", agent.budget.toolCalls, config.budgets.warnAt, event);
   if (tool === "Bash" && input.command) {
@@ -9742,7 +9922,9 @@ var onToolPre2 = (state, event, config, touched) => {
   if (config.docs.tools.includes(tool) && !ACTIVE_STATES.has(run.stages.docs.state)) {
     setStage(run, "docs", "running", event.at);
   }
-  if (early) {
+  if (early?.event === "tool.denied") {
+    onToolDenied(state, early, config);
+  } else if (early) {
     onToolEnd(state, early, config, touched);
   }
   return run;
@@ -9917,12 +10099,17 @@ var onToolEnd = (state, event, config, touched) => {
   const ownCall = own ? mainCall(own, event.data.toolUseId) : void 0;
   const repeated = (copy) => !index && copy?.endedAt !== void 0;
   const whole = index?.wholeRead === true && event.event === "tool.post";
+  const covered = index?.coveredEdit === true;
   if (!repeated(call)) {
-    countOutput(agent, event, call, whole);
+    countOutput(agent, event, call, whole, covered);
   }
   if (own && !repeated(ownCall)) {
-    countOutput(own, event, ownCall ?? call, whole);
-    countStep(own, event, ownCall ?? call, index?.mainStep);
+    countOutput(own, event, ownCall ?? call, whole, covered);
+    countStep(own, event, ownCall ?? call, index);
+  }
+  const record = own ? recordOf(state, event.sessionId) : void 0;
+  if (record && event.event === "tool.post" && event.data.tool === "Bash" && event.data.backgroundTaskId !== void 0) {
+    rememberTask(record, event.data.backgroundTaskId, index?.mainStep);
   }
   if (index?.mainVerify && own) {
     settleVerification(own, index.mainVerify, event, config);
@@ -10071,6 +10258,54 @@ var onWorktreeAdded = (state, event, add, agentKey, config, touched) => {
   logRun(state, run, event, `Worktree ${baseName(run.worktree)} created on ${run.branch}`, "normal", agent.id);
   return run;
 };
+var onToolDenied = (state, event, config) => {
+  const { toolUseId } = event.data;
+  const index = state.index.calls[toolUseId];
+  const run = index ? state.branchStates[index.runId] : hookRun(state, event, config);
+  if (!run) {
+    return void 0;
+  }
+  const agentKey = index?.agentKey ?? event.agentId ?? "main";
+  const agent = ensureAgent(run, agentKey, event, config);
+  const call = findCall(agent, toolUseId);
+  const own = agentKey === "main" ? mainOf(state, event.sessionId) : void 0;
+  const ownCall = own ? mainCall(own, toolUseId) : void 0;
+  const known = call ?? ownCall;
+  if (!known && (!index || index.early)) {
+    state.index.calls[toolUseId] = { runId: run.id, agentKey, early: event, at: event.at, atMs: time(event.at) };
+    return run;
+  }
+  if (known?.endedAt !== void 0) {
+    return run;
+  }
+  delete state.index.calls[toolUseId];
+  for (const copy of [call, ownCall]) {
+    if (copy) {
+      copy.endedAt = event.at;
+      copy.permission = "denied";
+      copy.outcome = "denied";
+    }
+  }
+  agent.budget.denials = (agent.budget.denials ?? 0) + 1;
+  if (own) {
+    own.budget.denials = (own.budget.denials ?? 0) + 1;
+  }
+  if (call && agent.now === call) {
+    delete agent.now;
+  }
+  if (own && ownCall && own.now === ownCall) {
+    delete own.now;
+  }
+  const asked = run.questions.find((question) => question.id === `q-perm-${toolUseId}`);
+  if (asked?.state === "open") {
+    closeQuestion(state, run, asked, "expired", event);
+  }
+  const reason = event.data.reason === "" ? "" : ` ${event.data.reason.slice(0, DENIAL_REASON_CAP)}`;
+  const summary = known ? `: ${known.summary}` : "";
+  logRun(state, run, event, `${event.data.tool} call denied by auto mode${reason}${summary}`, "warn", agent.id);
+  retireSpawn(state, toolUseId);
+  return run;
+};
 var onPermission = (state, event, config) => {
   const run = hookRun(state, event, config);
   if (event.data.tool === "AskUserQuestion") {
@@ -10133,7 +10368,7 @@ var createState = (config) => ({
     prOpeners: {}
   }
 });
-var RESUMES_AGENT = /* @__PURE__ */ new Set(["prompt", "tool.pre", "tool.post", "tool.fail"]);
+var RESUMES_AGENT = /* @__PURE__ */ new Set(["prompt", "tool.pre", "tool.post", "tool.fail", "tool.denied"]);
 var resumeFailedAgent = (agent, event) => {
   if (agent?.state === "failed" && !agent.endedAt && RESUMES_AGENT.has(event.event)) {
     agent.state = "running";
@@ -10157,10 +10392,14 @@ var idleMainThread = (state, session, at) => {
   }
 };
 var turnStarter = (state, data) => {
-  if (data.kind === "task-notification") {
-    return Object.hasOwn(state.index.agentRuns, data.taskId) ? data.taskId : void 0;
+  switch (data.kind) {
+    case "task-notification":
+      return Object.hasOwn(state.index.agentRuns, data.taskId) ? data.taskId : void 0;
+    case "handback":
+      return data.from || void 0;
+    default:
+      return void 0;
   }
-  return data.kind === "handback" ? data.from || void 0 : void 0;
 };
 var onHookEvent = (state, event, config, touched) => {
   const mode = event.data.permissionMode;
@@ -10203,6 +10442,8 @@ var hookEventRun = (state, event, config, touched) => {
       return onToolEnd(state, event, config, touched);
     case "permission":
       return onPermission(state, event, config);
+    case "tool.denied":
+      return onToolDenied(state, event, config);
     case "agent.start":
       return onAgentStart(state, event, config);
     case "agent.stop":
@@ -10295,6 +10536,7 @@ var RESUMES_WORK2 = /* @__PURE__ */ new Set([
   "tool.pre",
   "tool.post",
   "tool.fail",
+  "tool.denied",
   "permission",
   "agent.start",
   "agent.stop",
@@ -10434,6 +10676,12 @@ var mergeBudget = (lead, rest, warnAt) => {
     }
     if (budget.textChars !== void 0) {
       merged.textChars = (merged.textChars ?? 0) + budget.textChars;
+    }
+    if (budget.coveredEdits !== void 0) {
+      merged.coveredEdits = (merged.coveredEdits ?? 0) + budget.coveredEdits;
+    }
+    if (budget.denials !== void 0) {
+      merged.denials = (merged.denials ?? 0) + budget.denials;
     }
     if (budget.wholeReads !== void 0) {
       merged.wholeReads = (merged.wholeReads ?? 0) + budget.wholeReads;
@@ -11565,6 +11813,7 @@ var stageChip = (state, rows, open) => {
   }
   return at("merge").length > 0 ? { text: "Merge \xB7 waiting for you", tone: "you" } : { text: "Implement", tone };
 };
+var scheduledChip = () => ({ text: "Waits for a scheduled turn", tone: "normal" });
 var mainThreadChip = (main) => {
   const words = sessionMainWords(main);
   return { text: `Main thread \xB7 ${words}`, tone: words === "waiting for you" ? "you" : "normal" };
@@ -11580,16 +11829,20 @@ var baseChip = (input) => {
   if (input.finishedAt !== void 0) {
     return { text: input.outcome?.text ?? "Done", tone: "done" };
   }
+  const waitsForCron = input.scheduled && sessionMainWords(input.main) === "idle";
   if (input.kind === "conversation") {
-    return mainThreadChip(input.main);
+    return waitsForCron ? scheduledChip() : mainThreadChip(input.main);
   }
   const current = input.rows.filter((row) => row.pipeline === input.pipeline);
+  if (current.length === 0 && waitsForCron) {
+    return scheduledChip();
+  }
   if (current.length === 0) {
     return { text: input.exploring ? "Plan \xB7 exploring" : "Plan", tone: "normal" };
   }
   const open = current.filter((row) => row.settledAt === void 0);
   if (open.length === 0) {
-    return mainThreadChip(input.main);
+    return waitsForCron ? scheduledChip() : mainThreadChip(input.main);
   }
   return stageChip(input.state, current, open);
 };
@@ -11661,7 +11914,8 @@ var projectSession = (state, sessionId, config) => {
   const outcome = outcomeOf2(session, kind, finishedAt, rows, promote);
   const exploring = planAgents.some((id) => isExplorer(agents[id]));
   const waitingGate = GATE_ORDER.find(gateWaits);
-  const chipInput = { state, kind, rows, pipeline: current, questions, docs, finishedAt, outcome, exploring, main: { plan, agents } };
+  const scheduled = (session.crons ?? []).length > 0;
+  const chipInput = { state, kind, rows, pipeline: current, questions, docs, finishedAt, outcome, exploring, main: { plan, agents }, scheduled };
   if (waitingGate) {
     chipInput.waitingGate = waitingGate;
   }
