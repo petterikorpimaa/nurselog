@@ -22171,6 +22171,10 @@ var createModal = () => {
     if (isShown2(current.opener)) {
       return current.opener;
     }
+    const fallback = current.fallback?.();
+    if (isShown2(fallback)) {
+      return fallback;
+    }
     const owner = home === void 0 ? "" : `[data-session="${CSS.escape(home)}"]`;
     const card = owner === "" ? null : document.querySelector(`.card${owner}:not(.leaving)`);
     const row2 = owner === "" ? null : document.querySelector(`.run-row.conversation${owner} .run-row-line`);
@@ -31387,70 +31391,6 @@ var createSignInNotice = () => {
   return notice;
 };
 
-// src/ui/changelog-button.ts
-var changelogIcon = () => {
-  const icon2 = svgEl("svg", { viewBox: "0 0 14 14", "aria-hidden": "true" });
-  const stroke2 = { fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round" };
-  icon2.append(svgEl("path", { d: "M3 3.5h8M3 7h8M3 10.5h5", ...stroke2 }));
-  return icon2;
-};
-var createChangelogButton = () => {
-  const button = el("button", "button changelog-button");
-  button.type = "button";
-  button.hidden = true;
-  button.setAttribute("aria-haspopup", "dialog");
-  const version = el("span", "changelog-version");
-  const dot = el("i", "changelog-dot");
-  dot.setAttribute("aria-hidden", "true");
-  dot.hidden = true;
-  const unseen = el("span", "visually-hidden", " new");
-  unseen.hidden = true;
-  button.append(changelogIcon(), el("span", "changelog-label", "Changelog"), version, unseen, dot);
-  let changelog = null;
-  let notice;
-  const seen = (current) => {
-    const stored = readValue(SEEN_KEY, true);
-    const value2 = seenVersion(stored, current);
-    if (stored !== value2) {
-      writeValue(SEEN_KEY, value2, true);
-    }
-    return value2;
-  };
-  const render = () => {
-    button.hidden = changelog === null;
-    if (changelog === null) {
-      return;
-    }
-    setText(version, changelog.current);
-    button.title = `Changelog \xB7 you have ${changelog.current}`;
-    dot.hidden = !hasUnseen(changelog, notice, seen(changelog));
-    unseen.hidden = dot.hidden;
-  };
-  const open2 = (opener, flash) => {
-    if (changelog === null) {
-      return;
-    }
-    const before2 = seen(changelog);
-    openChangelog({ opener, rail: changelogRail(changelog, notice, before2), flash });
-    const newest3 = newestKnown(changelog, notice);
-    writeValue(SEEN_KEY, compareVersions(newest3, before2) > 0 ? newest3 : before2, true);
-    render();
-  };
-  button.addEventListener("click", () => open2(button));
-  return {
-    element: button,
-    setChangelog(next) {
-      changelog = next;
-      render();
-    },
-    setNotice(next) {
-      notice = next;
-      render();
-    },
-    open: open2
-  };
-};
-
 // src/ui/update.ts
 var SKIP_KEY = "nurselog.skipVersion";
 var NOTES_SHOWN = 6;
@@ -31474,6 +31414,7 @@ var DOT_FRAMES = [{ transform: "scale(0)" }, { transform: "scale(1.5)", offset: 
 var OPEN_FRAMES2 = [{ opacity: 0, transform: "translateY(-6px) scale(.97)" }, { opacity: 1, transform: "none" }];
 var CLOSE_FRAMES2 = [{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px) scale(.98)" }];
 var LEAVE_FRAMES = [{ opacity: 1 }, { opacity: 0, transform: "translateX(8px) scale(.96)" }];
+var isDrawn = (rect) => rect.width > 0 || rect.height > 0;
 var versionParts = (version) => version.split(".").map(Number);
 var newestFirst4 = (a, b) => {
   const left = versionParts(a.version);
@@ -31586,9 +31527,18 @@ var createUpdateButton = (options) => {
     const fade = popover.animate(CLOSE_FRAMES2, { duration: CLOSE_MS3, easing: "ease-in", fill: "forwards" });
     fade.finished.then(done, () => void 0);
   };
+  const toggle = (hidden) => {
+    const held = hidden && element.contains(document.activeElement);
+    element.hidden = hidden;
+    const showed = options.placed?.(hidden, button);
+    if (held) {
+      (showed ?? element.previousElementSibling)?.focus({ preventScroll: true });
+    }
+    return showed;
+  };
   const place2 = (hidden, timing) => {
     if (options.reducedMotion()) {
-      element.hidden = hidden;
+      toggle(hidden);
       return;
     }
     const items = Array.from(element.parentElement?.children ?? []).filter((item2) => item2 !== element);
@@ -31596,14 +31546,17 @@ var createUpdateButton = (options) => {
     for (const glide2 of glides) {
       glide2.cancel();
     }
-    element.hidden = hidden;
+    const pace = toggle(hidden) ? GLIDE_ENTER : timing;
     glides = [];
     for (const [item2, from] of before2) {
       const to = item2.getBoundingClientRect();
+      if (!isDrawn(from) || !isDrawn(to)) {
+        continue;
+      }
       const dx = from.left - to.left;
       const dy = from.top - to.top;
       if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-        glides.push(item2.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], timing));
+        glides.push(item2.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], pace));
       }
     }
   };
@@ -31622,13 +31575,13 @@ var createUpdateButton = (options) => {
   };
   const leave = () => {
     shown2 = false;
+    if (popover.contains(document.activeElement)) {
+      button.focus({ preventScroll: true });
+    }
     setOpen2(false);
     const gone = () => {
       if (shown2) {
         return;
-      }
-      if (element.contains(document.activeElement)) {
-        element.previousElementSibling?.focus({ preventScroll: true });
       }
       place2(true, GLIDE_LEAVE);
       for (const animation of button.getAnimations()) {
@@ -31729,6 +31682,90 @@ var createUpdateButton = (options) => {
   };
 };
 
+// src/ui/changelog-button.ts
+var changelogIcon = () => {
+  const icon2 = svgEl("svg", { viewBox: "0 0 14 14", "aria-hidden": "true" });
+  const stroke2 = { fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round" };
+  icon2.append(svgEl("path", { d: "M3 3.5h8M3 7h8M3 10.5h5", ...stroke2 }));
+  return icon2;
+};
+var createChangelogButton = (options) => {
+  const button = el("button", "button changelog-button");
+  button.type = "button";
+  button.hidden = true;
+  button.setAttribute("aria-haspopup", "dialog");
+  const version = el("span", "changelog-version");
+  const dot = el("i", "changelog-dot");
+  dot.setAttribute("aria-hidden", "true");
+  dot.hidden = true;
+  const unseen = el("span", "visually-hidden", " new");
+  unseen.hidden = true;
+  button.append(changelogIcon(), el("span", "changelog-label", "Changelog"), version, unseen, dot);
+  let changelog = null;
+  let notice;
+  let replaced = false;
+  let successor;
+  const seen = (current) => {
+    const stored = readValue(SEEN_KEY, true);
+    const value2 = seenVersion(stored, current);
+    if (stored !== value2) {
+      writeValue(SEEN_KEY, value2, true);
+    }
+    return value2;
+  };
+  const render = () => {
+    button.hidden = changelog === null || replaced;
+    if (changelog === null) {
+      return;
+    }
+    setText(version, changelog.current);
+    button.title = `Changelog \xB7 you have ${changelog.current}`;
+    dot.hidden = !hasUnseen(changelog, notice, seen(changelog));
+    unseen.hidden = dot.hidden;
+  };
+  const open2 = (opener, flash) => {
+    if (changelog === null) {
+      return;
+    }
+    const before2 = seen(changelog);
+    const fallback = () => replaced ? successor : button;
+    openChangelog({ opener, rail: changelogRail(changelog, notice, before2), flash, fallback });
+    const newest3 = newestKnown(changelog, notice);
+    writeValue(SEEN_KEY, compareVersions(newest3, before2) > 0 ? newest3 : before2, true);
+    render();
+  };
+  button.addEventListener("click", () => open2(button));
+  return {
+    element: button,
+    setChangelog(next) {
+      changelog = next;
+      render();
+    },
+    setNotice(next) {
+      notice = next;
+      render();
+    },
+    setReplaced(next, nextSuccessor) {
+      if (next === replaced) {
+        return void 0;
+      }
+      replaced = next;
+      successor = next ? nextSuccessor : void 0;
+      if (successor && document.activeElement === button) {
+        successor.focus({ preventScroll: true });
+      }
+      const wasHidden = button.hidden;
+      render();
+      const entered = !next && wasHidden && !button.hidden;
+      if (entered && !options.reducedMotion()) {
+        button.animate(ENTER_FRAMES2, { duration: ENTER_MS5, easing: EASE4 });
+      }
+      return entered ? button : void 0;
+    },
+    open: open2
+  };
+};
+
 // src/ui/topbar.ts
 var WARNINGS_SHOWN = 10;
 var EASE12 = "cubic-bezier(.2,.8,.2,1)";
@@ -31791,11 +31828,12 @@ var createTopBar = (host, options) => {
   warnings.append(button, list);
   status.append(connection, github, warnings);
   appendLegend(status, host);
-  const changelog = createChangelogButton();
+  const changelog = createChangelogButton({ reducedMotion: options.reducedMotion });
   const update = createUpdateButton({
     reducedMotion: options.reducedMotion,
     shownChanged: () => changelog.setNotice(update.shownNotice()),
-    openChangelog: (opener, version) => changelog.open(opener, version)
+    openChangelog: (opener, version) => changelog.open(opener, version),
+    placed: (hidden, button2) => changelog.setReplaced(!hidden, button2)
   });
   status.append(update.element, changelog.element);
   host.replaceChildren(brand, status);
@@ -32427,6 +32465,17 @@ var startBoard = async (source, options = {}) => {
     }
   };
   let updateAsk = 0;
+  let updateSettled = false;
+  let changelogAnswer;
+  let changelogHanded = false;
+  const handChangelog = () => {
+    const waiting = source.update !== void 0 && !updateSettled;
+    if (changelogAnswer === void 0 || changelogHanded || waiting || signedOut) {
+      return;
+    }
+    changelogHanded = true;
+    topBar.setChangelog(changelogAnswer);
+  };
   const checkUpdate = async () => {
     if (!source.update || signedOut) {
       return;
@@ -32437,6 +32486,8 @@ var startBoard = async (source, options = {}) => {
     if (own === updateAsk && !signedOut && notice !== void 0) {
       topBar.setUpdate(notice);
     }
+    updateSettled = true;
+    handChangelog();
   };
   let changelogKnown = false;
   const checkChangelog = async () => {
@@ -32446,7 +32497,8 @@ var startBoard = async (source, options = {}) => {
     const answer = await source.changelog();
     if (answer !== void 0 && !signedOut && !changelogKnown) {
       changelogKnown = true;
-      topBar.setChangelog(answer);
+      changelogAnswer = answer;
+      handChangelog();
     }
   };
   const checkList = async (own) => {
