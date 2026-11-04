@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.22 (2026-11-04)
+
+### Fixed
+
+- A reviewer asks for a Fix only on its own branch
+- A Bash call keeps 16,000 characters of its command
+
 ## 0.1.21 (2026-11-03)
 
 ### New

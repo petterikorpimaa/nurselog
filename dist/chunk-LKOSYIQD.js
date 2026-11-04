@@ -1890,6 +1890,7 @@ var ownEntry = (map, key, create) => {
   return entry;
 };
 var isTrunkLike = (branch, config) => branch === config.branches.trunk || config.branches.promote.includes(branch);
+var isTrunkBranch = (state, branch) => branch === state.board.branches.trunk || state.board.branches.promote.includes(branch);
 var agentFix = (run, agentId) => [...run.fixes].reverse().find((fix) => fix.agentId === agentId);
 var LINE_SUFFIX = /(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L\d+)?)$/;
 var bareItemFile = (file) => file.trim().replace(LINE_SUFFIX, "").replace(/^(?:\.\/)+/, "");
@@ -3211,6 +3212,7 @@ var PEER_NAME_CAP = 100;
 var PEER_LINE_CHARS = 300;
 var ANSWER_TEXT_CAP = 500;
 var DENIAL_REASON_CAP = 500;
+var BASH_COMMAND_CAP = 16e3;
 var ANSWERS_CAP2 = 10;
 var REPORT_HEAD = 4e3;
 var CUT = "\n[...]\n";
@@ -3234,7 +3236,7 @@ var taskIdOf = (value) => isTaskId(value) && !isReservedKey(value) ? value : voi
 var FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 var summarizeToolInput = (tool, input) => {
   if (tool === "Bash") {
-    return { command: cap(input.command, 2e3), description: str(input.description), runInBackground: input.run_in_background === true || void 0 };
+    return { command: cap(input.command, BASH_COMMAND_CAP), description: str(input.description), runInBackground: input.run_in_background === true || void 0 };
   }
   if (FILE_TOOLS.has(tool)) {
     const filePath = str(input.file_path) ?? str(input.notebook_path);
@@ -5196,7 +5198,6 @@ var byWorkTime = (a, b) => {
   const byKind = KIND_ORDER.indexOf(a.how) - KIND_ORDER.indexOf(b.how);
   return time(a.at) - time(b.at) || compareText(a.runId, b.runId) || byKind;
 };
-var isTrunkBranch = (state, branch) => branch === state.board.branches.trunk || state.board.branches.promote.includes(branch);
 var branchWorkKey = (run) => run.branch === "?" ? run.id : run.branch;
 var hasBranchWork = (session, runId) => session.branchWork.some((work) => work.runId === runId);
 var recordOf = (state, sessionId) => {
@@ -6672,6 +6673,59 @@ var onWorktreeRemoved = (state, data, at) => {
   return [run];
 };
 
+// src/model/own-branch.ts
+var roleStageStarted = (run, agent) => {
+  if (agent.stage === "implement") {
+    return agent.streamId !== void 0 || run.fixes.some((fix) => fix.agentId === agent.id);
+  }
+  if (agent.stage === "review") {
+    return agent.reviewerId !== void 0;
+  }
+  return agent.stage !== "pr" || run.stages.pr.state !== "pending";
+};
+var roleStageStartedInRuns = (state, agentId, except) => {
+  const runs = Object.values(state.branchStates).filter((run) => run !== except && Object.hasOwn(run.agents, agentId));
+  return runs.some((run) => roleStageStarted(run, run.agents[agentId]));
+};
+var editedInWorktree = (agent) => agent.filesChanged.some((path) => !isAbsolute2(path));
+var workedIn = (state, { run, agent }) => {
+  const started = roleStageStarted(run, agent);
+  const elsewhere = !started && !editedInWorktree(agent) && roleStageStartedInRuns(state, agent.id, run);
+  const worked = started || agent.budget.toolCalls.used > 0 && !elsewhere;
+  return worked && !isTrunkBranch(state, run.branch);
+};
+var firstWorkedCopy = (state, copies) => {
+  const worked = copies.filter((copy) => workedIn(state, copy));
+  return worked.sort((a, b) => time(a.agent.startedAt) - time(b.agent.startedAt) || compareText(a.run.id, b.run.id))[0];
+};
+var startWorktreeOf = (state, agentId, copies) => {
+  const sessionId = ownValue(state.index.agentSessions, agentId);
+  const spelled = sessionId === void 0 ? void 0 : ownValue(state.index.sessions, sessionId)?.startCwd;
+  if (spelled === void 0) {
+    return void 0;
+  }
+  const startCwd = resolveAlias(spelled, state.index.worktreeAliases);
+  const around = copies.map((copy) => copy.run.worktree).filter((worktree) => isInside2(startCwd, worktree));
+  return around.sort((a, b) => b.length - a.length)[0];
+};
+var ownBranchCopy = (state, agentId) => {
+  const copies = [];
+  for (const run of Object.values(state.branchStates)) {
+    const agent = ownValue(run.agents, agentId);
+    if (agent !== void 0) {
+      copies.push({ run, agent });
+    }
+  }
+  const start = startWorktreeOf(state, agentId, copies);
+  const linked = copies.filter((copy) => copy.run.worktree !== start);
+  return firstWorkedCopy(state, linked) ?? firstWorkedCopy(state, copies);
+};
+var onOwnBranch = (state, run, agentId) => {
+  const own = ownBranchCopy(state, agentId);
+  return own === void 0 || own.run === run;
+};
+var asksForOwnFix = (state, run, reviewer) => asksForFix(run, reviewer, state.index.agentSessions) && onOwnBranch(state, run, reviewer.agentId);
+
 // src/model/progress.ts
 var PROGRESS_SEGMENTS = 12;
 var PROGRESS_ITEMS_CAP = 200;
@@ -6921,7 +6975,7 @@ var fixItems = (state, run, fix, config, legPackage) => {
   const sessions = state.index.agentSessions;
   const sessionId = ownValue(sessions, fix.agentId) ?? fix.sessionId;
   const ownSession = (reviewer) => sessionId === void 0 || ownValue(sessions, reviewer.agentId) === sessionId;
-  const reviewers = run.reviewers.filter((reviewer) => asksForFix(run, reviewer, sessions) && ownSession(reviewer));
+  const reviewers = run.reviewers.filter((reviewer) => asksForOwnFix(state, run, reviewer) && ownSession(reviewer));
   const sourced = reviewers.flatMap((reviewer) => reviewerItems(run, reviewer, aliases));
   const ordered = [...sourced.filter(({ item }) => item.kind === "fix"), ...sourced.filter(({ item }) => item.kind === "improve")];
   const plan = planIn(run, sessionId === void 0 ? void 0 : ownValue(state.index.sessions, sessionId)?.plan);
@@ -8563,18 +8617,18 @@ ${spawn2.paths.map((path) => relativePath(run, path, state.index.worktreeAliases
   }
   return packageStream(plan, best.pkg);
 };
-var answeredBy = (run, reviewers, sessions) => {
-  const asking = [...reviewers].reverse().filter((reviewer) => asksForFix(run, reviewer, sessions));
+var answeredBy = (state, run, reviewers) => {
+  const asking = [...reviewers].reverse().filter((reviewer) => asksForOwnFix(state, run, reviewer));
   return asking.find((reviewer) => reviewer.state === "changes") ?? asking[0];
 };
-var reviewerAskingForFix = (run, sessions) => answeredBy(run, run.reviewers, sessions);
-var sessionReviewerAskingForFix = (run, sessionId, sessions) => {
-  const own = run.reviewers.filter((reviewer) => ownValue(sessions, reviewer.agentId) === sessionId);
-  return answeredBy(run, own, sessions);
+var reviewerAskingForFix = (state, run) => answeredBy(state, run, run.reviewers);
+var sessionReviewerAskingForFix = (state, run, sessionId) => {
+  const own = run.reviewers.filter((reviewer) => ownValue(state.index.agentSessions, reviewer.agentId) === sessionId);
+  return answeredBy(state, run, own);
 };
-var fixReviewerFor = (run, agent, sessionId, sessions) => {
-  const own = agentSession(sessions, agent.id, sessionId);
-  return sessionReviewerAskingForFix(run, own, sessions);
+var fixReviewerFor = (state, run, agent, sessionId) => {
+  const own = agentSession(state.index.agentSessions, agent.id, sessionId);
+  return sessionReviewerAskingForFix(state, run, own);
 };
 var openFixOf = (fix, agentId, sessionId) => fix.state === "running" && fix.agentId === agentId && (sessionId === void 0 || fix.sessionId === sessionId);
 var startFix = (state, run, reviewer, streamId, agentId, line, sessionId) => {
@@ -8643,9 +8697,10 @@ var reopenStream = (run, agent, at) => {
   stream.state = "running";
   checkImplement(run, at);
 };
-var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
+var linkReReviews = (state, run, reviewerId, agentId, at, sessionId) => {
+  const fixes = onOwnBranch(state, run, agentId) ? run.fixes : [];
   let linked = false;
-  for (const fix of run.fixes) {
+  for (const fix of fixes) {
     const ownSession = sessionId === void 0 || fix.sessionId === sessionId;
     if (fix.reviewerId === reviewerId && !fix.reReview && ownSession) {
       fix.reReview = { agentId, state: "running" };
@@ -8657,7 +8712,7 @@ var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
   }
   if (!linked) {
     const newest2 = /* @__PURE__ */ new Map();
-    for (const fix of run.fixes) {
+    for (const fix of fixes) {
       if (fix.reReview?.agentId === agentId) {
         newest2.set(fix.streamId ?? "main", fix.reReview);
       }
@@ -8670,7 +8725,7 @@ var linkReReviews = (run, reviewerId, agentId, at, sessionId) => {
 };
 var startImplementer = (state, run, agent, target, line, sessions, options = {}) => {
   endPlan(state, run, line);
-  const reviewer = options.noFix ? void 0 : fixReviewerFor(run, agent, line.sessionId, sessions);
+  const reviewer = options.noFix ? void 0 : fixReviewerFor(state, run, agent, line.sessionId);
   if (reviewer) {
     agent.streamId = fixStreamFor(planFor(state, run, agentSession(sessions, agent.id, line.sessionId)), target);
     startFix(state, run, reviewer, agent.streamId, agent.id, line);
@@ -8686,18 +8741,35 @@ var reviewSession = (run, line, config) => isTrunkLike(run.branch, config) ? lin
 var startReviewer = (state, run, agent, line, config) => {
   const { at } = line;
   const short = roleConfig(agent.role, config).short ?? agent.role;
+  agent.reviewerId = short;
+  let reviewer = run.reviewers.find((item) => item.id === short);
+  const holder = reviewer === void 0 || reviewer.agentId === agent.id ? void 0 : reviewer.agentId;
+  const heldByOwn = holder !== void 0 && onOwnBranch(state, run, holder);
+  const own = onOwnBranch(state, run, agent.id);
+  if (heldByOwn && !own) {
+    delete agent.reviewerId;
+    return;
+  }
   if (!run.join || run.join.state === "pending") {
     run.join = { at, state: "skipped" };
     setStage(run, "join", "skipped", at);
   }
-  agent.reviewerId = short;
-  let reviewer = run.reviewers.find((item) => item.id === short);
-  if (reviewer) {
+  const reReviewing = holder !== void 0 && run.fixes.some((fix) => fix.reReview?.agentId === holder);
+  if (reviewer && holder !== void 0 && !heldByOwn && own && !reReviewing) {
+    const visitor = ownValue(run.agents, holder);
+    if (visitor) {
+      delete visitor.reviewerId;
+    }
+    reviewer.agentId = agent.id;
+    reviewer.state = "running";
+    reviewer.model = agent.model ?? reviewer.model;
+    linkReReviews(state, run, short, agent.id, at, reviewSession(run, line, config));
+  } else if (reviewer) {
     reviewer.round += 1;
     reviewer.agentId = agent.id;
     reviewer.state = "running";
     reviewer.model = agent.model ?? reviewer.model;
-    linkReReviews(run, short, agent.id, at, reviewSession(run, line, config));
+    linkReReviews(state, run, short, agent.id, at, reviewSession(run, line, config));
     logRun(state, run, line, `re-review (round ${reviewer.round})`, "normal", agent.id);
   } else {
     reviewer = { id: short, agentId: agent.id, state: "running", round: 1 };
@@ -8711,7 +8783,7 @@ var startReviewer = (state, run, agent, line, config) => {
 var resumeRoleStage = (state, run, agent, line, config, sessions) => {
   const { at } = line;
   const fix = agentFix(run, agent.id);
-  const asking = fixReviewerFor(run, agent, line.sessionId, sessions);
+  const asking = fixReviewerFor(state, run, agent, line.sessionId);
   const reviewer = run.reviewers.find((item) => item.id === agent.reviewerId);
   if (fix && (!fix.reReview || !asking)) {
     fix.state = "running";
@@ -8724,7 +8796,7 @@ var resumeRoleStage = (state, run, agent, line, config, sessions) => {
     reopenStream(run, agent, at);
   } else if (reviewer && reviewer.agentId === agent.id) {
     reviewer.state = "running";
-    linkReReviews(run, reviewer.id, agent.id, at, reviewSession(run, line, config));
+    linkReReviews(state, run, reviewer.id, agent.id, at, reviewSession(run, line, config));
     checkReview(run, at);
   }
 };
@@ -8732,9 +8804,8 @@ var sentElsewhere = (state, run, agentId) => {
   const named = ownValue(state.index.agentStreams, agentId)?.worktrees ?? [];
   return named.length > 0 && !named.includes(run.worktree);
 };
-var editedInWorktree = (agent) => agent.filesChanged.some((path) => !isAbsolute2(path));
 var logSentElsewhere = (state, run, agent, line) => {
-  if (!fixReviewerFor(run, agent, line.sessionId, state.index.agentSessions)) {
+  if (!fixReviewerFor(state, run, agent, line.sessionId)) {
     return;
   }
   const named = ownValue(state.index.agentStreams, agent.id)?.worktrees ?? [];
@@ -8756,19 +8827,6 @@ var startRoleStage = (state, run, agent, target, line, config, when) => {
   } else if (agent.stage === "pr" && run.stages.pr.state === "pending") {
     setStage(run, "pr", "running", line.at);
   }
-};
-var roleStageStarted = (run, agent) => {
-  if (agent.stage === "implement") {
-    return agent.streamId !== void 0 || run.fixes.some((fix) => fix.agentId === agent.id);
-  }
-  if (agent.stage === "review") {
-    return agent.reviewerId !== void 0;
-  }
-  return agent.stage !== "pr" || run.stages.pr.state !== "pending";
-};
-var roleStageStartedInRuns = (state, agentId, except) => {
-  const runs = Object.values(state.branchStates).filter((run) => run !== except && Object.hasOwn(run.agents, agentId));
-  return runs.some((run) => roleStageStarted(run, run.agents[agentId]));
 };
 var roleStream = (state, agent) => {
   const homeId = state.index.agentRuns[agent.id];
@@ -9035,7 +9093,7 @@ var finalLogLine = (run, agent) => {
   const summary = agent.state === "done" && agent.report ? reportSummary(agent.report.text) : "";
   return { text: summary ? `done: ${summary}` : agent.state, tone: failed ? "failed" : "normal" };
 };
-var settleNodes = (state, run, agent, line, config) => {
+var settleNodes = (state, run, agent, line, config, visitor = false) => {
   const { at } = line;
   const ended = agent.endedAt !== void 0 && agent.state !== "running";
   if (ended && !agent.report) {
@@ -9049,10 +9107,12 @@ var settleNodes = (state, run, agent, line, config) => {
   delete agent.staleSince;
   if (agent.reviewerId) {
     finalizeReviewer(run, agent, at);
+  } else if (visitor) {
+    agent.state = reviewerVerdict(agent);
   } else {
     finalizeWorker(state, run, agent, at, config);
   }
-  if (!ended || agent.state !== before) {
+  if (!visitor && (!ended || agent.state !== before)) {
     const final = finalLogLine(run, agent);
     logRun(state, run, line, final.text, final.tone, agent.id);
   }
@@ -9062,6 +9122,7 @@ var copyRuns = (state, home, agentId) => {
   const runs = Object.values(state.branchStates);
   return runs.filter((run) => run !== home && Object.hasOwn(run.agents, agentId));
 };
+var leftWithoutNode = (state, run, copy) => copy.stage === "review" && copy.reviewerId === void 0 && !onOwnBranch(state, run, copy.id);
 var endCopies = (state, home, agent, line, config) => {
   for (const run of copyRuns(state, home, agent.id)) {
     const copy = run.agents[agent.id];
@@ -9069,7 +9130,7 @@ var endCopies = (state, home, agent, line, config) => {
       copy.report = structuredClone(agent.report);
     }
     closePermissions(state, run, copy, line, "unanswered");
-    settleNodes(state, run, copy, line, config);
+    settleNodes(state, run, copy, line, config, leftWithoutNode(state, run, copy));
   }
 };
 var resumeCopies = (state, home, agentId, line, config) => {
@@ -9596,7 +9657,7 @@ var tokenStage = (state, run, agent, sessionId, config) => {
   }
   const awaited = agent.stage === "implement" && !roleStageStarted(run, agent);
   const away = awaited && (sentElsewhere(state, run, agent.id) || roleStageStartedInRuns(state, agent.id, run));
-  if (awaited && !away && fixReviewerFor(run, agent, sessionId, state.index.agentSessions)) {
+  if (awaited && !away && fixReviewerFor(state, run, agent, sessionId)) {
     return "fix";
   }
   if (agent.stage === "implement") {
@@ -10358,8 +10419,7 @@ var onEditPre = (state, run, agent, filePath, line, config) => {
     endPlan(state, run, line);
   }
   const trunk = isTrunkLike(run.branch, config);
-  const sessions = state.index.agentSessions;
-  const reviewer = trunk ? sessionReviewerAskingForFix(run, line.sessionId, sessions) : reviewerAskingForFix(run, sessions);
+  const reviewer = trunk ? sessionReviewerAskingForFix(state, run, line.sessionId) : reviewerAskingForFix(state, run);
   if (reviewer) {
     const streamId = run.streams.find((stream) => stream.package === pkg)?.id ?? pkg;
     const ownSession = trunk ? line.sessionId : void 0;
@@ -11056,16 +11116,6 @@ var openedBranch = (state, agentId) => {
   const opened = Object.values(state.branchStates).filter((run) => run.pr?.openedBy?.agentId === agentId && !isTrunkBranch(state, run.branch));
   const first = opened.sort((a, b) => compareText(a.id, b.id))[0];
   return first === void 0 ? void 0 : branchWorkKey(first);
-};
-var workedIn = (state, { run, agent }) => {
-  const started = roleStageStarted(run, agent);
-  const elsewhere = !started && !editedInWorktree(agent) && roleStageStartedInRuns(state, agent.id, run);
-  const worked = started || agent.budget.toolCalls.used > 0 && !elsewhere;
-  return worked && !isTrunkBranch(state, run.branch);
-};
-var firstWorkedCopy = (state, copies) => {
-  const worked = copies.filter((copy) => workedIn(state, copy));
-  return worked.sort((a, b) => time(a.agent.startedAt) - time(b.agent.startedAt) || compareText(a.run.id, b.run.id))[0];
 };
 var agentBranch = (state, lead, rest) => {
   const first = firstWorkedCopy(state, [lead, ...rest]);
@@ -13300,6 +13350,7 @@ export {
   normalizePath,
   ownValue,
   ownEntry,
+  isTrunkBranch,
   literalWord,
   cdTarget,
   shellCode,
@@ -13341,12 +13392,12 @@ export {
   isBlockError,
   roleConfig,
   GATE_IDS,
-  isTrunkBranch,
   recordOf,
   sessionRunIds,
   sessionsAffected,
   worktreeAddOfCommand,
   STALE_AGENT_MS,
+  ownBranchCopy,
   PROGRESS_ITEMS_CAP,
   promoteCarries,
   isSessionDone,
@@ -13357,7 +13408,6 @@ export {
   sessionOutcomes,
   newOutcome,
   sessionAggregate,
-  firstWorkedCopy,
   sessionGates,
   blockingForYou,
   createStore,

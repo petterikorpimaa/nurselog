@@ -19,7 +19,6 @@ import {
   createStore,
   dropUserOnlyKeys,
   expandHome,
-  firstWorkedCopy,
   githubRepoOfRemote,
   hookConfigProblems,
   isBranchName,
@@ -30,6 +29,7 @@ import {
   mergeOverDefaults,
   newLineId,
   normalizePath,
+  ownBranchCopy,
   ownEntry,
   ownValue,
   patternInput,
@@ -43,7 +43,7 @@ import {
   time,
   userOnlyWarning,
   worktreeAddOfCommand
-} from "./chunk-EEWYYZR3.js";
+} from "./chunk-LKOSYIQD.js";
 
 // src/config.ts
 import { existsSync } from "fs";
@@ -1734,14 +1734,7 @@ var diffTargetOf = (state, agentId) => {
   if (home === void 0 || home.endedAt !== void 0 || home.stage !== "review") {
     return void 0;
   }
-  const copies = [];
-  for (const run of Object.values(state.branchStates)) {
-    const agent = ownValue(run.agents, agentId);
-    if (agent !== void 0) {
-      copies.push({ run, agent });
-    }
-  }
-  const first = firstWorkedCopy(state, copies);
+  const first = ownBranchCopy(state, agentId);
   if (first === void 0 || first.run.branch === "" || first.run.branch === "?" || first.run.worktree === "") {
     return void 0;
   }
