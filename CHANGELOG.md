@@ -182,3 +182,100 @@
 ### Fixed
 
 - One percent format across the board and the CLI
+
+## 0.1.6 (2026-10-28)
+
+### New
+
+- The live demo page and its release to gh-pages
+- The Implement stage in place of Build
+- Ship Inter and JetBrains Mono with the board
+- Wrench and fix count on the changes-requested node
+
+## 0.1.5 (2026-10-28)
+
+### New
+
+- Build streams from behaviour
+- Main-thread modal as turns with your messages
+- Short commands in hook and CLI messages
+- Replay the board start in a worker thread
+- Agent progress in the open row's details
+- Fainter travelling light on the progress ring
+
+### Fixed
+
+- Init role names and a workflow-neutral markers paragraph
+- Labels and copy for isolation worktrees and ticketless repositories
+- Small model gaps of other workflows
+- A PR without gh polling waits on no merge
+- Verification defaults and insight reasons for other workflows
+- Read worktree aliases in agent progress
+- Keep trunk-run ids off branch rows and read worktree aliases in run paths
+- Merge a symlinked worktree add onto its real path and read the add's branch as git does
+- Main-thread stages of a shared trunk run
+- Count a just-added worktree's lookup as a worktree and keep add warnings until the write
+- Bound the git producer's fs calls on outside paths and settle adds by branch
+- A hung worktree stat no longer stalls the git producer
+- Say a timed-out git or gh command timed out
+- Report an orphan spool directory of another user
+
+## 0.1.4 (2026-10-27)
+
+### Fixed
+
+- Refuse a sign-in ticket from another user's socket on Linux
+- Report an expired spool file the board's prune cannot delete
+
+## 0.1.3 (2026-10-27)
+
+### New
+
+- Fold the follow-ups under a chevron, closed by default
+- Progress ring on a running subagent's node
+- Nurselog uninstall removes Nurselog from the machine
+- Diff fact of a reviewer's changed files
+- Derive agent progress in the reducer
+- Nurse log icon in place of the light beam
+- Typical lengths of earlier runs on the session view
+- Running orbit and done sheen on the session graph
+
+### Fixed
+
+- Keep the sign-in ticket out of the process list
+
+## 0.1.2 (2026-10-27)
+
+### New
+
+- Terminal command at a fixed path (nurselog install-cli)
+- Warn when github.repo names no git remote of the repository
+- Ticket link from the key (keyUrl)
+- Resume cost in the Summary panel
+
+### Fixed
+
+- End the lanes of a removal before a closed PR and of an unconfirmed worktree add
+- Session cards skip start-only neighbours, amber only before Build ended
+- Run chip without skipped streams, amber only before Build ended
+- Report an unreachable spool directory instead of reading it as missing
+- Keep a SendMessage-resumed agent running until its next stop
+- Draw a skipped stream as one nobody took, not as finished work
+- Keep the row owner and Build to the session that built
+- Read only a missing spool directory or keepDays config as missing
+- End Build when its streams are handed or were never taken
+- Keep an agent's first start time on a SendMessage resume
+- Recheck the gh account when a browser connects without an open run
+- Prune session aggregates under a user config's spool.dir
+
+## 0.1.1 (2026-10-26)
+
+### New
+
+- Install from the public repository as a marketplace
+
+## 0.1.0 (2026-10-26)
+
+### New
+
+- The first public release
