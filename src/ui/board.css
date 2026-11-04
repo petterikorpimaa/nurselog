@@ -189,14 +189,14 @@ p { margin: 0; }
 .warning-text { overflow-wrap: anywhere; }
 
 /* the update button (update.ts; design section 15, "Update button"): the status block's item before the Changelog
-   button while the source reports a newer Nurselog, a pill of the button look in the --rev tone with a dot, "Update
-   available" and the version ("Update" alone at 760 px and narrower, the rest kept for assistive technology). The item
-   is hidden without a notice, so the status block keeps its gaps. Its popover opens under it, anchored right, above
-   the board like the warnings list; at 760 px and narrower, where the status block wraps, under the top bar at its
-   right edge. The notes scroll inside it past 40 % of the window, and update.ts ends it above the window's foot on
-   open, where the notes list (a scroll container, so its flex minimum is 0) gives up its height first; the command and
-   the actions stay in reach. The command wraps in its box, and the text actions ("Full changelog", "Skip this
-   version") and Copy have a 24 px hit area. */
+   button, which it replaces while it shows: a pill of the button look in the --rev tone
+   with a dot, "Update available" and the version ("Update" alone at 760 px and narrower, the rest kept for assistive
+   technology). The item is hidden without a notice, so the status block keeps its gaps. Its popover opens under it,
+   anchored right, above the board like the warnings list; at 760 px and narrower, where the status block wraps, under
+   the top bar at its right edge. The notes scroll inside it past 40 % of the window, and update.ts ends it above the
+   window's foot on open, where the notes list (a scroll container, so its flex minimum is 0) gives up its height
+   first; the command and the actions stay in reach. The command wraps in its box, and the text actions ("Full
+   changelog", "Skip this version") and Copy have a 24 px hit area. */
 .topbar-update { position: relative; flex: none; }
 .update-button {
   display: inline-flex; align-items: center; gap: 8px; padding-inline: 12px; border-radius: 999px; white-space: nowrap;
@@ -254,7 +254,8 @@ p { margin: 0; }
    has a changelog, a quiet pill (the demo's .clb) with three lines, "Changelog" and the running version, and a dot in
    the --rev tone (the demo's --web) while a version newer than the seen one is known, with a visually hidden " new" in
    the button's name; the icon alone at 760 px and narrower, the rest kept for assistive technology, at the height of a
-   .button's line box at every width, so the icon alone stands as tall as the update pill beside it */
+   .button's line box at every width, so the icon alone stands as tall as the update pill that takes its place and the
+   top bar keeps its height through the swap */
 .changelog-button {
   position: relative; flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: calc(1.45em + 8px);
   padding-inline: 11px; border-radius: 999px; background: transparent; color: var(--fg-2); white-space: nowrap;

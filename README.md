@@ -118,7 +118,8 @@ A board from a marketplace install shows an Update button in its top bar when a 
 and the command above. It checks the marketplace's GitHub repository a few seconds after it starts and every 6 hours,
 reading only the version and the changelog; `NURSELOG_UPDATE_CHECK=0` turns the check off. A board from a clone never
 checks. The Changelog button, the top bar's last item, lists what each version brought, newest first, and carries a dot
-while a version you have not looked at is out; a board from a clone has no changelog to show.
+while a version you have not looked at is out. While the Update button shows, it stands in its place, and its popover's
+"Full changelog" opens the same list. A board from a clone has no changelog to show.
 
 </details>
 

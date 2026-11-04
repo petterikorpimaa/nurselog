@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.23 (2026-11-04)
+
+### Fixed
+
+- The update button replaces the Changelog button while it shows
+
 ## 0.1.22 (2026-11-04)
 
 ### Fixed
