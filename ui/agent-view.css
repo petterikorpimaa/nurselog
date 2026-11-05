@@ -1,0 +1,383 @@
+/* The agent view (design section 15, "Agent view"; decisions 246 and 255; agent-view/view.ts), ported from
+   reference/agent-view.html: the head, the core with its loop phases, the tool nodes and the beams, the live line, the
+   calls row and the workspace, laid out as the reference's agent card. It takes the place of the session card's whole
+   content inside the card's frame (agent-view/stage.ts), which the zoom moves as its camera. */
+
+@property --av-state { syntax: '<color>'; inherits: true; initial-value: #7d8492; }
+
+/* the card while its view is open: the view in flow, the frame taking its height, and the content laid over it at its
+   place, put away (inert) and hidden once the zoom in ended (av-away); while the view zooms out the content takes its
+   place again and the view lies over it. The card's overflow clips the zoom. */
+.card.av-open > .card-content { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
+.card-content.av-away { visibility: hidden; }
+.card.av-leaving > .agent-view { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
+/* the copy of the clicked node that travels with the core while a zoom runs */
+.av-ghost { position: absolute; z-index: 1; pointer-events: none; }
+
+.agent-view {
+  --seg-system: #aeb4bf; --seg-task: #e9d28c; --seg-files: var(--c-observe); --seg-tools: var(--c-run); --seg-reasoning: var(--c-think);
+  position: relative; min-width: 0;
+}
+
+/* head: the back button and the task, as the reference's title row, and the previous and next agent at its end */
+.av-head { display: flex; align-items: flex-start; gap: 14px; padding: 16px 22px 0; }
+.av-back {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px 0 8px; border-radius: 8px;
+  border: 1px solid var(--border-2); background: var(--card-2); color: var(--fg-2); font: 500 12.5px var(--f-ui); cursor: pointer;
+  transition: color .2s, background-color .2s, border-color .2s;
+}
+.av-back .av-arrow { width: 15px; height: 15px; }
+.av-back:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+.av-back:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* the previous and next agent: the board's icon-only chevron button (.icon-button, as the collapse button), its
+   chevron turned to the side, disabled at an end as the board's .button is; hidden for a single card node */
+.av-nav { flex: none; display: inline-flex; gap: 6px; margin-left: auto; padding-top: 3px; }
+.av-nav[hidden] { display: none; }
+.av-step.prev svg { transform: rotate(-90deg); }
+.av-step.next svg { transform: rotate(90deg); }
+.av-step:disabled { cursor: default; color: var(--fg-3); background: transparent; }
+.av-step:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* the view takes the focus when a move took away what held it */
+.agent-view:focus { outline: none; }
+.agent-view:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 10px; }
+/* a pointer open gives the view the focus without its ring, until a key */
+.agent-view[data-quiet]:focus-visible { outline: none; }
+.av-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; padding-top: 3px; }
+.av-title { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; color: var(--fg); overflow-wrap: anywhere; text-wrap: balance; }
+
+/* the diagram, as the reference's */
+.av-viz { display: flex; justify-content: center; padding: 14px 22px 4px; }
+.av-svg { width: 100%; max-width: 400px; display: block; overflow: visible; --av-state: var(--c-idle); transition: --av-state .45s ease; }
+.av-svg text { font-family: var(--f-mono); }
+.av-track { fill: none; stroke: var(--dot); stroke-width: 1.5; stroke-dasharray: .1 5; stroke-linecap: round; }
+.av-socket { fill: none; stroke: var(--fg-3); stroke-width: 1.3; stroke-dasharray: .1 3.6; stroke-linecap: round; opacity: 0; transition: opacity .3s; }
+.av-socket.empty { opacity: .6; }
+.av-goo-core { fill: var(--av-state); }
+
+.av-core { transform-box: fill-box; transform-origin: center; }
+.av-core.shake { animation: av-shake .5s 2; }
+@keyframes av-shake { 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+.av-core-ring { fill: none; stroke: var(--av-state); stroke-width: 1.6; transform-box: fill-box; transform-origin: center; animation: av-core-ring 1.8s ease-out infinite; }
+@keyframes av-core-ring { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(1.5); opacity: 0; } }
+.av-core-orbit { fill: none; stroke: var(--av-state); stroke-width: 1.5; stroke-opacity: .85; transform-box: fill-box; transform-origin: center; animation: av-orbit 7s linear infinite; }
+@keyframes av-orbit { to { transform: rotate(360deg); } }
+.av-svg[data-state="think"] .av-core-orbit { animation-duration: 2.2s; }
+.av-svg[data-state="act"] .av-core-orbit { animation-duration: 4s; }
+.av-svg[data-state="verify"] .av-core-orbit { animation-direction: reverse; animation-duration: 5s; }
+.av-core-out { fill: color-mix(in srgb, var(--av-state) 14%, var(--card)); stroke: var(--av-state); stroke-width: 1.8; transition: stroke-dasharray .3s; }
+.av-liquid { fill: var(--av-state); transition: opacity .4s; }
+.av-glyph path { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.av-glyph.base path { stroke: var(--fg); }
+.av-glyph.onliq path { stroke: var(--ink); }
+.av-svg[data-state="starting"] .av-core-out { fill: var(--card); stroke: var(--fg-3); stroke-dasharray: .1 6; stroke-linecap: round; stroke-width: 2.2; }
+.av-svg[data-state="starting"] .av-liquid, .av-svg[data-state="wait"] .av-liquid { opacity: 0; }
+.av-svg[data-state="starting"] .av-glyph.base path { stroke: var(--fg-3); }
+.av-svg[data-state="wait"] .av-core-out { fill: color-mix(in srgb, var(--you) 7%, var(--card)); stroke-dasharray: 7 5; }
+.av-svg[data-state="wait"] .av-glyph.base path { stroke: var(--you); }
+.av-svg[data-state="stale"] .av-core-out { stroke-dasharray: .1 6; stroke-linecap: round; stroke-width: 2.2; }
+.av-svg[data-state="stale"] .av-liquid { opacity: .35; }
+.av-svg:is([data-state="starting"], [data-state="done"], [data-state="failed"], [data-state="handed"], [data-state="stale"], [data-state="wait"]) .av-core-orbit { animation: none; opacity: 0; }
+.av-svg:is([data-state="starting"], [data-state="done"], [data-state="failed"], [data-state="handed"], [data-state="stale"]) .av-core-ring { animation: none; opacity: 0; }
+.av-sheen { fill: var(--fg); opacity: 0; }
+.av-sheen.go { animation: av-sheen .9s ease-out; }
+@keyframes av-sheen { 0% { opacity: 0; transform: translateX(0); } 25% { opacity: .5; } 100% { opacity: 0; transform: translateX(150px); } }
+.av-badge .kn { fill: var(--card); }
+.av-badge .bd { fill: var(--card-3); stroke: var(--border-2); stroke-width: 1; }
+.av-badge .node-mark { color: var(--fg-2); }
+.av-badge .node-letter { font: 700 9px var(--f-mono); fill: var(--fg-2); text-anchor: middle; }
+
+/* the phase nodes under the core */
+.av-pnode { transition: none; }
+.av-node .n-out { fill: var(--card); stroke: var(--fg-3); stroke-width: 1.6; stroke-dasharray: .1 3.6; stroke-linecap: round; transition: fill .35s, stroke .35s; }
+.av-node .n-ic path { fill: none; stroke: var(--fg-3); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: .75; transition: stroke .3s, opacity .3s; }
+.av-node .n-orbit { fill: none; stroke: var(--c); stroke-width: 1.3; stroke-opacity: .85; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.av-node .n-ring { fill: none; stroke: var(--c); stroke-width: 1.4; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.av-node.done .n-out { fill: color-mix(in srgb, var(--c) 16%, var(--card)); stroke: var(--c); stroke-dasharray: none; }
+.av-node.done .n-ic path { stroke: var(--c); opacity: 1; }
+.av-node.running .n-out { fill: var(--c); stroke: var(--c); stroke-dasharray: none; }
+.av-node.running .n-ic path { stroke: var(--ink); opacity: 1; }
+.av-node.running .n-orbit { opacity: 1; animation: av-orbit 7s linear infinite; }
+.av-node.running .n-ring { animation: av-node-ring 1.8s ease-out infinite; }
+@keyframes av-node-ring { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(1.75); opacity: 0; } }
+.av-node.changes .n-out { fill: color-mix(in srgb, var(--warm) 18%, var(--card)); stroke: var(--warm); stroke-dasharray: none; }
+.av-node.changes .n-ic path { stroke: var(--warm); opacity: 1; }
+.av-node .n-core { transform-box: fill-box; transform-origin: center; }
+.av-node.bump .n-core { animation: av-pop .45s var(--ease); }
+@keyframes av-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.av-node.waiting .n-out { fill: color-mix(in srgb, var(--you) 7%, var(--card)); stroke: var(--you); stroke-dasharray: 3 2.6; }
+.av-node.waiting .n-ic path { stroke: var(--you); opacity: 1; }
+.av-node.waiting .n-ring { stroke: var(--you); animation: av-node-ring 1.8s ease-out infinite; }
+
+/* the tool nodes on the ring (agent-view/tools.ts): the phase nodes' look with a label, a count badge and a check's pips */
+.av-tool { transition: opacity .25s; }
+.av-node .n-lab { font-size: 10.5px; font-weight: 500; fill: var(--fg-3); text-anchor: middle; transition: fill .3s; }
+.av-node:is(.done, .changes) .n-lab { fill: var(--fg-2); }
+.av-node:is(.running, .waiting) .n-lab { fill: var(--fg); font-weight: 600; }
+.av-node .n-q { font: 700 13px var(--f-ui); fill: var(--fg-3); text-anchor: middle; transition: fill .3s; }
+.av-node.done .n-q { fill: var(--c); }
+.av-node.running .n-q { fill: var(--ink); }
+.av-node.waiting .n-q { fill: var(--you); }
+.av-tool .n-badge { opacity: 0; transition: opacity .3s; }
+.av-tool .n-badge.has { opacity: 1; }
+.av-tool .n-badge .kn { fill: var(--card); }
+.av-tool .n-badge .bd { fill: color-mix(in srgb, var(--c) 18%, var(--card)); stroke: var(--c); stroke-width: 1.1; }
+.av-tool .n-badge text { font: 700 8.5px var(--f-mono); fill: color-mix(in srgb, var(--c) 75%, var(--fg)); text-anchor: middle; }
+.av-tool .pip.ok { fill: var(--rev); }
+.av-tool .pip.bad { fill: var(--warm); }
+/* the pop at the family's first call; at the open after the zoom (--av-delay) */
+.av-tool.in { animation: av-tool-in .32s ease-out var(--av-delay, 0s) backwards; }
+.av-tool.in .n-core { animation: av-pop .45s var(--ease) var(--av-delay, 0s) backwards; }
+@keyframes av-tool-in { from { opacity: 0; } }
+/* a node that leaves the ring fades and shrinks out */
+.av-tool.out { animation: av-tool-out .2s ease-in forwards; }
+.av-tool.out .n-core { animation: av-tool-shrink .2s ease-in forwards; }
+@keyframes av-tool-out { to { opacity: 0; } }
+@keyframes av-tool-shrink { to { transform: scale(.6); } }
+/* a hovered or picked segment's node lights, as the reference's segShow */
+.av-tool.hl .n-out { stroke-width: 3.2; }
+.av-tool.hl .av-node { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--c) 70%, transparent)); }
+
+/* the beams: one from the core to its node per open call; tools.ts draws them in and back by their dash offset */
+.av-beam { pointer-events: none; transition: opacity .25s; }
+.av-beam path { fill: none; stroke-linecap: round; }
+.av-beam .lz-glow { stroke: var(--lc); stroke-width: 8; opacity: .22; filter: blur(2.5px); }
+.av-beam .lz-core { stroke: var(--lc); stroke-width: 2.4; }
+.av-beam .lz-hot { stroke: #fff; stroke-width: .9; opacity: .8; }
+.av-beam .lz-wave { stroke: var(--lc); stroke-width: 1.2; opacity: 0; transition: opacity .25s; }
+.av-beam .lz-wave.w2 { stroke-width: .9; }
+.av-beam.live .lz-wave { opacity: .85; }
+.av-beam .lz-flow { stroke: #fff; stroke-width: 1.8; stroke-dasharray: 2 15; opacity: 0; transition: opacity .25s; }
+.av-beam.live .lz-flow { opacity: .95; animation: av-lz-flow .45s linear infinite; }
+.av-beam.live .lz-glow { animation: av-lz-glow 1.1s ease-in-out infinite; }
+@keyframes av-lz-flow { to { stroke-dashoffset: -17; } }
+@keyframes av-lz-glow { 50% { opacity: .36; stroke-width: 11; } }
+.av-beam .lz-pkt { fill: #fff; filter: drop-shadow(0 0 4px var(--lc)); }
+.av-beam.wait :is(.lz-glow, .lz-hot, .lz-flow, .lz-wave) { opacity: 0; }
+.av-beam.wait .lz-core { stroke: var(--you); stroke-width: 1.4; opacity: .85; }
+.av-beam.denied :is(.lz-core, .lz-glow) { stroke: var(--red); }
+.av-beam.denied :is(.lz-hot, .lz-flow, .lz-wave) { opacity: 0; }
+/* a stale agent's beams: a dim dashed line, nothing flowing (the reference's stale rules) */
+.av-svg[data-state="stale"] .av-beam :is(.lz-wave, .lz-flow, .lz-hot) { opacity: 0; }
+.av-svg[data-state="stale"] .av-beam .lz-glow { opacity: .08; animation: none; }
+.av-svg[data-state="stale"] .av-beam .lz-core { stroke: var(--fg-3); stroke-dasharray: 2 4; }
+
+.av-word { font: 600 10.5px var(--f-mono); letter-spacing: .16em; text-transform: uppercase; text-anchor: middle; fill: var(--lc, var(--fg-2)); opacity: 0; transform-box: fill-box; transform-origin: center;
+  transition: opacity .45s ease, transform .65s var(--ease), letter-spacing .65s var(--ease), fill .4s; }
+
+/* the live line */
+.av-lower { display: flex; flex-direction: column; gap: 12px; padding: 4px 22px 6px; }
+.av-live { display: flex; align-items: flex-start; gap: 11px; min-height: 24px; border: 1.5px solid transparent; border-radius: 12px; transition: padding .3s var(--ease), background-color .3s, border-color .3s; }
+.av-live-ic { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; position: relative; color: var(--fg-2); }
+.av-live-ic .av-lm { width: 8px; height: 8px; border-radius: 2px; background: var(--av-state, var(--fg-3)); }
+.av-live-ic .av-ic { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.av-live-ic b { font: 800 13px var(--f-ui); }
+.av-live-body { min-width: 0; flex: 1; padding-top: 2px; }
+.av-live-text { display: flex; align-items: center; gap: 10px; min-width: 0; font: 400 12.5px/1.45 var(--f-mono); color: var(--fg-2); }
+.av-live-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-live-tool { color: var(--fg); font-weight: 600; margin-right: 8px; }
+.av-live-text .av-code { font: 600 12.5px var(--f-mono); color: var(--fg); }
+.av-live-text .av-more { margin-left: 8px; color: var(--fg-3); }
+.av-muted { color: var(--fg-3); }
+.av-dots { flex: none; display: inline-flex; gap: 3px; padding: 3px 6px; border-radius: 999px; background: var(--card-3); }
+.av-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-2); animation: av-pulse 1.2s ease-in-out infinite; }
+.av-dots i:nth-child(2) { animation-delay: .2s; }
+.av-dots i:nth-child(3) { animation-delay: .4s; }
+.av-dots.off { visibility: hidden; }
+@keyframes av-pulse { 0%, 100% { opacity: .25; } 50% { opacity: .9; } }
+.av-live-sub { margin-top: 3px; font-size: 12px; line-height: 1.45; color: var(--fg-3); }
+.av-fu { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 12px; }
+.av-fu-chip { font: 500 11.5px var(--f-mono); padding: 1px 8px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--c) 50%, transparent); color: color-mix(in srgb, var(--c) 75%, var(--fg)); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.av-fu-chip b { font-weight: 700; }
+.av-live[data-tone="wait"] { padding: 10px 12px; border-style: dashed; border-color: var(--you); background: color-mix(in srgb, var(--you) 4%, var(--card)); }
+.av-live[data-tone="wait"] .av-live-ic { background: var(--you); color: var(--ink); }
+.av-live[data-tone="wait"] .av-live-ic::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1.5px solid var(--you); animation: av-node-ring 1.8s ease-out infinite; }
+.av-live[data-tone="done"] .av-live-ic { background: color-mix(in srgb, var(--rev) 18%, var(--card)); color: var(--rev); }
+.av-live[data-tone="failed"] .av-live-ic { background: color-mix(in srgb, var(--red) 16%, var(--card)); color: var(--red); }
+.av-live[data-tone="handed"] .av-live-ic { background: color-mix(in srgb, var(--amber) 18%, var(--card)); color: color-mix(in srgb, var(--amber) 80%, var(--fg)); }
+.av-live[data-tone="stale"] .av-live-ic { border: 1.4px dotted var(--fg-3); color: var(--fg-3); }
+.av-live:is([data-tone="done"], [data-tone="failed"], [data-tone="handed"]) .av-live-main { white-space: normal; font: 500 13.5px/1.45 var(--f-ui); color: var(--fg); }
+
+/* the calls row: the newest 20 calls in their phase's colour, the earlier ones as "+N", the count and the context */
+.av-trace { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; }
+.av-rl { font: 600 10px var(--f-mono); letter-spacing: .07em; text-transform: uppercase; color: var(--fg-3); white-space: nowrap; }
+.av-tape { height: 20px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.av-older { flex: none; font: 600 10.5px var(--f-mono); color: var(--fg-2); padding: 1px 7px; border-radius: 999px; background: var(--card-3); cursor: default; }
+.av-segs { display: flex; gap: 2px; flex: 1; min-width: 0; height: 20px; align-items: center; }
+.av-segs i { position: relative; display: block; flex-basis: 0; min-width: 4px; height: 8px; border-radius: 2px; background: var(--kc); opacity: .5; cursor: pointer; transition: opacity .2s, transform .2s, flex-grow .4s; }
+/* the tape's height as the hit area */
+.av-segs i::before { content: ""; position: absolute; inset: -6px 0; }
+.av-segs i:hover, .av-segs i.pick { opacity: 1; transform: scaleY(1.6); }
+/* the row is one tab stop with roving focus: the focused segment rings in the focus colour */
+.av-segs i:focus { outline: none; }
+.av-segs i:focus-visible { opacity: 1; outline: 2px solid var(--focus); outline-offset: 2px; }
+.av-segs i.run { opacity: 1; animation: av-pulse 1s ease-in-out infinite; }
+.av-segs i.wait { opacity: 1; background: transparent; box-shadow: inset 0 0 0 1.4px var(--you); }
+.av-segs i.fail { opacity: 1; background-color: var(--warm); background-image: linear-gradient(135deg, transparent 38%, var(--ink) 38% 62%, transparent 62%); background-size: 6px 6px; }
+.av-segs i.denied { opacity: 1; background: repeating-linear-gradient(135deg, var(--red) 0 3px, transparent 3px 6px); }
+.av-trace-meta { display: inline-flex; align-items: center; gap: 14px; font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
+.av-ctx { display: inline-flex; align-items: center; gap: 7px; }
+.av-ctx b { color: var(--fg-2); font-weight: 600; }
+.av-ctx-bar { display: none; width: 44px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--card-3); }
+.av-ctx-bar i { display: block; height: 100%; width: 0; transition: width .8s var(--ease); }
+.av-ctx-bar i[data-part="system"] { background: var(--seg-system); }
+.av-ctx-bar i[data-part="task"] { background: var(--seg-task); }
+.av-ctx-bar i[data-part="files"] { background: var(--seg-files); }
+.av-ctx-bar i[data-part="tools"] { background: var(--seg-tools); }
+.av-ctx-bar i[data-part="reasoning"] { background: var(--seg-reasoning); }
+.av-ctx.warn .av-ctx-bar { display: flex; }
+.av-ctx.warn, .av-ctx.warn b { color: color-mix(in srgb, var(--amber) 80%, var(--fg)); }
+.av-cap { min-height: 16px; margin-top: -6px; font: 500 11px var(--f-mono); color: var(--fg-2); opacity: 0; transition: opacity .2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.av-cap.on { opacity: 1; }
+
+/* a PR agent's PR facts in the live line's body under the report (decision 247): the node card's PR line, stale line and "#n on GitHub" */
+.av-prf { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 8px; font: 400 12.5px/1.45 var(--f-ui); }
+.av-prf[hidden] { display: none; }
+.av-prf .nc-pr { align-self: stretch; }
+.av-prf .nc-link { margin-left: -6px; }
+
+/* the workspace: the tabs, "Following agent" and the panels, each scrolling in a capped height with a soft fade */
+.av-workspace { display: flex; flex-direction: column; gap: 10px; margin: 2px -22px 0; padding: 16px 22px 0; border-top: 1px solid var(--border); }
+.av-wbar { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.av-wbar[hidden] { display: none; }
+.av-wtabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--card-2); border: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.av-wtabs::-webkit-scrollbar { display: none; }
+/* the tablist fades at an edge while more tabs lie beyond it, the left one mirrored, both while it has more both ways */
+.av-wtabs.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+.av-wtabs.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 24px); mask-image: linear-gradient(to right, transparent, #000 24px); }
+.av-wtabs.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+.av-wtab { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px 0 12px; margin: 0; border: 0; border-radius: 7px; background: none; color: var(--fg-2); font: 500 12.5px var(--f-ui); cursor: pointer; white-space: nowrap; transition: background-color .2s, color .2s, box-shadow .2s; }
+.av-wtab[hidden] { display: none; }
+.av-wtab:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.av-wtab[aria-selected="true"] { background: var(--card-3); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-2); }
+.av-wtab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.av-wtab[data-tab="files"] { --lc: var(--c-observe); }
+.av-wtab[data-tab="terminal"] { --lc: var(--c-run); }
+.av-wtab[data-tab="browser"] { --lc: var(--c-browser); }
+.av-wtab[data-tab="plan"] { --lc: var(--c-think); }
+.av-cnt { min-width: 18px; height: 17px; padding: 0 5px; border-radius: 9px; display: inline-grid; place-items: center; font: 600 10.5px/1 var(--f-mono); color: var(--fg-2); background: var(--card-3); }
+.av-cnt:empty { display: none; }
+.av-wtab[aria-selected="true"] .av-cnt { background: color-mix(in srgb, var(--lc) 20%, transparent); color: color-mix(in srgb, var(--lc) 70%, var(--fg)); }
+/* the live mark: a call of the tab's family is open */
+.av-ld { width: 6px; height: 6px; margin: 0 -2px 0 -4px; border-radius: 50%; background: var(--lc); opacity: 0; transform: scale(.4); transition: opacity .2s, transform .2s; }
+.av-wtab.live .av-ld { opacity: 1; transform: none; animation: av-pulse 1s ease-in-out infinite; }
+.av-wtab.born { animation: av-rise .35s var(--ease); }
+@keyframes av-rise { from { opacity: 0; transform: translateY(4px); } }
+.av-follow[hidden] { display: none; }
+.av-follow { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--fg-3); font: 500 12px var(--f-ui); cursor: pointer; transition: color .2s, background-color .2s, border-color .2s; }
+.av-follow .av-ic { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.av-follow.on .av-ic { color: var(--c-observe); }
+.av-follow:not(.on) { border-color: var(--border-2); background: var(--card-2); color: var(--fg); }
+.av-follow:hover { color: var(--fg); }
+.av-follow:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.av-ws-empty { margin: 0; padding: 14px; border: 1px dashed var(--border-2); border-radius: 10px; text-align: center; font-size: 12.5px; color: var(--fg-3); }
+.av-ws-empty[hidden], .av-panel[hidden], .av-pnote[hidden] { display: none; }
+.av-panel { display: flex; flex-direction: column; min-width: 0; }
+.av-pb { min-height: 110px; max-height: 300px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
+.av-pb.more { -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent); mask-image: linear-gradient(#000 calc(100% - 32px), transparent); }
+.av-pb.more-above { -webkit-mask-image: linear-gradient(transparent, #000 24px); mask-image: linear-gradient(transparent, #000 24px); }
+.av-pb.more.more-above { -webkit-mask-image: linear-gradient(transparent, #000 24px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(transparent, #000 24px, #000 calc(100% - 32px), transparent); }
+.av-pb:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
+.av-pnote { margin: 0; padding: 12px 6px; font-size: 12px; color: var(--fg-3); }
+
+/* files: what the agent touched as a tree, single-child folders folded into one row */
+.av-files { font: 500 12px var(--f-mono); }
+.av-fr { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px 0 calc(6px + var(--dp) * 18px); border-radius: 6px; color: var(--fg); }
+.av-fr.dir .av-fn { color: var(--fg-3); }
+/* a folder outside the repository: one row in the other folder rows' text colour, marked by its dashed folder icon,
+   its whole path in its title */
+.av-fr.outside .av-fi { stroke-dasharray: 2.4 2; }
+.av-fi { flex: none; width: 13px; height: 13px; fill: none; stroke: var(--fg-3); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.av-fn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-fbadge { flex: none; font: 600 10px/16px var(--f-mono); padding: 0 6px; border-radius: 999px; border: 1px solid var(--border-2); color: var(--fg-3); }
+.av-fbadge.new { color: color-mix(in srgb, var(--gain) 72%, var(--fg)); border-color: color-mix(in srgb, var(--gain) 45%, transparent); background: color-mix(in srgb, var(--gain) 10%, transparent); }
+.av-fbadge.edited { color: color-mix(in srgb, var(--amber) 72%, var(--fg)); border-color: color-mix(in srgb, var(--amber) 45%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+.av-fd { flex: none; display: inline-flex; gap: 6px; font: 600 11px var(--f-mono); }
+.av-fd .add { color: color-mix(in srgb, var(--gain) 75%, var(--fg)); }
+.av-fd .del { color: color-mix(in srgb, var(--red) 75%, var(--fg)); }
+/* the trust map's tags (decision 241): a missing check's tag as the node card draws it, a covered file's positive tag;
+   the name keeps the text colour */
+.av-fr[data-trust="one"] { --c: var(--amber); }
+.av-fr[data-trust="both"] { --c: var(--red); }
+.av-covered { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 3px; font: 600 10.5px var(--f-mono); color: color-mix(in srgb, var(--rev) 75%, var(--fg)); }
+.av-covered svg { width: 11px; height: 11px; }
+.av-fr.born { animation: av-born-file .8s; }
+@keyframes av-born-file { 0% { opacity: 0; background: color-mix(in srgb, var(--gain) 30%, transparent); } 40% { opacity: 1; } 100% { background: transparent; } }
+
+/* terminal: each command as a run with its result drawn */
+.av-terminal { padding: 0 2px; }
+.av-tr { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px 4px; }
+.av-tr + .av-tr { border-top: 1px solid var(--border); }
+.av-tr.born { animation: av-file-in .35s var(--ease); }
+@keyframes av-file-in { from { opacity: 0; transform: translateY(-4px); } }
+.av-tdot { width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box; display: grid; place-items: center; margin-top: 1px; border: 1.6px solid var(--rev); background: var(--rev); color: var(--ink); }
+.av-tdot .av-ic { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.av-tr[data-st="fail"] .av-tdot { background: color-mix(in srgb, var(--warm) 18%, var(--card)); border-color: var(--warm); color: var(--warm); }
+.av-tr[data-st="denied"] .av-tdot { background: color-mix(in srgb, var(--red) 14%, var(--card)); border-color: var(--red); color: var(--red); }
+.av-tr[data-st="run"] .av-tdot { background: var(--card); border: 2px solid color-mix(in srgb, var(--kc) 22%, transparent); border-top-color: var(--kc); animation: av-spin .9s linear infinite; }
+.av-tr[data-st="wait"] .av-tdot { background: color-mix(in srgb, var(--you) 7%, var(--card)); border: 1.6px dashed var(--you); }
+@keyframes av-spin { to { transform: rotate(360deg); } }
+.av-tmain { min-width: 0; }
+.av-tline { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.av-tkind { flex: none; font: 600 10px/15px var(--f-mono); color: color-mix(in srgb, var(--kc) 72%, var(--fg)); background: color-mix(in srgb, var(--kc) 12%, transparent); border: 1px solid color-mix(in srgb, var(--kc) 40%, transparent); border-radius: 999px; padding: 0 6px; }
+.av-tcmd { font: 500 11.5px var(--f-mono); color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-tr[data-st="denied"] .av-tcmd { text-decoration: line-through; color: var(--fg-3); }
+.av-tsum { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; margin-top: 6px; font: 500 10.5px var(--f-mono); color: var(--fg-2); }
+.av-tsum.muted { color: var(--fg-3); margin-top: 4px; }
+.av-tpips { display: inline-flex; gap: 2px; flex-wrap: wrap; }
+.av-tpips i { width: 4px; height: 11px; border-radius: 1px; background: var(--rev); transform-origin: bottom; }
+.av-tpips i.fail { background: var(--warm); }
+.av-tpips i.none { background: var(--card-3); box-shadow: inset 0 0 0 1px var(--fg-3); }
+.av-tr[data-st="fail"] .av-tlab { color: color-mix(in srgb, var(--warm) 80%, var(--fg)); }
+.av-tfail { margin-top: 6px; padding: 5px 8px; border-left: 2px solid var(--warm); background: color-mix(in srgb, var(--warm) 7%, transparent); border-radius: 0 6px 6px 0; font: 500 10.5px var(--f-mono); color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.av-tfail div:first-child { color: color-mix(in srgb, var(--warm) 80%, var(--fg)); }
+.av-trunbar { display: block; width: 120px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--kc), transparent) -60px 0 / 60px 100% no-repeat, var(--card-3); animation: av-scan 1.2s linear infinite; }
+@keyframes av-scan { to { background-position: 120px 0, 0 0; } }
+.av-tside { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; padding-top: 3px; }
+.av-tdur { width: 72px; height: 3px; border-radius: 2px; background: var(--card-3); overflow: hidden; }
+.av-tdur i { display: block; height: 100%; width: 0; background: var(--kc); opacity: .75; border-radius: 2px; transition: width .25s linear; }
+.av-tres { font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
+.av-tr[data-st="fail"] .av-tres { color: color-mix(in srgb, var(--warm) 80%, var(--fg)); }
+.av-tr[data-st="denied"] .av-tres { color: color-mix(in srgb, var(--red) 80%, var(--fg)); }
+.av-tr[data-st="wait"] .av-tres { color: var(--you); }
+
+/* browser: the browser server's calls, their action, target and time */
+.av-browser { font: 500 12px var(--f-mono); }
+.av-br { display: grid; grid-template-columns: minmax(86px, max-content) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px; border-radius: 6px; color: var(--fg-2); }
+.av-br.born { animation: av-file-in .35s var(--ease); }
+.av-ba { max-width: 150px; color: color-mix(in srgb, var(--c-browser) 75%, var(--fg)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-bt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.av-ct { color: var(--fg-3); }
+.av-br[data-st="run"] { background: color-mix(in srgb, var(--c-browser) 10%, transparent); }
+
+/* plan: the agent's task list, else a Fix's items as the node card draws them */
+.av-plan { --c: var(--c-act); display: flex; flex-direction: column; padding: 2px 0; }
+.av-pl-i { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; font-size: 13px; color: var(--fg); }
+.av-pl-i[data-st="done"] { color: var(--fg-2); }
+.av-pl-i .nc-mark { flex: none; margin-top: 0; }
+.av-pl-text { min-width: 0; overflow-wrap: anywhere; }
+.av-pl-i.born { animation: av-born-task 1.2s ease-out; }
+@keyframes av-born-task { 0% { background: color-mix(in srgb, var(--amber) 22%, transparent); transform: translateX(10px); } 30% { transform: none; } }
+.av-plan-fix { display: flex; flex-direction: column; gap: 12px; padding: 4px 6px; }
+
+@media (max-width: 560px) {
+  .av-head { padding: 14px 14px 12px; }
+  .av-title { font-size: 15.5px; }
+  .av-back { width: 30px; padding: 0; justify-content: center; }
+  .av-back span { display: none; }
+  .av-viz { padding: 10px 12px 2px; }
+  .av-lower { padding: 4px 14px 4px; }
+  .av-workspace { margin: 0 -14px; padding: 14px 14px 0; }
+  .av-trace { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .av-rl { display: none; }
+  /* the button's words stay its name, hidden as the visually-hidden rule hides them */
+  .av-follow-text { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .av-follow { padding: 0 8px; }
+  .av-tdur { width: 48px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .av-core-ring, .av-core-orbit, .av-node.running .n-orbit, .av-node.running .n-ring, .av-dots i, .av-segs i.run, .av-live[data-tone="wait"] .av-live-ic::after, .av-node.bump .n-core { animation: none !important; }
+  .av-node.waiting .n-ring, .av-tool.in, .av-tool.in .n-core, .av-tool.out .n-core, .av-beam.live .lz-flow, .av-beam.live .lz-glow { animation: none !important; }
+  .av-wtab.live .av-ld, .av-wtab.born, .av-fr.born, .av-tr.born, .av-tr[data-st="run"] .av-tdot, .av-trunbar, .av-br.born, .av-pl-i.born { animation: none !important; }
+  .av-word { transition: opacity .16s ease; }
+}

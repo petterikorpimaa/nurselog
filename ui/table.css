@@ -24,6 +24,10 @@
    agent or branch another view points at (the demo's .row.hl), fading with the row's background transition */
 :where(.agent-item.main) > .agent-row { background: rgba(255, 255, 255, .015); }
 .agent-item.hl > .agent-row { background: rgba(255, 255, 255, .05); }
+/* the agent whose agent view is open (decision 246): a quiet mark, no flash; a pointed row keeps its .hl background */
+.agent-item.current > .agent-row { box-shadow: inset 2px 0 0 var(--fg-2); }
+.agent-item.current:not(.hl) > .agent-row { background: rgba(255, 255, 255, .035); }
+.agent-item.dim.current .agent-row { opacity: .85; }
 
 /* Stream: the package pill */
 .stream-pill {
