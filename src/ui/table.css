@@ -147,6 +147,26 @@
 .report-text { white-space: pre-line; overflow-wrap: anywhere; max-height: 16em; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent; }
 .report-text b { margin-right: 2px; color: var(--fg); font: 600 12px var(--f-mono); }
 .details-files { display: flex; flex-direction: column; gap: 1px; font: 400 11px var(--f-mono); color: var(--fg-3); overflow-wrap: anywhere; }
+/* an agent's follow-up list under "Follow-ups" (decision 245): the node card's sections and items (.nc-section, .nc-item
+   in board.css), an item's whole text in --fg here; with the list the report text folds under "Full report", a heading
+   with the follow-ups toggle's padded hover target and trailing chevron that turns when open, and opens with the
+   details' own grid-rows transition, the text 6 px under the toggle and the next heading 12 px under it either way */
+.details-followups { display: flex; flex-direction: column; gap: 12px; }
+.details-followups .nc-text { display: block; overflow: visible; -webkit-line-clamp: none; color: var(--fg); }
+.report-toggle {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; border: 0; background: transparent;
+  padding: 6px; margin: -6px 0 -6px -6px; border-radius: 6px; cursor: pointer; text-align: left;
+}
+/* the padding stands in for the 6 px a heading after a part has above it, and the bottom margin takes back the padding
+   below it over the heading rules, so the text keeps the rhythm; positioned, so the open fold's top does not cover it */
+.details-report .report-toggle:not(:first-child) { margin: 0 0 -6px -6px; }
+.report-toggle:hover { background: var(--card-2); color: var(--fg-2); }
+.report-toggle svg { width: 11px; height: 11px; flex: none; transform: rotate(180deg); transition: transform .35s var(--ease); }
+.report-toggle[aria-expanded="true"] svg { transform: none; }
+.report-fold { display: grid; grid-template-rows: 0fr; margin-top: -6px; transition: grid-template-rows .4s var(--ease); }
+.report-fold.open { grid-template-rows: 1fr; }
+.report-clip { overflow: hidden; min-height: 0; padding-top: 0; transition: padding-top .4s var(--ease); }
+.report-fold.open .report-clip { padding-top: 6px; }
 
 /* the rows beyond the visible set: they open with a height transition under "Show all" */
 .agent-rows-more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease); }

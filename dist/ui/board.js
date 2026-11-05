@@ -665,6 +665,8 @@ var time = (at) => Date.parse(at);
 var compareText = (a, b) => Number(a > b) - Number(a < b);
 var shortBranch = (branch) => branch.replace(/^(feat|fix|chore|docs|refactor|test|perf|build|ci)\//, "");
 var ownValue = (map, key) => Object.hasOwn(map, key) ? map[key] : void 0;
+var LINE_SUFFIX = /(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L\d+)?)$/;
+var bareItemFile = (file) => file.trim().replace(LINE_SUFFIX, "").replace(/^(?:\.\/)+/, "");
 
 // src/model/progress.ts
 var PHASE_SHARES = { implement: [0.25, 0.5, 0.25], pr: [0.5, 0.5] };
@@ -1107,10 +1109,10 @@ var prepareOverview = (branches) => {
     const at = parseTime2(dot.mergedAt);
     return at === void 0 ? [] : [{ prNumber: dot.prNumber, branch: dot.branch, at, promotedTo: promotedTo(dot.prNumber) }];
   });
-  const lineOf2 = new Map(lines.map((line) => [line.name, line]));
+  const lineOf3 = new Map(lines.map((line) => [line.name, line]));
   const promotions = branches.promotions.flatMap((promotion) => {
     const at = parseTime2(promotion.mergedAt);
-    const line = lineOf2.get(promotion.target);
+    const line = lineOf3.get(promotion.target);
     if (at === void 0 || !line || line.tone === "trunk") {
       return [];
     }
@@ -6644,6 +6646,26 @@ var createChangelogView = (options) => {
   };
 };
 
+// src/ui/agent-followups.ts
+var compareFollowups = (a, b) => {
+  const byTime2 = (parseTime(a.at) ?? 0) - (parseTime(b.at) ?? 0);
+  return byTime2 !== 0 ? byTime2 : compareText(a.id, b.id);
+};
+var byBlockPlace = (agentId) => {
+  const prefix = `f-${agentId}-`;
+  const place2 = (followup) => {
+    const n2 = followup.id.startsWith(prefix) ? Number(followup.id.slice(prefix.length)) : Number.NaN;
+    return Number.isInteger(n2) ? n2 : Number.POSITIVE_INFINITY;
+  };
+  return (a, b) => place2(a) - place2(b) || (place2(a) === Number.POSITIVE_INFINITY ? compareFollowups(a, b) : 0);
+};
+var agentFollowups = (session, agentId) => {
+  return session.followups.filter((followup) => followup.origin.agentId === agentId).sort(byBlockPlace(agentId));
+};
+var isReviewer = (session, agent) => {
+  return agent.stage === "review" || session.rows.some((row2) => row2.reviewers.some((reviewer) => reviewer.agentId === agent.id));
+};
+
 // src/model/keys.ts
 var KEY_BEFORE = String.raw`(?:^|[^\w\\./-])`;
 var KEY_AFTER = String.raw`(?:$|[^\w/.]|\.(?:$|[^A-Za-z0-9]))`;
@@ -7457,10 +7479,24 @@ var budgetLines = (agent, totalUsd, whole) => {
     { label: "cost", text: cost(costUsd), ratio: share2, level: "ok", title: shareTitle }
   ];
 };
-var changedFiles2 = (agent, limit = 5) => {
+var changedFiles2 = (agent, limit = 5, named2 = /* @__PURE__ */ new Set()) => {
   const blockFiles = agent.report?.block?.files ?? [];
-  const all = blockFiles.length > 0 ? blockFiles : agent.filesChanged;
+  const listed = blockFiles.length > 0 ? blockFiles : agent.filesChanged;
+  const all = listed.filter((file) => !named2.has(bareItemFile(file)));
   return { files: all.slice(0, limit), more: Math.max(0, all.length - limit) };
+};
+var LIST_TYPES = ["fix", "improve", "issue"];
+var lineOf = (followup) => {
+  const { id, text: text2, file, category } = followup;
+  return { id, text: text2, file, category };
+};
+var followupSections = (own) => {
+  const sectionOf2 = (type) => ({ type, items: own.filter((followup) => followup.type === type).map(lineOf) });
+  return LIST_TYPES.map(sectionOf2).filter((section2) => section2.items.length > 0);
+};
+var itemFiles = (own) => {
+  const files = own.map((followup) => bareItemFile(followup.file ?? ""));
+  return new Set(files.filter((file) => file !== ""));
 };
 var workingOn = (agent) => {
   const permission = openPermission(agent);
@@ -7505,17 +7541,20 @@ var sessionAgentDetails = (session, agent, full, load2, typical) => {
   const budget = budgetLines(agent, session.costUsd, "the session's cost");
   const heading2 = active ? "Working on" : "Report";
   const progress = progressLine(session, agent, state, typical);
+  const own = agentFollowups(session, agent.id);
+  const followups = followupSections(own);
   if (source === void 0) {
     const line = agent.report ? reportText(agent.report.text) : "";
     const body2 = active ? workingOn(agent) : { tool: "", text: line || "No report." };
     const note2 = load2 === "failed" ? DETAILS_FAILED : DETAILS_LOADING;
-    return { calls: [], budget, heading: heading2, ...body2, files: [], moreFiles: 0, note: note2, progress };
+    return { calls: [], budget, heading: heading2, ...body2, files: [], moreFiles: 0, followups, note: note2, progress };
   }
-  const { files, more } = changedFiles2(source);
+  const named2 = isReviewer(session, agent) ? itemFiles(own) : /* @__PURE__ */ new Set();
+  const { files, more } = changedFiles2(source, 5, named2);
   const report = source.report ? reportText(source.report.text) : "";
   const body = active ? workingOn(agent) : { tool: "", text: report || "No report." };
   const note = load2 === "failed" ? DETAILS_FAILED : "";
-  return { calls: recentCalls(source), budget, heading: heading2, ...body, files, moreFiles: more, note, progress };
+  return { calls: recentCalls(source), budget, heading: heading2, ...body, files, moreFiles: more, followups, note, progress };
 };
 var detailKey = (agent) => {
   const last = agent.recent.at(-1);
@@ -8455,13 +8494,13 @@ var createReplyCard = () => {
   };
 };
 var turnCount = 0;
-var lineOf = (className, who, text2) => {
+var lineOf2 = (className, who, text2) => {
   const line = el("span", className);
   line.append(el("span", "main-turn-who", who), el("span", "main-turn-first", text2));
   return line;
 };
 var noteLine = (note) => {
-  return note.kind === "report" ? el("span", "main-turn-line report", note.text) : lineOf("main-turn-line you none", "you", note.text);
+  return note.kind === "report" ? el("span", "main-turn-line report", note.text) : lineOf2("main-turn-line you none", "you", note.text);
 };
 var createTurnCard = (reducedMotion) => {
   turnCount += 1;
@@ -8541,9 +8580,9 @@ var createTurnCard = (reducedMotion) => {
       const key = JSON.stringify([turn.developer.map((message) => [message.who, message.line]), turn.note, entry?.label, entry?.firstLine]);
       if (linesKey !== key) {
         linesKey = key;
-        const you = turn.developer.map((message) => lineOf("main-turn-line you", message.who, message.line));
+        const you = turn.developer.map((message) => lineOf2("main-turn-line you", message.who, message.line));
         const note = turn.note ? [noteLine(turn.note)] : [];
-        const main = entry ? [lineOf("main-turn-line main", `main \xB7 ${entry.label}`, entry.firstLine)] : [];
+        const main = entry ? [lineOf2("main-turn-line main", `main \xB7 ${entry.label}`, entry.firstLine)] : [];
         lines.replaceChildren(...you, ...note, ...main);
       }
       fillBubbles(group, bubbles, turn.developer, void 0, reducedMotion);
@@ -14280,10 +14319,6 @@ var WORDS = {
 };
 var flyText = (type) => WORDS[type].fly;
 var flyColor = (type) => WORDS[type].color;
-var compareFollowups = (a, b) => {
-  const byTime2 = (parseTime(a.at) ?? 0) - (parseTime(b.at) ?? 0);
-  return byTime2 !== 0 ? byTime2 : compareText(a.id, b.id);
-};
 var followupColumns = (followups, expanded = /* @__PURE__ */ new Set()) => {
   const ordered = [...followups].sort(compareFollowups);
   return FOLLOWUP_TYPES.map((type) => {
@@ -14321,6 +14356,31 @@ var followupIcon = (type) => {
     icon2.append(svgEl("path", { ...wrench2, "stroke-width": 1.4, "stroke-linejoin": "round" }));
   }
   return icon2;
+};
+var SECTION_TITLES = { fix: "Fixes", improve: "Improvements", issue: "Open issues" };
+var followupSection = (type, count) => {
+  const section2 = el("div", "nc-section");
+  setVars(section2, { "--c": flyColor(type) });
+  const heading2 = el("h4");
+  heading2.append(followupIcon(type), el("span", "nc-section-title", SECTION_TITLES[type]), el("span", "nc-count", String(count)));
+  const list = el("ul", "nc-list");
+  section2.append(heading2, list);
+  return { section: section2, list };
+};
+var followupItem = (item2) => {
+  const entry = el("li", "nc-item");
+  entry.append(el("p", "nc-text", item2.text));
+  if (item2.file !== void 0 || item2.category !== void 0) {
+    const file = el("p", "nc-file");
+    if (item2.file !== void 0) {
+      file.append(el("code", void 0, item2.file));
+    }
+    if (item2.category !== void 0) {
+      file.append(el("span", void 0, item2.category));
+    }
+    entry.append(file);
+  }
+  return entry;
 };
 var branchColor = (session, branch, context) => {
   const row2 = session.rows.find((entry) => entry.branch === branch);
@@ -15133,14 +15193,63 @@ var budgetSection = (lines) => {
   section2.append(heading("Budget"), list);
   return section2;
 };
-var reportSection = (model) => {
-  const section2 = el("div", "details-report");
+var followupList = (sections) => {
+  const list = el("div", "details-followups");
+  for (const { type, items } of sections) {
+    const { section: section2, list: entries } = followupSection(type, items.length);
+    entries.append(...items.map((item2) => followupItem(item2)));
+    list.append(section2);
+  }
+  return list;
+};
+var createReportFold = (id) => {
+  const toggle = el("button", "details-heading report-toggle");
+  toggle.type = "button";
+  toggle.setAttribute("aria-controls", id);
+  toggle.append(el("span", void 0, "Full report"), chevronIcon());
+  const part = el("div", "report-fold");
+  part.id = id;
+  const clip3 = el("div", "report-clip");
+  part.append(clip3);
+  const setOpen2 = (open2) => {
+    toggle.setAttribute("aria-expanded", String(open2));
+    part.classList.toggle("open", open2);
+    part.inert = !open2;
+  };
+  setOpen2(false);
+  toggle.addEventListener("click", () => setOpen2(toggle.getAttribute("aria-expanded") !== "true"));
+  return { toggle, part, clip: clip3 };
+};
+var placeParts = (parent, parts) => {
+  for (const child of Array.from(parent.children)) {
+    if (!parts.includes(child)) {
+      child.remove();
+    }
+  }
+  parts.forEach((part, index) => {
+    const at = parent.children[index] ?? null;
+    if (at !== part) {
+      parent.insertBefore(part, at);
+    }
+  });
+};
+var reportParts = (model, fold) => {
   const body = el("p", "report-text");
   if (model.tool) {
     body.append(el("b", void 0, model.tool), " ");
   }
   body.append(model.text);
-  section2.append(heading(model.heading), body);
+  const followups = model.followups ?? [];
+  const list = followups.length > 0 ? [heading("Follow-ups"), followupList(followups)] : [];
+  const parts = [];
+  if (list.length > 0 && model.heading === "Report") {
+    if (fold.clip.firstElementChild?.textContent !== body.textContent) {
+      fold.clip.replaceChildren(body);
+    }
+    parts.push(...list, fold.toggle, fold.part);
+  } else {
+    parts.push(heading(model.heading), body, ...list);
+  }
   if (model.files.length > 0) {
     const files = el("div", "details-files");
     for (const file of model.files) {
@@ -15149,9 +15258,9 @@ var reportSection = (model) => {
     if (model.moreFiles > 0) {
       files.append(el("span", "files-more", `and ${model.moreFiles} more`));
     }
-    section2.append(heading("Files changed"), files);
+    parts.push(heading("Files changed"), files);
   }
-  return section2;
+  return parts;
 };
 var createAgentDetails = (id) => {
   const element = el("div", "agent-details");
@@ -15166,6 +15275,8 @@ var createAgentDetails = (id) => {
   const progress = el("div", "details-progress");
   const progressText2 = el("p", "report-text");
   progress.append(heading("Progress"), progressText2);
+  const report = el("div", "details-report");
+  const fold = createReportFold(`${id}-report`);
   let calls;
   let signature = "";
   return {
@@ -15185,7 +15296,8 @@ var createAgentDetails = (id) => {
           delete note.dataset.tone;
         }
         calls = callsSection(model.calls, note);
-        inner.replaceChildren(calls, budgetSection(model.budget), reportSection(model));
+        placeParts(report, reportParts(model, fold));
+        placeParts(inner, [calls, budgetSection(model.budget), report]);
       }
       if (line === "") {
         progress.remove();
@@ -16082,14 +16194,6 @@ var fixCard = (parts, fix, row2) => {
 };
 var NO_ITEMS = "No items: the review named no file.";
 var NO_ITEMS_CONTINUED = "No items.";
-var byBlockPlace = (agentId) => {
-  const prefix = `f-${agentId}-`;
-  const place2 = (followup) => {
-    const n2 = followup.id.startsWith(prefix) ? Number(followup.id.slice(prefix.length)) : Number.NaN;
-    return Number.isInteger(n2) ? n2 : Number.POSITIVE_INFINITY;
-  };
-  return (a, b) => place2(a) - place2(b) || (place2(a) === Number.POSITIVE_INFINITY ? compareFollowups(a, b) : 0);
-};
 var reviewerCard = (parts) => {
   const { session, agent, leg } = parts;
   const verdict = VERDICTS2[parts.state] ?? stateChip(parts.state, "var(--rev)");
@@ -16097,7 +16201,7 @@ var reviewerCard = (parts) => {
   const reportedAt = agent.report === void 0 ? "" : timeOfDay(parseTime(agent.report.at ?? agent.endedAt));
   const time2 = elapsed(totalMs(parts).ms);
   const meta = joinMeta([modelName(agent.model ?? ""), time2, reportedAt === "" ? "" : `reported ${reportedAt}`, cost(agent.budget.costUsd)]);
-  const own = session.followups.filter((followup) => followup.origin.agentId === agent.id).sort(byBlockPlace(agent.id));
+  const own = agentFollowups(session, agent.id);
   const blocks = [];
   if (parts.running) {
     blocks.push(nowBlock(parts));
@@ -16179,9 +16283,6 @@ var agentCard = (parts, kind, pr, prRow) => {
     model.pr = { number: pr.number, url: pr.url };
   }
   return model;
-};
-var isReviewer = (session, agent) => {
-  return agent.stage === "review" || session.rows.some((row2) => row2.reviewers.some((reviewer) => reviewer.agentId === agent.id));
 };
 var nodeCardModel = (session, target, config, clock) => {
   const agent = ownValue(session.agents, target.agentId);
@@ -16292,15 +16393,9 @@ var markIcon2 = (mark) => {
 var WEB_URL = /^https?:\/\//i;
 var CARD_NODE = '.session-graph [aria-haspopup="dialog"]';
 var MARK_WORDS = { edited: "edited", working: "working on", todo: "to do" };
-var SECTION_TITLES = { fix: "Fixes", improve: "Improvements" };
 var sectionOf = (type, count, lists) => {
-  const section2 = el("div", "nc-section");
-  setVars(section2, { "--c": flyColor(type) });
-  const heading2 = el("h4");
-  heading2.append(followupIcon(type), el("span", "nc-section-title", SECTION_TITLES[type]), el("span", "nc-count", String(count)));
-  const list = el("ul", "nc-list");
+  const { section: section2, list } = followupSection(type, count);
   lists.set(section2, list);
-  section2.append(heading2, list);
   return section2;
 };
 var chipOf = (chip) => {
@@ -16537,21 +16632,6 @@ var createNodeCard = (context, options) => {
       return { key: `items:${block.type}`, sig: String(block.rows.length), make, items };
     }
     return { key: block.kind, sig: JSON.stringify(block), make };
-  };
-  const followupItem = (item2) => {
-    const entry = el("li", "nc-item");
-    entry.append(el("p", "nc-text", item2.text));
-    if (item2.file !== void 0 || item2.category !== void 0) {
-      const file = el("p", "nc-file");
-      if (item2.file !== void 0) {
-        file.append(el("code", void 0, item2.file));
-      }
-      if (item2.category !== void 0) {
-        file.append(el("span", void 0, item2.category));
-      }
-      entry.append(file);
-    }
-    return entry;
   };
   const fade = () => {
     const top = body.scrollTop;
