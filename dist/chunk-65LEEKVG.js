@@ -358,6 +358,122 @@ var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var TASK_ID_CHARS = 39;
 var isTaskId = (value) => typeof value === "string" && value.length <= TASK_ID_CHARS && /^[A-Za-z][\w-]*$/.test(value);
+var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var PATCH_TOOLS = /* @__PURE__ */ new Set(["Edit", "MultiEdit", "Write"]);
+var lineCount = (text) => {
+  let lines = 0;
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) {
+    lines += 1;
+  }
+  return text === "" || text.endsWith("\n") ? lines : lines + 1;
+};
+var patchLines = (tool, response) => {
+  if (!PATCH_TOOLS.has(tool) || !isObject(response)) {
+    return void 0;
+  }
+  const created = tool === "Write" && response.type === "create";
+  if (created && typeof response.content === "string") {
+    return { linesAdded: lineCount(response.content), linesRemoved: 0, created: true };
+  }
+  if (!Array.isArray(response.structuredPatch)) {
+    return void 0;
+  }
+  let added = 0;
+  let removed = 0;
+  for (const hunk of response.structuredPatch) {
+    const lines = isObject(hunk) && Array.isArray(hunk.lines) ? hunk.lines : [];
+    for (const line of lines) {
+      if (typeof line === "string" && line.startsWith("+")) {
+        added += 1;
+      } else if (typeof line === "string" && line.startsWith("-")) {
+        removed += 1;
+      }
+    }
+  }
+  const counts = { linesAdded: added, linesRemoved: removed };
+  return created ? { ...counts, created: true } : counts;
+};
+var BROWSER_TARGET_CHARS = 120;
+var BROWSER_TARGET_FIELDS = ["element", "selector", "uid", "ref"];
+var BROWSER_SERVER = /playwright|puppeteer|browser|chrome|devtools|selenium|webdriver|stagehand/;
+var isBrowserTool = (tool) => {
+  if (typeof tool !== "string" || !tool.startsWith("mcp__")) {
+    return false;
+  }
+  const at = tool.indexOf("__", 5);
+  if (at <= 5) {
+    return false;
+  }
+  return BROWSER_SERVER.test(tool.slice(5, at).toLowerCase()) || tool.slice(at + 2).toLowerCase().startsWith("browser_");
+};
+var TOKEN_SEGMENT_CHARS = 8;
+var DIGIT_SEGMENT_CHARS = 6;
+var isTokenSegment = (segment) => segment.length >= TOKEN_SEGMENT_CHARS && /\d/.test(segment) || segment.length >= DIGIT_SEGMENT_CHARS && /^\d+$/.test(segment);
+var INVISIBLE = /[​-‏‪-‮⁦-⁩﻿]/g;
+var keptPath = (pathname) => {
+  let path;
+  try {
+    path = stripControl(decodeURIComponent(pathname)).replace(INVISIBLE, "");
+  } catch {
+    return "/";
+  }
+  if (/[?=&#%]|:\/\//.test(path)) {
+    return "/";
+  }
+  return path.split("/").map((segment) => isTokenSegment(segment) ? "\u2026" : segment).join("/");
+};
+var URL_SCHEME2 = /^([A-Za-z][A-Za-z0-9+.-]{0,31}):/;
+var ONLY_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]{0,31}:$/;
+var schemeOnly = (text) => {
+  const scheme = URL_SCHEME2.exec(text)?.[1];
+  return scheme === void 0 ? void 0 : `${scheme.toLowerCase()}:`;
+};
+var parseUrl = (text) => {
+  try {
+    return new URL(text);
+  } catch {
+    return void 0;
+  }
+};
+var browserUrl = (url) => {
+  if (typeof url !== "string") {
+    return void 0;
+  }
+  const text = url.trim();
+  if (ONLY_SCHEME.test(text)) {
+    return text.toLowerCase();
+  }
+  if (!text.includes("://")) {
+    const authority = /^[^/\\?#]*/.exec(text)?.[0] ?? "";
+    if (authority.includes("@")) {
+      return void 0;
+    }
+    if (authority.endsWith(":")) {
+      return schemeOnly(text);
+    }
+    const bare = parseUrl(`http://${text}`);
+    return bare ? `${bare.host}${keptPath(bare.pathname)}` : void 0;
+  }
+  const parsed = parseUrl(text);
+  if (parsed && (parsed.protocol === "http:" || parsed.protocol === "https:")) {
+    return `${parsed.origin}${keptPath(parsed.pathname)}`;
+  }
+  return schemeOnly(text);
+};
+var browserInput = (input, prepare = (text) => text) => {
+  const kept = {};
+  const fields = isObject(input) ? input : {};
+  const url = browserUrl(fields.url);
+  if (url !== void 0) {
+    kept.url = url;
+  }
+  for (const field of BROWSER_TARGET_FIELDS) {
+    if (typeof fields[field] === "string") {
+      kept[field] = prepare(fields[field]).slice(0, BROWSER_TARGET_CHARS);
+    }
+  }
+  return kept;
+};
 
 // hooks/lib.mjs
 var HOOK_DEFAULTS = { spool: { dir: "~/.local/share/nurselog", maxLineBytes: 65536, keepDays: 14 } };
@@ -557,7 +673,7 @@ var userOnlyWarning = (key) => `${stripControl(key)} is honoured only in the use
 var dropUserOnlyKeys = (file) => {
   const dropped = [];
   if ("spool" in file) {
-    const keys = isObject(file.spool) ? Object.keys(file.spool).map((key) => `spool.${key}`) : ["spool"];
+    const keys = isObject2(file.spool) ? Object.keys(file.spool).map((key) => `spool.${key}`) : ["spool"];
     dropped.push(...keys);
     delete file.spool;
   }
@@ -565,7 +681,7 @@ var dropUserOnlyKeys = (file) => {
     delete file.pricesFrom;
     dropped.push("pricesFrom");
   }
-  if (isObject(file.insights) && "keepDays" in file.insights) {
+  if (isObject2(file.insights) && "keepDays" in file.insights) {
     delete file.insights.keepDays;
     dropped.push("insights.keepDays");
   }
@@ -615,16 +731,16 @@ var readConfigText = (found) => {
 var parseObject = (text) => {
   try {
     const value = JSON.parse(text);
-    return isObject(value) ? value : {};
+    return isObject2(value) ? value : {};
   } catch {
     return {};
   }
 };
 var mergeRoles = (roles) => {
   const merged = Object.assign(/* @__PURE__ */ Object.create(null), DEFAULT_ROLES);
-  for (const [type, given] of Object.entries(isObject(roles) ? roles : {})) {
-    const role = isObject(given) && given.stage === LEGACY_ROLE_STAGE ? { ...given, stage: "implement" } : given;
-    merged[type] = isObject(role) && isObject(merged[type]) ? { ...merged[type], ...role } : role;
+  for (const [type, given] of Object.entries(isObject2(roles) ? roles : {})) {
+    const role = isObject2(given) && given.stage === LEGACY_ROLE_STAGE ? { ...given, stage: "implement" } : given;
+    merged[type] = isObject2(role) && isObject2(merged[type]) ? { ...merged[type], ...role } : role;
   }
   return merged;
 };
@@ -634,10 +750,10 @@ var readHookConfig = (root) => {
   const found = text === void 0 ? void 0 : located;
   const file = text === void 0 ? {} : parseObject(text);
   const dropped = found?.kind === "repository" ? dropUserOnlyKeys(file) : [];
-  const stateFile = isObject(file.server) && file.server.stateFile !== void 0 ? [STATE_FILE_WARNING] : [];
-  const port = isObject(file.server) && file.server.port !== void 0 ? [SERVER_PORT_WARNING] : [];
+  const stateFile = isObject2(file.server) && file.server.stateFile !== void 0 ? [STATE_FILE_WARNING] : [];
+  const port = isObject2(file.server) && file.server.port !== void 0 ? [SERVER_PORT_WARNING] : [];
   const warnings = [...stateFile, ...port, ...dropped.map(userOnlyWarning)];
-  const spool = { ...HOOK_DEFAULTS.spool, ...isObject(file.spool) ? file.spool : {} };
+  const spool = { ...HOOK_DEFAULTS.spool, ...isObject2(file.spool) ? file.spool : {} };
   const roles = mergeRoles(file.roles);
   const problems = hookConfigProblems({ spool }, root);
   if (problems.length === 0) {
@@ -656,10 +772,10 @@ var configKeepDays = (path, section = "spool") => {
   } catch (error) {
     throw error instanceof SyntaxError ? new Error(`${path} is not a JSON object`) : error;
   }
-  if (!isObject(file)) {
+  if (!isObject2(file)) {
     throw new Error(`${path} is not a JSON object`);
   }
-  const keepDays = Object.hasOwn(file, section) && isObject(file[section]) ? file[section].keepDays : void 0;
+  const keepDays = Object.hasOwn(file, section) && isObject2(file[section]) ? file[section].keepDays : void 0;
   if (keepDays === void 0) {
     return void 0;
   }
@@ -961,7 +1077,7 @@ var ERROR_LINE = 300;
 var MARKER_TEXT = 300;
 var ANSWER_TEXT = 500;
 var ANSWERS_CAP = 10;
-var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isSecretFileWord = (word) => {
   const directories = word.toLowerCase().split("/");
   const file = directories.pop();
@@ -987,14 +1103,24 @@ var withoutBodies = (input) => {
     if (BODY_FIELDS.includes(field)) {
       slim[`${field}Chars`] = typeof value === "string" ? value.length : JSON.stringify(value ?? null).length;
     } else if (field === "edits" && Array.isArray(value)) {
-      slim.edits = value.map((edit) => isObject(edit) ? withoutBodies(edit) : edit);
+      slim.edits = value.map((edit) => isObject2(edit) ? withoutBodies(edit) : edit);
     } else if (field !== "__proto__") {
       slim[field] = value;
     }
   }
   return slim;
 };
-var slimInput = (input, sensitive) => {
+var NURSELOG_TOOL_PREFIX = "mcp__plugin_nurselog_nurselog__";
+var MCP_INPUT_FIELDS = ["pageId", "issueIdOrKey"];
+var MCP_INPUT_CHARS = 200;
+var isOtherMcpTool = (tool) => typeof tool === "string" && tool.startsWith("mcp__") && !tool.startsWith(NURSELOG_TOOL_PREFIX);
+var slimInput = (input, sensitive, tool) => {
+  if (isOtherMcpTool(tool)) {
+    const fields = MCP_INPUT_FIELDS.filter((field) => typeof input[field] === "string");
+    const read = Object.fromEntries(fields.map((field) => [field, redactString(input[field]).slice(0, MCP_INPUT_CHARS)]));
+    const kept2 = { ...read, ...isBrowserTool(tool) ? browserInput(input, redactString) : {} };
+    return sensitive ? { ...kept2, sensitive: true } : kept2;
+  }
   if (!sensitive) {
     return withoutBodies(input);
   }
@@ -1018,7 +1144,7 @@ var textOf = (value) => {
   if (!Array.isArray(value)) {
     return "";
   }
-  return value.map((item) => isObject(item) && typeof item.text === "string" ? item.text : "").join("\n");
+  return value.map((item) => isObject2(item) && typeof item.text === "string" ? item.text : "").join("\n");
 };
 var firstLine = (value) => redactString(textOf(value)).split("\n").find((line) => line.trim())?.trim().slice(0, ERROR_LINE);
 var answerText = (text) => redactString(text).slice(0, ANSWER_TEXT);
@@ -1027,24 +1153,24 @@ var optionLabel = (option) => {
   if (typeof option === "string") {
     return option;
   }
-  return isObject(option) && typeof option.label === "string" ? option.label : void 0;
+  return isObject2(option) && typeof option.label === "string" ? option.label : void 0;
 };
 var optionLabels = (input, response) => {
-  const questions = [input.questions, response.questions].filter(Array.isArray).flat().filter(isObject);
+  const questions = [input.questions, response.questions].filter(Array.isArray).flat().filter(isObject2);
   const options = questions.flatMap((question) => Array.isArray(question.options) ? question.options : []);
   return new Set(options.map(optionLabel).filter((label) => label !== void 0));
 };
 var isOptionAnswer = (answer, labels) => labels.has(answer) || answer.split(", ").every((part) => labels.has(part));
 var keptAnswers = (input, response) => {
-  if (!isObject(response.answers)) {
+  if (!isObject2(response.answers)) {
     return void 0;
   }
-  const annotations = isObject(response.annotations) ? response.annotations : {};
+  const annotations = isObject2(response.annotations) ? response.annotations : {};
   const labels = optionLabels(input, response);
   const answered = Object.entries(response.answers).filter(([, answer]) => typeof answer === "string").slice(0, ANSWERS_CAP);
   const kept = answered.map(([question, answer]) => {
     const annotation = Object.hasOwn(annotations, question) ? annotations[question] : void 0;
-    const notes = isObject(annotation) ? annotation.notes : void 0;
+    const notes = isObject2(annotation) ? annotation.notes : void 0;
     const secret = SECRET_QUESTION.test(question);
     const typed = secret && !isOptionAnswer(answer, labels);
     const item = { question: answerText(question), answer: typed ? REDACTED : answerText(answer) };
@@ -1059,15 +1185,16 @@ var slimResponse = (response, tool, input, sensitive) => {
   const command = typeof input.command === "string" ? input.command : "";
   const slim = { responseChars: JSON.stringify(response ?? null).length };
   if (MARKER_TOOL.test(tool)) {
-    slim.text = redactString(textOf(isObject(response) ? response.content : response)).slice(0, MARKER_TEXT);
-    if (isObject(response) && typeof response.isError === "boolean") {
+    slim.text = redactString(textOf(isObject2(response) ? response.content : response)).slice(0, MARKER_TEXT);
+    if (isObject2(response) && typeof response.isError === "boolean") {
       slim.isError = response.isError;
     }
   }
-  if (!isObject(response)) {
+  if (!isObject2(response)) {
     return slim;
   }
-  for (const field of RESPONSE_SCALARS) {
+  const withheld = isOtherMcpTool(tool);
+  for (const field of RESPONSE_SCALARS.filter((name) => !(withheld && name === "status"))) {
     const value = response[field];
     if (typeof value === "boolean" || typeof value === "number" || typeof value === "string" && value.length <= 200) {
       slim[field] = value;
@@ -1076,11 +1203,12 @@ var slimResponse = (response, tool, input, sensitive) => {
   if (tool === "Bash" && isTaskId(response.backgroundTaskId)) {
     slim.backgroundTaskId = response.backgroundTaskId;
   }
+  Object.assign(slim, patchLines(tool, response));
   if (sensitive) {
     slim.sensitive = true;
     return slim;
   }
-  const failed = response.is_error === true || typeof response.error === "string" && response.error !== "";
+  const failed = !withheld && (response.is_error === true || typeof response.error === "string" && response.error !== "");
   const error = failed ? firstLine(response.error || response.stderr || response.content) : void 0;
   if (error) {
     slim.error = error;
@@ -1097,8 +1225,8 @@ var slimResponse = (response, tool, input, sensitive) => {
   }
   return slim;
 };
-var slimFailureError = (error, sensitive) => {
-  if (sensitive || typeof error !== "string") {
+var slimFailureError = (error, withheld) => {
+  if (withheld || typeof error !== "string") {
     return void 0;
   }
   return redactString(error).slice(0, FAILURE_ERROR_CHARS);
@@ -1109,16 +1237,18 @@ var minimizePayload = (payload) => {
   if (payload.tool_input === void 0 && payload.tool_response === void 0 && !failure && !denial) {
     return payload;
   }
-  const input = isObject(payload.tool_input) ? payload.tool_input : {};
+  const input = isObject2(payload.tool_input) ? payload.tool_input : {};
   const sensitive = touchesSecret(input);
+  const withheld = isOtherMcpTool(payload.tool_name);
   const slim = { ...payload };
+  delete slim.reasonChars;
   if (typeof payload.error === "string") {
     slim.errorChars = payload.error.length;
   } else {
     delete slim.errorChars;
   }
   if (payload.error !== void 0) {
-    const error = slimFailureError(payload.error, sensitive);
+    const error = slimFailureError(payload.error, sensitive || withheld);
     if (error === void 0) {
       delete slim.error;
     } else {
@@ -1126,12 +1256,15 @@ var minimizePayload = (payload) => {
     }
   }
   if (payload.tool_input !== void 0) {
-    slim.tool_input = slimInput(input, sensitive);
+    slim.tool_input = slimInput(input, sensitive, payload.tool_name);
   }
   if (payload.tool_response !== void 0) {
     slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === "string" ? payload.tool_name : "", input, sensitive);
   }
-  if (denial) {
+  if (denial && withheld) {
+    delete slim.reason;
+    slim.reasonChars = payload.reason.length;
+  } else if (denial) {
     slim.reason = redactString(payload.reason, true);
   }
   return slim;
@@ -1428,7 +1561,7 @@ var readRepositoryRecord = (path) => {
   } catch {
     return void 0;
   }
-  const valid = isObject(record) && typeof record.root === "string" && isAbsolute(record.root);
+  const valid = isObject2(record) && typeof record.root === "string" && isAbsolute(record.root);
   return valid ? { root: record.root } : void 0;
 };
 var recordedRootValid = (root, hash) => {
@@ -2796,13 +2929,20 @@ var stringFields = (data, required, optional = [], prefix = "data") => {
   const wrong = optional.find((key) => !isOptional(data[key], isString));
   return wrong ? `${prefix}.${wrong} must be a string` : void 0;
 };
-var INPUT_STRINGS = ["command", "description", "filePath", "pattern", "path", "glob", "subagentType", "model", "prompt", "message", "name", "pageId", "issueIdOrKey", "taskId"];
+var INPUT_STRINGS = ["command", "description", "filePath", "pattern", "path", "glob", "subagentType", "model", "prompt", "message", "name", "pageId", "issueIdOrKey", "url", "element", "taskId"];
 var isQuestionList = (value) => Array.isArray(value) && value.every((item) => isFields(item) && isString(item.question) && isOptional(item.options, isStringList2));
 var isQuestionAnswer = (item) => isFields(item) && isString(item.question) && isString(item.answer) && isOptional(item.notes, isString);
 var toolPostProblem = (data) => {
   const problem = stringFields(data, ["toolUseId", "tool"], ["stdoutTail", "backgroundTaskId", "agentId", "resolvedModel"]);
   const answers = isOptional(data.answers, (value) => Array.isArray(value) && value.every(isQuestionAnswer));
-  return problem ?? (answers ? void 0 : "data.answers must be a list of { question, answer, notes }");
+  if (problem || !answers) {
+    return problem ?? "data.answers must be a list of { question, answer, notes }";
+  }
+  const lines = ["linesAdded", "linesRemoved"].find((key) => !isOptional(data[key], isCount));
+  if (lines) {
+    return `data.${lines} must be a whole number of at least 0`;
+  }
+  return isOptional(data.created, isBoolean2) ? void 0 : "data.created must be a boolean";
 };
 var toolInputProblem = (input) => {
   if (!isFields(input)) {
@@ -2975,6 +3115,8 @@ var DATA_CHECKS = {
   permission: (data) => stringFields(data, ["tool"]) ?? toolInputProblem(data.input),
   "tool.denied": (data) => stringFields(data, ["toolUseId", "tool", "reason"]),
   "agent.stop": (data) => stringFields(data, ["lastMessage"], ["transcriptPath"]),
+  "task.created": (data) => stringFields(data, ["taskId"], ["subject"]),
+  "task.completed": (data) => stringFields(data, ["taskId"], ["subject"]),
   "turn.stop": turnStopProblem,
   cwd: (data) => stringFields(data, ["to"]),
   "model.switch": (data) => stringFields(data, [], ["model"]),
@@ -3078,7 +3220,7 @@ var FIELDS = {
 };
 var STRINGS = ["run", "note", "gate", "state", "text", "context", "node", "answer", "relays"];
 var STREAM_FIELDS = ["id", "package", "after", "model"];
-var isObject2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isObject3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var isSet = (value) => value !== void 0 && value !== null;
 var isStringList3 = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
 var defined = (fields) => Object.fromEntries(Object.entries(fields).filter(([, value]) => isSet(value)));
@@ -3096,7 +3238,7 @@ var lengthProblem = (input, caps, nameOf) => {
 };
 var streamInput = (item, index, caps) => {
   const prefix = `streams[${index}]`;
-  if (!isObject2(item)) {
+  if (!isObject3(item)) {
     return `${prefix} must be an object`;
   }
   const problem = fieldProblem(item, STREAM_FIELDS, ["id", "package", "model"], `${prefix}.`);
@@ -3191,7 +3333,7 @@ var validateMarkerInput = (kind, input, names = FIELD_NAMES, { caps = true } = {
   if (!check) {
     return { error: "a marker is plan, gate or question" };
   }
-  if (!isObject2(input)) {
+  if (!isObject3(input)) {
     return { error: `${kind} needs an object with its fields` };
   }
   const long = caps ? lengthProblem(input, TEXT_CAPS, (key) => names[key]) : void 0;
@@ -3205,12 +3347,13 @@ var num = (value) => typeof value === "number" ? value : void 0;
 var amount = (value) => isAmount(value) ? value : void 0;
 var bool = (value) => typeof value === "boolean" ? value : void 0;
 var cap = (value, max) => (str(value) ?? "").slice(0, max);
-var isObject3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var objects = (value) => Array.isArray(value) ? value.filter(isObject3) : [];
+var isObject4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var objects = (value) => Array.isArray(value) ? value.filter(isObject4) : [];
 var STOP_MESSAGE_CAP = 8e3;
 var PEER_NAME_CAP = 100;
 var PEER_LINE_CHARS = 300;
 var ANSWER_TEXT_CAP = 500;
+var TASK_ID_CAP = 100;
 var DENIAL_REASON_CAP = 500;
 var BASH_COMMAND_CAP = 16e3;
 var ANSWERS_CAP2 = 10;
@@ -3234,6 +3377,18 @@ var ABSOLUTE_PATH = /(?<![\w.~/-])(?:~\/|\/)(?:[\w.@-]+\/)+[\w.@-]*/g;
 var findAbsolutePaths = (text) => [...new Set(text.match(ABSOLUTE_PATH) ?? [])];
 var taskIdOf = (value) => isTaskId(value) && !isReservedKey(value) ? value : void 0;
 var FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
+var browserSummary = (input) => {
+  const kept = browserInput(input);
+  const element = BROWSER_TARGET_FIELDS.map((field) => kept[field]).find((value) => value !== void 0 && value !== "");
+  return { url: kept.url, element };
+};
+var editLines = (tool, result) => {
+  if (!PATCH_TOOLS.has(tool) || !isCount(result.linesAdded) || !isCount(result.linesRemoved)) {
+    return patchLines(tool, result);
+  }
+  const counts = { linesAdded: result.linesAdded, linesRemoved: result.linesRemoved };
+  return result.created === true ? { ...counts, created: true } : counts;
+};
 var summarizeToolInput = (tool, input) => {
   if (tool === "Bash") {
     return { command: cap(input.command, BASH_COMMAND_CAP), description: str(input.description), runInBackground: input.run_in_background === true || void 0 };
@@ -3271,6 +3426,9 @@ var summarizeToolInput = (tool, input) => {
   }
   if (tool === "Skill" || tool === "SlashCommand") {
     return { name: str(input.skill) ?? str(input.command) ?? str(input.name) };
+  }
+  if (isBrowserTool(tool)) {
+    return browserSummary(input);
   }
   if (tool.startsWith("mcp__")) {
     return { pageId: str(input.pageId), issueIdOrKey: str(input.issueIdOrKey) };
@@ -3338,11 +3496,11 @@ var questionAnswer = (question, answer, notes) => {
   return typeof notes === "string" && notes !== "" ? [{ ...item, notes: notes.slice(0, ANSWER_TEXT_CAP) }] : [item];
 };
 var rawAnswers = (result) => {
-  const answers = isObject3(result.answers) ? result.answers : {};
-  const annotations = isObject3(result.annotations) ? result.annotations : {};
+  const answers = isObject4(result.answers) ? result.answers : {};
+  const annotations = isObject4(result.annotations) ? result.annotations : {};
   return Object.entries(answers).flatMap(([question, answer]) => {
     const annotation = Object.hasOwn(annotations, question) ? annotations[question] : void 0;
-    return questionAnswer(question, answer, isObject3(annotation) ? annotation.notes : void 0);
+    return questionAnswer(question, answer, isObject4(annotation) ? annotation.notes : void 0);
   });
 };
 var questionAnswers = (result) => {
@@ -3364,7 +3522,7 @@ var scalars = (payload, skip) => {
   return Object.fromEntries(kept.map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 500) : value]));
 };
 var setupHashesOf = (value) => {
-  if (!isObject3(value) || Object.keys(value).length > MAX_SETUP_FILES) {
+  if (!isObject4(value) || Object.keys(value).length > MAX_SETUP_FILES) {
     return void 0;
   }
   const hashes = {};
@@ -3435,6 +3593,7 @@ var hookPayloadToEvent = (payload, options) => {
       const command = str(input.command) ?? "";
       const stdout = str(result.stdout);
       const agentTool = tool === "Agent" || tool === "Task";
+      const lines = editLines(tool, result);
       const data = {
         ...base,
         toolUseId: str(payload.tool_use_id) ?? "",
@@ -3449,7 +3608,10 @@ var hookPayloadToEvent = (payload, options) => {
         agentId: agentTool ? str(result.agentId) : void 0,
         isAsync: agentTool ? result.isAsync === true : void 0,
         status: agentTool ? str(result.status) : void 0,
-        resolvedModel: agentTool ? str(result.resolvedModel) : void 0
+        resolvedModel: agentTool ? str(result.resolvedModel) : void 0,
+        linesAdded: lines?.linesAdded,
+        linesRemoved: lines?.linesRemoved,
+        created: lines?.created
       };
       return { ...envelope, src: "hook", event: "tool.post", data };
     }
@@ -3481,7 +3643,7 @@ var hookPayloadToEvent = (payload, options) => {
     }
     case "TaskCreated":
     case "TaskCompleted": {
-      const data = { ...base, taskId: str(payload.task_id) ?? "", subject: str(payload.task_subject) ?? str(payload.subject) };
+      const data = { ...base, taskId: cap(payload.task_id, TASK_ID_CAP), subject: str(payload.task_subject) ?? str(payload.subject) };
       return { ...envelope, src: "hook", event: payload.hook_event_name === "TaskCreated" ? "task.created" : "task.completed", data };
     }
     case "PreCompact":
@@ -3506,7 +3668,7 @@ var QUESTION_ID = /\bq-[0-9a-z]{6}\b/;
 var hookPayloadToMarker = (payload, options) => {
   const kind = payload.hook_event_name === "PostToolUse" ? MARKER_TOOL2.exec(str(payload.tool_name) ?? "")?.[1] : void 0;
   const response = payload.tool_response;
-  const failed = isObject3(response) && (response.isError === true || response.is_error === true);
+  const failed = isObject4(response) && (response.isError === true || response.is_error === true);
   if (!kind || failed || isInternalHelper(payload)) {
     return void 0;
   }
@@ -4655,6 +4817,7 @@ var countVerification = (state, run, agent, match) => {
   return entries;
 };
 var SGR = /\x1b\[[0-9;]*m/g;
+var stripSgr = (text) => text.replace(SGR, "");
 var verifyResult = (kind, event, config) => {
   if (event.event === "tool.fail") {
     return "fail";
@@ -4664,7 +4827,7 @@ var verifyResult = (kind, event, config) => {
     return "fail";
   }
   const pattern = compile(config).failPatterns.get(kind);
-  const tail = (stdoutTail ?? "").replace(SGR, "");
+  const tail = stripSgr(stdoutTail ?? "");
   return pattern?.test(patternInput(tail)) ? "fail" : "pass";
 };
 var settleVerification = (agent, entries, event, config) => {
@@ -6671,6 +6834,56 @@ var onWorktreeRemoved = (state, data, at) => {
   }
   settleRemovedRun(state, run, data.branch, at);
   return [run];
+};
+
+// src/model/agent-tasks.ts
+var TASKS_CAP = 50;
+var TASK_SUBJECT_CAP = 200;
+var keepSubject = (subject) => subject === void 0 || subject === "" ? void 0 : subject.slice(0, TASK_SUBJECT_CAP);
+var noteTask = (agent, event) => {
+  const { taskId } = event.data;
+  if (typeof taskId !== "string" || taskId === "") {
+    return;
+  }
+  const tasks = agent.tasks ?? (agent.tasks = []);
+  const subject = keepSubject(event.data.subject);
+  const completed = event.event === "task.completed";
+  const known = tasks.find((task2) => task2.taskId === taskId);
+  if (known) {
+    if (known.subject === void 0 && subject !== void 0) {
+      known.subject = subject;
+    }
+    if (completed) {
+      known.completed = true;
+    }
+    return;
+  }
+  const task = { taskId };
+  if (subject !== void 0) {
+    task.subject = subject;
+  }
+  if (completed) {
+    task.completed = true;
+  }
+  tasks.push(task);
+  tasks.splice(0, tasks.length - TASKS_CAP);
+};
+var mergeTasks = (agents) => {
+  const merged = /* @__PURE__ */ new Map();
+  for (const task of agents.flatMap((agent) => agent.tasks ?? [])) {
+    const known = merged.get(task.taskId);
+    if (!known) {
+      merged.set(task.taskId, { ...task });
+      continue;
+    }
+    if (known.subject === void 0 && task.subject !== void 0) {
+      known.subject = task.subject;
+    }
+    if (task.completed) {
+      known.completed = true;
+    }
+  }
+  return merged.size === 0 ? void 0 : [...merged.values()].slice(-TASKS_CAP);
 };
 
 // src/model/own-branch.ts
@@ -9965,6 +10178,29 @@ var endCall = (call, event) => {
   }
   return waited;
 };
+var markCallCheck = (copies, match) => {
+  const kind = match?.kinds[0];
+  if (kind === void 0) {
+    return;
+  }
+  for (const copy of copies) {
+    if (copy) {
+      copy.check = { kind, result: "running" };
+    }
+  }
+};
+var settleCallCheck = (call, event, config) => {
+  if (!call?.check || event.event === "tool.post" && event.data.backgroundTaskId !== void 0) {
+    return;
+  }
+  call.check = { kind: call.check.kind, result: verifyResult(call.check.kind, event, config) };
+  const tail = event.event === "tool.post" ? stripSgr(event.data.stdoutTail ?? "") : "";
+  if (tail === "") {
+    delete call.tail;
+  } else {
+    call.tail = tail;
+  }
+};
 var LARGE_OUTPUT_CHARS = 2e4;
 var BINARY_READ = /\.(png|jpe?g|gif|webp|pdf)$/i;
 var isBinaryRead = (tool, call) => tool === "Read" && BINARY_READ.test(call?.summary ?? "");
@@ -10107,6 +10343,10 @@ var callSummary = (state, tool, input, run) => {
   if (asked) {
     return asked.slice(0, 160);
   }
+  const target = input.url?.replace(/^https?:\/\//, "") || input.element;
+  if (target) {
+    return target.slice(0, 160);
+  }
   return input.name ?? input.pageId ?? input.issueIdOrKey ?? tool;
 };
 var rangeSide = (side) => side.replace(/^origin\//, "").replace(/(?:[~^]|@\{).*$/s, "");
@@ -10242,6 +10482,7 @@ var onToolPre2 = (state, event, config, touched) => {
     onEditPre(state, run, agent, input.filePath, event, config);
     workOnEdit(state, run, agent, { filePath: input.filePath, started }, event, config, touched);
     noteEdit(state, agentKey, input.filePath, event.at, config);
+    state.index.calls[toolUseId].editPath = relativePath(run, input.filePath, state.index.worktreeAliases);
     if (inWorktree(run, input.filePath, state.index.worktreeAliases)) {
       state.index.calls[toolUseId].trustPath = relativePath(run, input.filePath, state.index.worktreeAliases);
     }
@@ -10330,6 +10571,7 @@ var onBashPre = (state, run, agent, event, config, touched) => {
     noteBashRead(state, agent.id, command, event.cwd, event.at);
   }
   const own = agent.id === "main" ? mainOf(state, event.sessionId) : void 0;
+  markCallCheck([findCall(agent, event.data.toolUseId), own ? mainCall(own, event.data.toolUseId) : void 0], match);
   const mainVerify = own ? countMainVerification(own, match, config.budgets.warnAt) : [];
   if (mainVerify.length > 0) {
     callIndex.mainVerify = mainVerify;
@@ -10429,6 +10671,35 @@ var onEditPre = (state, run, agent, filePath, line, config) => {
     }
   }
 };
+var editLinesOf = (data) => {
+  if (!isCount(data.linesAdded) || !isCount(data.linesRemoved)) {
+    return void 0;
+  }
+  const lines = { added: data.linesAdded, removed: data.linesRemoved };
+  if (data.created === true) {
+    lines.created = true;
+  }
+  return lines;
+};
+var noteEditLines = (path, lines, targets) => {
+  if (!lines) {
+    return;
+  }
+  for (const { agent, call } of targets) {
+    if (call) {
+      call.lines = { ...lines };
+    }
+    if (!agent) {
+      continue;
+    }
+    const sum = ownEntry(agent.fileLines ??= {}, path, () => ({ added: 0, removed: 0 }));
+    sum.added += lines.added;
+    sum.removed += lines.removed;
+    if (lines.created) {
+      sum.created = true;
+    }
+  }
+};
 var onToolEnd = (state, event, config, touched) => {
   const index = state.index.calls[event.data.toolUseId];
   const run = index ? state.branchStates[index.runId] : hookRun(state, event, config);
@@ -10474,6 +10745,8 @@ var onToolEnd = (state, event, config, touched) => {
   }
   const runWaited = call ? endCall(call, event) : false;
   const ownWaited = ownCall ? endCall(ownCall, event) : false;
+  settleCallCheck(call, event, config);
+  settleCallCheck(ownCall, event, config);
   const asked = runWaited || ownWaited ? run.questions.find((q) => q.id === `q-perm-${event.data.toolUseId}`) : void 0;
   if (asked?.state === "open") {
     closeQuestion(state, run, asked, "answered", event, "terminal");
@@ -10508,6 +10781,9 @@ var onToolEnd = (state, event, config, touched) => {
     return run;
   }
   const data = event.data;
+  if (index?.editPath) {
+    noteEditLines(index.editPath, editLinesOf(data), [{ agent, call }, { agent: own, call: ownCall }]);
+  }
   const succeeded = !data.interrupted && (data.exitCode === void 0 || data.exitCode === 0);
   if (index?.trustPath && succeeded) {
     noteTrustEdit(run, index.trustPath, event.at);
@@ -10891,6 +11167,10 @@ var hookEventRun = (state, event, config, touched) => {
     }
     case "task.created":
     case "task.completed":
+      const taskOwner = event.agentId ? agent : session.main;
+      if (taskOwner) {
+        noteTask(taskOwner, event);
+      }
       logRun(state, run, event, `Task ${event.event === "task.created" ? "created" : "completed"}: ${event.data.subject ?? event.data.taskId}`, "normal", agent?.id);
       break;
     default:
@@ -11084,6 +11364,22 @@ var mergeRecent = (agents) => {
   }
   return structuredClone([...calls.values()].sort(byCallStart).slice(-RECENT_CAP));
 };
+var mergeFileLines = (agents) => {
+  const sources = agents.flatMap((agent) => agent.fileLines ? [agent.fileLines] : []);
+  if (sources.length === 0) {
+    return void 0;
+  }
+  const merged = {};
+  for (const [path, lines] of sources.flatMap((source) => Object.entries(source))) {
+    const sum = ownEntry(merged, path, () => ({ added: 0, removed: 0 }));
+    sum.added += lines.added;
+    sum.removed += lines.removed;
+    if (lines.created) {
+      sum.created = true;
+    }
+  }
+  return merged;
+};
 var mergeAgent = (lead, rest, config) => {
   const merged = structuredClone(lead.agent);
   delete merged.pathCallAt;
@@ -11101,6 +11397,16 @@ var mergeAgent = (lead, rest, config) => {
     merged.now = structuredClone(newestOpen);
   }
   merged.filesChanged = [...new Set(agents.flatMap((agent) => agent.filesChanged))];
+  const fileLines = mergeFileLines(agents);
+  delete merged.fileLines;
+  if (fileLines) {
+    merged.fileLines = fileLines;
+  }
+  delete merged.tasks;
+  const tasks = mergeTasks(agents);
+  if (tasks) {
+    merged.tasks = tasks;
+  }
   delete merged.resumedAt;
   for (const agent of agents) {
     if (time(agent.startedAt) < time(merged.startedAt)) {
@@ -12849,7 +13155,7 @@ var sha1Hex = (text) => {
 
 // src/spool/decode.ts
 var ignoreErrors = () => void 0;
-var isObject4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isObject5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var eventsOf = (line) => line.marker ? [line.event, line.marker] : [line.event];
 var timeOf = (record) => {
   if (typeof record.at === "string") {
@@ -12864,7 +13170,7 @@ var decodeLine = (text, keyConfig) => {
   } catch (error) {
     return { error: `not JSON: ${error.message}` };
   }
-  if (isObject4(record) && isObject4(record.payload) && record.event === void 0) {
+  if (isObject5(record) && isObject5(record.payload) && record.event === void 0) {
     const id = typeof record.id === "string" ? record.id : `r-${sha1Hex(text).slice(0, 12)}`;
     const injectedChars = isCount(record.injectedChars) ? record.injectedChars : void 0;
     const { keyPattern, keyIgnoreCase } = keyConfig;

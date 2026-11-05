@@ -6,7 +6,7 @@ var attempt = (call) => {
   }
 };
 var createAppBadge = (api) => {
-  let shown2;
+  let shown3;
   const clearBadge = () => {
     const clearAppBadge = api?.clearAppBadge;
     if (api && typeof clearAppBadge === "function") {
@@ -14,12 +14,12 @@ var createAppBadge = (api) => {
     }
   };
   return {
-    set(count) {
-      const next = Math.max(0, Math.floor(count));
-      if (!api || next === shown2) {
+    set(count2) {
+      const next = Math.max(0, Math.floor(count2));
+      if (!api || next === shown3) {
         return;
       }
-      shown2 = next;
+      shown3 = next;
       const setAppBadge = api.setAppBadge;
       if (next > 0 && typeof setAppBadge === "function") {
         attempt(() => setAppBadge.call(api, next));
@@ -28,7 +28,7 @@ var createAppBadge = (api) => {
       }
     },
     clear() {
-      shown2 = void 0;
+      shown3 = void 0;
       clearBadge();
     }
   };
@@ -139,7 +139,7 @@ var clearedAtFor = (item2, now) => {
   const activeAt = parseTime(item2.lastActiveAt) ?? 0;
   return Math.max(now, activeAt);
 };
-var conversationsLabel = (count) => `Conversations, ${count}`;
+var conversationsLabel = (count2) => `Conversations, ${count2}`;
 var clearedKey = (repositoryId, sessionId) => `nurselog.cleared.${repositoryId}.${sessionId}`;
 var clearedValue = (at) => new Date(at).toISOString();
 var parseCleared = (value2) => parseTime(value2 ?? void 0);
@@ -608,19 +608,19 @@ var tweenStart = (placement) => ({ x: placement.x, y: placement.y, y0: placement
 var tweenStarts = (placements) => new Map([...placements].map(([key, placement]) => [key, tweenStart(placement)]));
 var tweenShare = (elapsed2) => easeCurve(Math.min(1, Math.max(0, elapsed2 / TWEEN_MS)));
 var tweenPlacements = (placements, starts, share2) => {
-  const along = (from, to) => share2 === 1 || from === void 0 ? to : from + (to - from) * share2;
+  const along2 = (from, to) => share2 === 1 || from === void 0 ? to : from + (to - from) * share2;
   for (const [key, placement] of placements) {
     const start = starts.get(key);
-    placement.opacity = along(start?.opacity, placement.alive ? 1 : 0);
+    placement.opacity = along2(start?.opacity, placement.alive ? 1 : 0);
     const goal = targetOf(placement.item);
     if (!goal) {
       continue;
     }
-    placement.x = along(start?.x, goal[0]);
-    placement.y = along(start?.y, goal[1]);
+    placement.x = along2(start?.x, goal[0]);
+    placement.y = along2(start?.y, goal[1]);
     if (placement.item.kind === "bar") {
-      placement.y0 = along(start?.y0, placement.item.y0);
-      placement.y1 = along(start?.y1, placement.item.y1);
+      placement.y0 = along2(start?.y0, placement.item.y0);
+      placement.y1 = along2(start?.y1, placement.item.y1);
       placement.y = (placement.y0 + placement.y1) / 2;
     }
   }
@@ -692,8 +692,8 @@ var elapsed = (ms) => {
   return `${minutes}m ${pad(seconds % 60)}s`;
 };
 var cost = (usd) => `$${(Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)}`;
-var tokens = (count) => {
-  const value2 = Number.isFinite(count) ? Math.max(0, count) : 0;
+var tokens = (count2) => {
+  const value2 = Number.isFinite(count2) ? Math.max(0, count2) : 0;
   if (value2 >= 999500) {
     return `${Number((value2 / 1e6).toFixed(2))}M`;
   }
@@ -741,7 +741,7 @@ var modelLetter = (model, letters) => {
   }
   return best === void 0 ? "?" : letters[best];
 };
-var plural = (count, noun3) => `${count} ${noun3}${count === 1 ? "" : "s"}`;
+var plural = (count2, noun3) => `${count2} ${noun3}${count2 === 1 ? "" : "s"}`;
 var staleApprovalText = (files) => `${plural(files, "file")} changed since the approval`;
 var githubStatus = (github) => {
   const checked = github.polling || github.checkedAt !== void 0;
@@ -815,16 +815,16 @@ var GLYPHS = [
   { family: "fable", prefix: "claude-fable", parts: () => [stroke(BOOK, true)] }
 ];
 var iconMark = (family) => `${MARK_PREFIX}${family}`;
-var glyphOf = (mark) => GLYPHS.find((glyph) => iconMark(glyph.family) === mark);
+var glyphOf = (mark) => GLYPHS.find((glyph2) => iconMark(glyph2.family) === mark);
 var markFamily = (mark) => glyphOf(mark)?.family;
 var modelMark = (model, letters) => {
   if (model === void 0 || !Object.keys(letters).some((prefix) => model.startsWith(prefix))) {
     return "";
   }
   let best;
-  for (const glyph of GLYPHS) {
-    if (model.startsWith(glyph.prefix) && glyph.prefix.length > (best?.prefix.length ?? -1)) {
-      best = glyph;
+  for (const glyph2 of GLYPHS) {
+    if (model.startsWith(glyph2.prefix) && glyph2.prefix.length > (best?.prefix.length ?? -1)) {
+      best = glyph2;
     }
   }
   return best === void 0 ? modelLetter(model, letters) : iconMark(best.family);
@@ -832,12 +832,12 @@ var modelMark = (model, letters) => {
 var iconScale = (radius) => Math.min(1, (radius + 4) / 15);
 var round = (value2) => String(Math.round(value2 * 1e3) / 1e3);
 var drawMark = (group, mark, radius) => {
-  const glyph = glyphOf(mark);
-  if (glyph) {
+  const glyph2 = glyphOf(mark);
+  if (glyph2) {
     const scale = round(iconScale(radius));
     const icon2 = svgEl("g", { class: "node-mark model-icon", transform: `scale(${scale})` });
     setVars(icon2, { "--k": scale });
-    icon2.append(...glyph.parts());
+    icon2.append(...glyph2.parts());
     group.append(icon2);
   } else if (mark !== "") {
     const letter = svgEl("text", { class: "node-letter", y: 3.6 });
@@ -846,12 +846,12 @@ var drawMark = (group, mark, radius) => {
   }
 };
 var markIcon = (mark) => {
-  const glyph = glyphOf(mark);
-  if (!glyph) {
+  const glyph2 = glyphOf(mark);
+  if (!glyph2) {
     return void 0;
   }
   const icon2 = svgEl("svg", { class: "model-icon badge-icon", viewBox: "-6 -6 12 12", width: BADGE_SIZE, height: BADGE_SIZE, "aria-hidden": "true" });
-  icon2.append(...glyph.parts());
+  icon2.append(...glyph2.parts());
   return icon2;
 };
 var setBadgeMark = (element, mark, model) => {
@@ -899,7 +899,7 @@ var COUNT_CHAR = 5.5;
 var SUMMARY_TEXT = 120;
 var COLUMN_LEAD = 24;
 var pillWidth = (text2) => text2.length * CHAR + 14;
-var bubbleReach = (count) => count < 2 ? BUBBLE_RADIUS : BUBBLE_COUNT_X + String(count).length * COUNT_CHAR;
+var bubbleReach = (count2) => count2 < 2 ? BUBBLE_RADIUS : BUBBLE_COUNT_X + String(count2).length * COUNT_CHAR;
 var keys = {
   /** A column's anchor at its start: a new column enters from the anchor of the column before it. */
   column: (id) => `anchor:column:${id}`,
@@ -1026,7 +1026,7 @@ var trunkLines = (trunk, promote) => {
   const trunkY = targets.length > 0 ? targets[targets.length - 1].y + TRUNK_GAP : TOP_Y;
   return [...targets, { name: trunk, y: trunkY, tone: "trunk" }];
 };
-var drawingHeight = (lanesTop, count) => lanesTop + Math.max(1, count) * LANE_GAP + BOTTOM;
+var drawingHeight = (lanesTop, count2) => lanesTop + Math.max(1, count2) * LANE_GAP + BOTTOM;
 var forkPath = (forkX, trunkY, y) => {
   const controls = `${point(forkX + 9, trunkY)}, ${point(forkX + 5, y)}`;
   return `M${point(forkX, trunkY)} C ${controls}, ${point(forkX + FORK_RUN, y)}`;
@@ -1057,15 +1057,15 @@ var mergeOf = (lane, byBranch) => {
   return own.find((dot) => dot.mergedAt === lane.mergedAt) ?? own[own.length - 1];
 };
 var prepareSegments = (lane) => {
-  const segments = [];
+  const segments2 = [];
   for (const segment of lane.segments) {
     const from = parseTime2(segment.from);
     const to = parseTime2(segment.to);
     if (from !== void 0) {
-      segments.push(to === void 0 ? { stage: segment.stage, from } : { stage: segment.stage, from, to });
+      segments2.push(to === void 0 ? { stage: segment.stage, from } : { stage: segment.stage, from, to });
     }
   }
-  return segments;
+  return segments2;
 };
 var byFork = (a, b) => {
   const forkA = a.fork ?? Number.MAX_SAFE_INTEGER;
@@ -1083,22 +1083,22 @@ var prepareOverview = (branches) => {
     return branches.promote.filter((target) => carrying.some((promotion) => promotion.target === target));
   };
   const lanes = branches.lanes.map((lane) => {
-    const segments = prepareSegments(lane);
-    const fork = parseTime2(lane.forkedAt) ?? segments[0]?.from;
-    const last = segments[segments.length - 1];
+    const segments2 = prepareSegments(lane);
+    const fork = parseTime2(lane.forkedAt) ?? segments2[0]?.from;
+    const last = segments2[segments2.length - 1];
     const lastEnd = last ? last.to ?? last.from : fork;
-    const merged = lane.mergedAt !== void 0;
-    const state = merged ? "merged" : lane.deleted ? "deleted" : "open";
+    const merged2 = lane.mergedAt !== void 0;
+    const state = merged2 ? "merged" : lane.deleted ? "deleted" : "open";
     let drainFrom;
-    if (merged) {
+    if (merged2) {
       drainFrom = parseTime2(lane.mergedAt) ?? lastEnd;
     } else if (lane.deleted) {
       drainFrom = lastEnd;
     }
     const label = lane.branchLabel === void 0 ? void 0 : labelText(lane.branchLabel);
     const name = label ?? shortBranch(lane.branch);
-    const prepared = { branch: lane.branch, name, ...label === void 0 ? {} : { label }, fork, state, drainFrom, segments, head: lane.head, promotedTo: [] };
-    const merge = merged ? mergeOf(lane, byBranch) : void 0;
+    const prepared = { branch: lane.branch, name, ...label === void 0 ? {} : { label }, fork, state, drainFrom, segments: segments2, head: lane.head, promotedTo: [] };
+    const merge = merged2 ? mergeOf(lane, byBranch) : void 0;
     if (merge) {
       prepared.prNumber = merge.prNumber;
       prepared.promotedTo = promotedTo(merge.prNumber);
@@ -1109,10 +1109,10 @@ var prepareOverview = (branches) => {
     const at = parseTime2(dot.mergedAt);
     return at === void 0 ? [] : [{ prNumber: dot.prNumber, branch: dot.branch, at, promotedTo: promotedTo(dot.prNumber) }];
   });
-  const lineOf3 = new Map(lines.map((line) => [line.name, line]));
+  const lineOf4 = new Map(lines.map((line) => [line.name, line]));
   const promotions = branches.promotions.flatMap((promotion) => {
     const at = parseTime2(promotion.mergedAt);
-    const line = lineOf3.get(promotion.target);
+    const line = lineOf4.get(promotion.target);
     if (at === void 0 || !line || line.tone === "trunk") {
       return [];
     }
@@ -1206,8 +1206,8 @@ var promotionTooltip = (promotion, now, labels, clickable = false) => {
     lines.push(promotion.title);
   }
   const carried = joinNames(promotion.carries.map((prNumber) => `#${prNumber}`));
-  const merged = `merged ${ago(now - promotion.at)}`;
-  lines.push(carried === "" ? merged : `${merged} \xB7 carries ${carried}`);
+  const merged2 = `merged ${ago(now - promotion.at)}`;
+  lines.push(carried === "" ? merged2 : `${merged2} \xB7 carries ${carried}`);
   return [...lines, ...sessionsLine(labels, clickable)];
 };
 var litByBranches = (layout, branches) => {
@@ -1269,13 +1269,13 @@ var branchesLayout = (input) => {
     }
     const startX = laneStart + (endX - laneStart) * shrink;
     const endAt = drainFrom ?? now;
-    const segments = [];
+    const segments2 = [];
     lane.segments.forEach((segment, position) => {
       const segmentEnd = segment.to ?? lane.segments[position + 1]?.from ?? endAt;
       const x1 = Math.max(startX, x(segment.from));
       const x2 = Math.min(endX, x(segmentEnd));
       if (x2 - x1 >= 0.5) {
-        segments.push({ x1, x2, color: stageColor(segment.stage), dashed: segment.stage === "wait" });
+        segments2.push({ x1, x2, color: stageColor(segment.stage), dashed: segment.stage === "wait" });
       }
     });
     const head = headOf(lane, endX, mergeX);
@@ -1297,7 +1297,7 @@ var branchesLayout = (input) => {
       endX,
       nameX,
       nameText,
-      segments,
+      segments: segments2,
       head,
       hitEnd,
       endAt
@@ -1357,8 +1357,8 @@ var setColor = (element, color) => {
     setVars(element, { "--c": color });
   }
 };
-var setShown = (element, shown2) => {
-  const display = shown2 ? "" : "none";
+var setShown = (element, shown3) => {
+  const display = shown3 ? "" : "none";
   if (element.style.display !== display) {
     element.style.display = display;
   }
@@ -1429,12 +1429,12 @@ var createBranchesOverview = (host, context, link) => {
   const motion = () => !first && !held && !context.reducedMotion();
   const recent = (at) => motion() && now - at < DRAIN_MS;
   const ripple = (x, y, color, delay) => {
-    const circle = svgEl("circle", { class: "br-ripple", cx: value(x), cy: value(y), r: 5 });
-    setColor(circle, color);
-    effects.append(circle);
-    const animation = circle.animate(RIPPLE, { duration: RIPPLE_MS, delay, easing: "ease-out" });
-    animation.onfinish = () => circle.remove();
-    animation.oncancel = () => circle.remove();
+    const circle2 = svgEl("circle", { class: "br-ripple", cx: value(x), cy: value(y), r: 5 });
+    setColor(circle2, color);
+    effects.append(circle2);
+    const animation = circle2.animate(RIPPLE, { duration: RIPPLE_MS, delay, easing: "ease-out" });
+    animation.onfinish = () => circle2.remove();
+    animation.oncancel = () => circle2.remove();
   };
   const draw2 = (path) => {
     path.animate(DRAW, { duration: DRAW_MS, easing: EASING });
@@ -1626,16 +1626,16 @@ var createBranchesOverview = (host, context, link) => {
     const body = svgEl("g", { class: "br-lane" });
     const fork = svgEl("path", { class: "br-fork", pathLength: 1 });
     const base = svgEl("path", { class: "br-base" });
-    const segments = svgEl("g");
+    const segments2 = svgEl("g");
     const name = svgEl("text", { class: "br-name" });
     const headGroup = svgEl("g", { class: "br-head" });
     headGroup.append(svgEl("circle", { class: "br-ring", r: 5 }), svgEl("circle", { class: "br-core", r: 5 }));
     const label = svgEl("text", { class: "br-label" });
     const hit = svgEl("rect", { class: "br-hit" });
-    body.append(fork, base, segments, name, headGroup, label, hit);
+    body.append(fork, base, segments2, name, headGroup, label, hit);
     group.append(body);
     laneLayer.append(group);
-    const entry = { group, body, fork, base, segments, segmentLines: [], name, head: headGroup, label, hit, y: lane.y, layout: lane };
+    const entry = { group, body, fork, base, segments: segments2, segmentLines: [], name, head: headGroup, label, hit, y: lane.y, layout: lane };
     bindHover(hit, { kind: "lane", branch: lane.branch });
     if (motion()) {
       draw2(fork);
@@ -1747,8 +1747,8 @@ var createBranchesOverview = (host, context, link) => {
         }
       }
       entry.mark = mark;
-      for (const circle of entry.group.children) {
-        write(circle, { cx: mark.x, cy: current.trunkY });
+      for (const circle2 of entry.group.children) {
+        write(circle2, { cx: mark.x, cy: current.trunkY });
       }
     }
     for (const [prNumber, entry] of marks) {
@@ -1780,8 +1780,8 @@ var createBranchesOverview = (host, context, link) => {
       }
       entry.promotion = promotion;
       write(entry.arc, { d: promotionPath(promotion.x, current.trunkY, promotion.y) });
-      for (const circle of [entry.dot, entry.hit]) {
-        write(circle, { cx: promotion.x + PROMOTION_RUN, cy: promotion.y });
+      for (const circle2 of [entry.dot, entry.hit]) {
+        write(circle2, { cx: promotion.x + PROMOTION_RUN, cy: promotion.y });
       }
     }
     for (const [prNumber, entry] of promotions) {
@@ -1869,17 +1869,17 @@ var createBranchesOverview = (host, context, link) => {
 var CONNECTING_DELAY_MS = 300;
 var createConnectionState = (show, delay = CONNECTING_DELAY_MS) => {
   let timer;
-  const cancel = () => {
+  const cancel2 = () => {
     clearTimeout(timer);
     timer = void 0;
   };
   return {
     set(state) {
-      cancel();
+      cancel2();
       show(state);
     },
     switching() {
-      cancel();
+      cancel2();
       timer = setTimeout(() => {
         timer = void 0;
         show("connecting");
@@ -2037,16 +2037,16 @@ var flashLine = (context, line) => {
 // src/ui/ticket-link.ts
 var drawnLinks = /* @__PURE__ */ new WeakMap();
 var ticketLinkTitle = (key) => `Open ${key} in the tracker`;
-var setTicketKey = (host, key, template, after = "", fallback = "") => {
+var setTicketKey = (host, key, template, after2 = "", fallback = "") => {
   const href = key === void 0 ? void 0 : ticketUrl(template, key);
   if (key === void 0 || href === void 0) {
     if (drawnLinks.delete(host)) {
       host.replaceChildren();
     }
-    setText(host, key === void 0 ? fallback : `${key}${after}`);
+    setText(host, key === void 0 ? fallback : `${key}${after2}`);
     return;
   }
-  const drawn = JSON.stringify([href, key, after]);
+  const drawn = JSON.stringify([href, key, after2]);
   if (drawnLinks.get(host) === drawn) {
     return;
   }
@@ -2059,8 +2059,8 @@ var setTicketKey = (host, key, template, after = "", fallback = "") => {
   link.addEventListener("click", (event) => event.stopPropagation());
   host.textContent = "";
   host.replaceChildren(link);
-  if (after !== "") {
-    host.append(after);
+  if (after2 !== "") {
+    host.append(after2);
   }
 };
 
@@ -2223,18 +2223,18 @@ var createFinishedParts = (context, actions) => {
   const detail = el("div", "row-detail-inner");
   detailBox.append(detail);
   parts.element.append(detailBox);
-  let shown2 = false;
-  show.addEventListener("click", () => actions.onShow(!shown2));
+  let shown3 = false;
+  show.addEventListener("click", () => actions.onShow(!shown3));
   clear.addEventListener("click", () => actions.onClear());
   const setShown2 = (next, open2 = next) => {
-    shown2 = next;
+    shown3 = next;
     detailBox.classList.toggle("open", open2);
     detail.inert = !open2;
     show.setAttribute("aria-expanded", String(next));
     setText(show, next ? HIDE_TEXT : SHOW_TEXT);
   };
   setShown2(false);
-  return { ...parts, outcome, facts, when, show, clear, detailBox, detail, setShown: setShown2, isShown: () => shown2 };
+  return { ...parts, outcome, facts, when, show, clear, detailBox, detail, setShown: setShown2, isShown: () => shown3 };
 };
 var createFinishedSessionRow = (context, actions) => {
   const parts = createFinishedParts(context, actions);
@@ -2446,8 +2446,8 @@ var createSectionCore = (make) => {
   element.hidden = true;
   const bar = el("div", "section-bar");
   const heading2 = el("h2", "section-heading");
-  const count = el("span", "section-count num", "0");
-  heading2.append(el("span", "section-title", CONVERSATIONS_TITLE), count);
+  const count2 = el("span", "section-count num", "0");
+  heading2.append(el("span", "section-title", CONVERSATIONS_TITLE), count2);
   bar.append(heading2);
   const list = el("ol", "run-rows");
   element.append(bar, list);
@@ -2496,7 +2496,7 @@ var createSectionCore = (make) => {
       return;
     }
     rows.sync(next, { moved, animate: motion && wasShown, fill });
-    setText(count, String(next.length));
+    setText(count2, String(next.length));
     heading2.setAttribute("aria-label", conversationsLabel(next.length));
     element.hidden = next.length === 0;
     if (motion && !wasShown && next.length > 0) {
@@ -2595,9 +2595,9 @@ var writeValue = (key, value2, local) => {
     writeStorage(key, value2);
   }
 };
-var createIdStore = (keyOf, { parse, format }, local) => ({
-  get: (id) => parse(readValue(keyOf(id), local)),
-  set: (id, value2) => writeValue(keyOf(id), value2 === void 0 ? void 0 : format(value2), local)
+var createIdStore = (keyOf2, { parse, format }, local) => ({
+  get: (id) => parse(readValue(keyOf2(id), local)),
+  set: (id, value2) => writeValue(keyOf2(id), value2 === void 0 ? void 0 : format(value2), local)
 });
 var COLLAPSED_FORMAT = {
   parse: (value2) => value2 === null ? void 0 : value2 === "1",
@@ -2750,9 +2750,9 @@ var morphFrom = (element, from) => {
   morph.finished.then(settle, settle);
 };
 var measureTops = (elements) => new Map(elements.map((element) => [element, element.getBoundingClientRect().top]));
-var glide = (before, after, still = /* @__PURE__ */ new Set()) => {
+var glide = (before, after2, still = /* @__PURE__ */ new Set()) => {
   for (const [element, top] of before) {
-    const delta = top - (after.get(element) ?? top);
+    const delta = top - (after2.get(element) ?? top);
     if (!still.has(element) && Math.abs(delta) > 0.5) {
       element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: EASE4 });
     }
@@ -3161,9 +3161,9 @@ var modelText = (roles, source) => {
 };
 var sharedTurns = (roles, setup) => sharedValue(roles, (role) => agentOf(role, setup)?.maxTurns);
 var roleList = (names) => {
-  const shown2 = names.slice(0, MAX_ROLES).join(", ");
+  const shown3 = names.slice(0, MAX_ROLES).join(", ");
   const rest = names.length - MAX_ROLES;
-  return rest > 0 ? `${shown2} +${rest}` : shown2;
+  return rest > 0 ? `${shown3} +${rest}` : shown3;
 };
 var sharedBudget = (roles, setup) => {
   const budgets = roles.map((role) => entryOf2(role, setup)?.toolCalls);
@@ -3666,9 +3666,9 @@ var QUIET_RUNS = 10;
 var HEADROOM = 1.08;
 var MAX_CHIPS = 4;
 var RATIO_CAP = 10;
-var noun = (count, unit) => count === 1 ? unit[0] : unit[1];
+var noun = (count2, unit) => count2 === 1 ? unit[0] : unit[1];
 var wholePercent = (fraction) => `${Math.round(fraction * 100)}%`;
-var characters = (count) => `${Math.round(count).toLocaleString("en-US")} characters`;
+var characters = (count2) => `${Math.round(count2).toLocaleString("en-US")} characters`;
 var MAIN_STEP_IDS = ["explore", "implement", "verify"];
 var NO_BREAK = "\xA0";
 var stepsText = (shares) => {
@@ -4217,15 +4217,15 @@ var agentReadsOf = (since, before, format, counted) => {
 var setupEvidence = (points, format, worse, facts, suggested) => {
   const target = targetOf2(suggested);
   const before = (index) => (point2) => point2.setupChange === void 0 || point2.setupChange < index;
-  const after = (index) => (point2) => point2.setupChange !== void 0 && point2.setupChange >= index;
+  const after2 = (index) => (point2) => point2.setupChange !== void 0 && point2.setupChange >= index;
   const relevant = facts.setupChanges.flatMap((change, index) => {
-    const inSeries = change !== void 0 && change.paths.some(target) && points.some(before(index)) && points.some(after(index));
+    const inSeries = change !== void 0 && change.paths.some(target) && points.some(before(index)) && points.some(after2(index));
     return inSeries ? [{ change, index }] : [];
   });
   const titles = /* @__PURE__ */ new Map();
   const days = [];
   for (const { change, index } of relevant) {
-    const at = points.findIndex(after(index));
+    const at = points.findIndex(after2(index));
     titles.set(at, [...titles.get(at) ?? [], `Setup changed ${change.day}: ${changedFiles(change)}`]);
     if (!days.includes(change.day)) {
       days.push(change.day);
@@ -4241,7 +4241,7 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   }
   const { day, paths, added, removed } = latest.change;
   const chip = { day, paths: paths.filter(target), added: added.filter(target), removed: removed.filter(target), direction: "no change yet" };
-  const sinceSide = sideOf(points.filter(after(latest.index)), format);
+  const sinceSide = sideOf(points.filter(after2(latest.index)), format);
   const beforeSide = sideOf(points.filter(before(latest.index)), format);
   const sinceText = sinceSide === void 0 ? void 0 : sideText(format, sinceSide.evidence);
   const beforeText = beforeSide === void 0 ? void 0 : sideText(format, beforeSide.evidence);
@@ -4252,13 +4252,13 @@ var setupEvidence = (points, format, worse, facts, suggested) => {
   chip.direction = sinceText === beforeText ? "no change yet" : directionOf(sinceSide, beforeSide, worse);
   chip.compared = { since: sinceText, before: beforeText, over };
   const since = `since ${chip.day} (${over}): ${unbroken(sinceText)} \xB7 before: ${unbroken(beforeText)}`;
-  const reads = agentReadsOf(points.filter(after(latest.index)), points.filter(before(latest.index)), format, sinceSide.points);
+  const reads = agentReadsOf(points.filter(after2(latest.index)), points.filter(before(latest.index)), format, sinceSide.points);
   if (reads === void 0) {
     return { marks, label, since, latest: chip };
   }
   chip.agentReads = reads;
-  const count = reads.over === void 0 ? "" : ` (${reads.over})`;
-  const agents = `${reads.agents} read${count}: ${unbroken(reads.since)} \xB7 before: ${unbroken(reads.before)}`;
+  const count2 = reads.over === void 0 ? "" : ` (${reads.over})`;
+  const agents = `${reads.agents} read${count2}: ${unbroken(reads.since)} \xB7 before: ${unbroken(reads.before)}`;
   return { marks, label, since, agents, latest: chip };
 };
 var groupOf = (verdict) => verdict === "unused" ? "unmeasured" : verdict;
@@ -4504,7 +4504,7 @@ var costChanges = (report) => {
   const suggested = report.groups.filter((group) => group.group === "change" || group.group === "consider");
   return suggested.reduce((total, group) => total + group.findings.filter((finding) => finding.impact === "cost").length, 0);
 };
-var costLinkText = (count) => `${plural(count, "workflow change")} would cut token use`;
+var costLinkText = (count2) => `${plural(count2, "workflow change")} would cut token use`;
 var sessionChips = (report, sessionId) => {
   const suggested = report.groups.filter((group) => group.group === "change" || group.group === "consider");
   const chips = suggested.flatMap((group) => group.findings).flatMap((finding) => {
@@ -4719,7 +4719,7 @@ var impactHit = (finding, impact) => impact === "all" || finding.impact === impa
 var filterView = (report, filter) => {
   const findings = report.groups.flatMap((group) => group.findings);
   const passing = findings.filter((finding) => stageHit(finding, filter.stage) && impactHit(finding, filter.impact));
-  const shown2 = new Set(passing.map((finding) => finding.id));
+  const shown3 = new Set(passing.map((finding) => finding.id));
   const suggested = findings.filter((finding) => SUGGESTED.has(finding.group));
   const byImpact = suggested.filter((finding) => impactHit(finding, filter.impact));
   const byStage = suggested.filter((finding) => stageHit(finding, filter.stage));
@@ -4730,8 +4730,8 @@ var filterView = (report, filter) => {
   const filtered = filter.stage !== "all" || filter.impact !== "all";
   const noun3 = findings.length === 1 ? "finding" : "findings";
   const all = `${findings.length} ${noun3}`;
-  const summary = filtered ? `Showing ${shown2.size} of ${all}` : `${all} \xB7 numbers count what is worth changing or considering`;
-  return { shown: shown2, stageCounts, impactCounts, filtered, summary };
+  const summary = filtered ? `Showing ${shown3.size} of ${all}` : `${all} \xB7 numbers count what is worth changing or considering`;
+  return { shown: shown3, stageCounts, impactCounts, filtered, summary };
 };
 var updatedText = (report, now) => {
   const updated = report.updated;
@@ -4839,16 +4839,16 @@ var createHealthReportView = (hooks) => {
       item2.hidden = !view.shown.has(id);
     }
     for (const group of groups2) {
-      const shown2 = group.ids.filter((id) => view.shown.has(id)).length;
-      group.section.hidden = shown2 === 0;
-      setText(group.count, String(shown2));
+      const shown3 = group.ids.filter((id) => view.shown.has(id)).length;
+      group.section.hidden = shown3 === 0;
+      setText(group.count, String(shown3));
     }
     for (const option of options) {
       const counts = option.kind === "stage" ? view.stageCounts : view.impactCounts;
-      const count = counts.get(option.value) ?? 0;
+      const count2 = counts.get(option.value) ?? 0;
       option.button.setAttribute("aria-pressed", String(filter[option.kind] === option.value));
-      option.button.classList.toggle("z", count === 0 && option.value !== "all");
-      setText(option.count, count === 0 ? "" : String(count));
+      option.button.classList.toggle("z", count2 === 0 && option.value !== "all");
+      setText(option.count, count2 === 0 ? "" : String(count2));
     }
     setText(summaryText, view.summary);
     summary.classList.toggle("on", view.filtered);
@@ -4860,8 +4860,8 @@ var createHealthReportView = (hooks) => {
     if (hooks.reducedMotion()) {
       return;
     }
-    const shown2 = [...items.values()].filter((item2) => !item2.hidden);
-    shown2.forEach((item2, index) => {
+    const shown3 = [...items.values()].filter((item2) => !item2.hidden);
+    shown3.forEach((item2, index) => {
       const delay = Math.min(index, FADE_UP_MAX_DELAYED) * FADE_UP_STAGGER_MS;
       item2.animate(FADE_UP, { duration: FADE_UP_MS, delay, easing: EASE4, fill: "backwards" });
     });
@@ -4886,13 +4886,13 @@ var createHealthReportView = (hooks) => {
         mark.setAttribute("aria-hidden", "true");
         button.append(mark);
       }
-      const count = el("span", "n");
-      button.append(name, count);
+      const count2 = el("span", "n");
+      button.append(name, count2);
       button.addEventListener("click", () => {
         const pressed = filter[kind] === value2;
         setFilter({ ...filter, [kind]: pressed ? "all" : value2 });
       });
-      options.push({ button, kind, value: value2, count });
+      options.push({ button, kind, value: value2, count: count2 });
       seg.append(button);
     }
     seg.addEventListener("scroll", () => segFade(seg));
@@ -5238,12 +5238,12 @@ var createHealthReportView = (hooks) => {
   const groupSection = (group) => {
     const section2 = el("section", `hg ${GROUP_CLASSES[group.group]}`);
     const heading2 = el("h3", "hgh");
-    const count = el("span", "hgn");
-    heading2.append(group.label, " ", count);
+    const count2 = el("span", "hgn");
+    heading2.append(group.label, " ", count2);
     const list = el("ol", "hfl");
     list.append(...group.findings.map(findingItem));
     section2.append(heading2, list);
-    groups2.push({ section: section2, count, ids: group.findings.map((finding) => finding.id) });
+    groups2.push({ section: section2, count: count2, ids: group.findings.map((finding) => finding.id) });
     return section2;
   };
   const flash = (item2) => {
@@ -5441,18 +5441,18 @@ var createHealthStrip = (context, hooks) => {
   const bodyId = `health-body-${stripCount}`;
   toggle.setAttribute("aria-controls", bodyId);
   toggle.append(chevronIcon());
-  const count = el("span", "hsc");
+  const count2 = el("span", "hsc");
   const countDot = el("i");
   countDot.setAttribute("aria-hidden", "true");
   const countText5 = el("span");
-  count.append(countDot, countText5);
+  count2.append(countDot, countText5);
   const basis = el("span", "hsu");
   const note = el("span", "hsn", EMPTY_TEXT);
   note.title = EMPTY_TITLE;
   const reportButton = el("button", "button hso", "Open report");
   reportButton.type = "button";
   reportButton.addEventListener("click", () => hooks.open(reportButton, {}));
-  header.append(toggle, el("h2", void 0, "Workflow health"), count, basis, note, reportButton);
+  header.append(toggle, el("h2", void 0, "Workflow health"), count2, basis, note, reportButton);
   const body = el("div", "hsb");
   body.id = bodyId;
   const clip3 = el("div");
@@ -5475,12 +5475,12 @@ var createHealthStrip = (context, hooks) => {
   let drawnKeys;
   const drawOpen = () => {
     const empty = map?.empty ?? false;
-    const shown2 = open2 && !empty;
-    element.classList.toggle("open", shown2);
-    body.classList.toggle("open", shown2);
-    body.inert = !shown2;
+    const shown3 = open2 && !empty;
+    element.classList.toggle("open", shown3);
+    body.classList.toggle("open", shown3);
+    body.inert = !shown3;
     for (const parts of steps.values()) {
-      parts.node.tabIndex = shown2 ? 0 : -1;
+      parts.node.tabIndex = shown3 ? 0 : -1;
     }
     toggle.setAttribute("aria-expanded", String(open2));
     toggle.setAttribute("aria-label", open2 ? "Hide the workflow map" : "Show the workflow map");
@@ -5504,11 +5504,11 @@ var createHealthStrip = (context, hooks) => {
     let parts = steps.get(step.id);
     if (!parts) {
       const id = step.id;
-      const made = createStep(`${bodyId}-${id}-setup`, (node) => openStep(id, node));
-      list.append(made.item);
-      items.set(step.id, made.item);
-      steps.set(step.id, made.step);
-      parts = made.step;
+      const made2 = createStep(`${bodyId}-${id}-setup`, (node) => openStep(id, node));
+      list.append(made2.item);
+      items.set(step.id, made2.item);
+      steps.set(step.id, made2.step);
+      parts = made2.step;
     }
     parts.node.className = parts.node.classList.contains("bump") ? `wn ${step.verdict} bump` : `wn ${step.verdict}`;
     parts.node.dataset.step = step.id;
@@ -5523,13 +5523,13 @@ var createHealthStrip = (context, hooks) => {
     setText(parts.more, step.more > 0 ? `+${step.more}` : "");
     parts.more.hidden = step.more === 0;
   };
-  const placeSteps = (shown2) => {
-    const ids = new Set(shown2.map((step) => step.id));
+  const placeSteps = (shown3) => {
+    const ids = new Set(shown3.map((step) => step.id));
     for (const [id, item2] of items) {
       if (!ids.has(id)) {
         if (item2.contains(document.activeElement)) {
-          const at = Math.min(Array.from(list.children).indexOf(item2) - 1, shown2.length - 1);
-          const heir = shown2[Math.max(0, at)];
+          const at = Math.min(Array.from(list.children).indexOf(item2) - 1, shown3.length - 1);
+          const heir = shown3[Math.max(0, at)];
           if (heir) {
             steps.get(heir.id)?.node.focus();
           }
@@ -5539,14 +5539,14 @@ var createHealthStrip = (context, hooks) => {
         steps.delete(id);
       }
     }
-    shown2.forEach((step, index) => {
+    shown3.forEach((step, index) => {
       const item2 = items.get(step.id);
       const at = list.children[index + 1];
       if (item2 && at !== item2) {
         list.insertBefore(item2, at ?? null);
       }
     });
-    list.dataset.steps = String(shown2.length);
+    list.dataset.steps = String(shown3.length);
   };
   const bump = (id) => {
     const node = steps.get(id)?.node;
@@ -5576,7 +5576,7 @@ var createHealthStrip = (context, hooks) => {
     map = next;
     element.classList.toggle("empty", next.empty);
     toggle.hidden = next.empty;
-    count.hidden = next.empty;
+    count2.hidden = next.empty;
     basis.hidden = next.empty;
     reportButton.hidden = next.empty;
     note.hidden = !next.empty;
@@ -5687,14 +5687,14 @@ var wrench = (r) => {
   const d = WRENCH.replace(/-?\d*\.?\d+/g, (value2) => round2(Number(value2) * r / 12));
   return svgEl("path", { class: "node-icon node-wrench", d });
 };
-var countText2 = (count) => {
-  const text2 = String(count);
+var countText2 = (count2) => {
+  const text2 = String(count2);
   const long = text2.length >= 3;
   const element = svgEl("text", { class: long ? "node-count long" : "node-count", y: long ? 2.9 : 3.6 });
   element.textContent = text2;
   return element;
 };
-var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count) => {
+var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count2) => {
   const core = svgEl("g", { class: "node-core" });
   core.append(svgEl("circle", { class: "node-outline", r: radius }));
   const parts = [];
@@ -5709,7 +5709,7 @@ var drawNode = (group, state, mark, radius, rings = RUN_RINGS, count) => {
   } else if (state === "done" || state === "approved") {
     core.append(check(radius));
   } else if (state === "changes") {
-    core.append(count !== void 0 && count > 0 ? countText2(count) : wrench(radius));
+    core.append(count2 !== void 0 && count2 > 0 ? countText2(count2) : wrench(radius));
   } else if (state === "handed") {
     const inner = round2(radius - 1.6);
     core.append(svgEl("path", { class: "node-half", d: `M0 -${inner} A${inner} ${inner} 0 0 0 0 ${inner} Z` }));
@@ -5730,9 +5730,9 @@ var badgeOffset = (radius, low) => {
   const offset = Math.round(radius * 8) / 10;
   return { x: offset, y: low ? offset : -offset };
 };
-var writeBadge = (core, count) => {
+var writeBadge = (core, count2) => {
   const [knockout, body, label] = [...core.children];
-  const text2 = String(count);
+  const text2 = String(count2);
   const width = text2.length > 1 ? BADGE_PILL : BADGE_HEIGHT;
   const outerWidth = width + 2 * BADGE_KNOCKOUT;
   knockout?.setAttribute("x", String(round2(-outerWidth / 2)));
@@ -5744,24 +5744,24 @@ var writeBadge = (core, count) => {
     label.textContent = text2;
   }
 };
-var drawBadge = (group, radius, count, low = false, amber = false) => {
+var drawBadge = (group, radius, count2, low = false, amber = false) => {
   const at = badgeOffset(radius, low);
   const outerHeight = BADGE_HEIGHT + 2 * BADGE_KNOCKOUT;
   const knockout = { y: round2(-outerHeight / 2), height: round2(outerHeight), rx: round2(outerHeight / 2) };
   const body = { y: round2(-BADGE_HEIGHT / 2), height: BADGE_HEIGHT, rx: BADGE_HEIGHT / 2 };
   const core = svgEl("g", { class: "node-badge-core" });
   core.append(svgEl("rect", { class: "node-badge-knockout", ...knockout }), svgEl("rect", { class: "node-badge-body", ...body }), svgEl("text", { y: 2.7 }));
-  writeBadge(core, count);
+  writeBadge(core, count2);
   const badge = svgEl("g", { class: amber ? "node-badge amber" : "node-badge", transform: `translate(${round2(at.x)} ${round2(at.y)})` });
   badge.append(core);
   group.append(badge);
   return core;
 };
-var setBadgeCount = (badge, count) => {
+var setBadgeCount = (badge, count2) => {
   const core = badge.firstElementChild;
   const label = core?.children[2];
-  if (core && label?.textContent !== String(count)) {
-    writeBadge(core, count);
+  if (core && label?.textContent !== String(count2)) {
+    writeBadge(core, count2);
   }
 };
 var SHEEN_TILT = 24;
@@ -5786,8 +5786,8 @@ var drawSheen = (core, radius, state) => {
 };
 var rollCount = 0;
 var drawRoll = (core, radius) => {
-  const count = [...core.children].find((child) => child.classList.contains("node-count"));
-  if (!count) {
+  const count2 = [...core.children].find((child) => child.classList.contains("node-count"));
+  if (!count2) {
     return void 0;
   }
   rollCount += 1;
@@ -5795,21 +5795,21 @@ var drawRoll = (core, radius) => {
   const clip3 = svgEl("clipPath", { id });
   clip3.append(svgEl("circle", { r: round2(radius - 0.8) }));
   const roll = svgEl("g", { class: "node-roll", "clip-path": `url(#${id})` });
-  core.insertBefore(clip3, count);
-  core.insertBefore(roll, count);
-  const glyph = wrench(radius);
-  roll.append(glyph, count);
-  count.style.opacity = "0";
+  core.insertBefore(clip3, count2);
+  core.insertBefore(roll, count2);
+  const glyph2 = wrench(radius);
+  roll.append(glyph2, count2);
+  count2.style.opacity = "0";
   const settle = () => {
     const parent = roll.parentNode;
     if (parent) {
-      count.style.opacity = "";
-      parent.insertBefore(count, roll);
+      count2.style.opacity = "";
+      parent.insertBefore(count2, roll);
       roll.remove();
       clip3.remove();
     }
   };
-  return { wrench: glyph, count, distance: Math.round(radius * 14) / 10, settle };
+  return { wrench: glyph2, count: count2, distance: Math.round(radius * 14) / 10, settle };
 };
 
 // src/ui/ranking.ts
@@ -5845,17 +5845,17 @@ var stageKeyTitle = (stage, packages) => {
 };
 var rankRow = (entry, max, packages) => {
   const order = stageOrder(Object.keys(entry.byStage), packages);
-  const segments = [];
+  const segments2 = [];
   for (const stage of order) {
     const value3 = entry.byStage[stage] ?? 0;
     if (value3 > 0) {
-      segments.push({ stage, color: stageKeyColor(stage), title: stageKeyTitle(stage, packages), width: value3 / max * 100 });
+      segments2.push({ stage, color: stageKeyColor(stage), title: stageKeyTitle(stage, packages), width: value3 / max * 100 });
     }
   }
   const value2 = `${tokens(entry.tokens)} \xB7 ${cost(entry.usd)}`;
   const label = entry.branchLabel?.description ?? entry.key;
   const keyTitle = labelTitle(entry.branchLabel, entry.key);
-  return { key: entry.key, label, keyTitle, title: entry.title ?? "", ticket: entry.ticket === true, finished: entry.finished, value: value2, segments };
+  return { key: entry.key, label, keyTitle, title: entry.title ?? "", ticket: entry.ticket === true, finished: entry.finished, value: value2, segments: segments2 };
 };
 var rankingModel = (entries, packages) => {
   const sorted = entries.filter((entry) => entry.tokens > 0).sort((a, b) => b.tokens - a.tokens || a.key.localeCompare(b.key));
@@ -5964,11 +5964,11 @@ var text = (className, value2, y, x = 0) => {
   element.textContent = value2;
   return element;
 };
-var nodeGroup = (state, color, mark, radius, x = 0, extra, count, improvements) => {
+var nodeGroup = (state, color, mark, radius, x = 0, extra, count2, improvements) => {
   const classes = extra ? `node ${state} ${extra}` : `node ${state}`;
   const group = svgEl("g", { class: classes, transform: `translate(${x} 0)` });
   setVars(group, { "--c": color });
-  drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }), count);
+  drawNode(group, state, mark, radius, sessionRings({ stale: extra === "stale" }), count2);
   if (improvements !== void 0) {
     drawBadge(group, radius, improvements);
   }
@@ -6024,9 +6024,9 @@ var row = (title, items, note) => {
 var nodesRow = (config, color) => {
   const marks = legendMarks(config);
   const mark = legendSampleMark(marks);
-  const items = LEGEND_NODES.map(({ state, label, className, count, improvements }) => {
+  const items = LEGEND_NODES.map(({ state, label, className, count: count2, improvements }) => {
     const svg = improvements === void 0 ? sample("-13 -13 26 26", 26, 26) : sample("-14 -14 28 28", 28, 28);
-    svg.append(nodeGroup(state, color, mark, NODE_R, 0, className, count, improvements));
+    svg.append(nodeGroup(state, color, mark, NODE_R, 0, className, count2, improvements));
     return item(svg, label);
   });
   return row("Nodes", items, marksNote(marks));
@@ -6146,6 +6146,7 @@ var appendLegend = (status, bar) => {
     if (event.key !== "Escape" || !panel.classList.contains("open")) {
       return;
     }
+    event.preventDefault();
     const focused = document.activeElement;
     const inside = focused === button || focused !== null && panel.contains(focused);
     setOpen(parts, false);
@@ -6209,8 +6210,8 @@ var documentTitle = (list, selected, label) => {
     return label;
   }
   const waiting = waitingTotal(list);
-  const count = waiting > 0 ? `(${waiting}) ` : "";
-  return `${count}${selected.name} \xB7 ${label}`;
+  const count2 = waiting > 0 ? `(${waiting}) ` : "";
+  return `${count2}${selected.name} \xB7 ${label}`;
 };
 var inView = (start, end, viewStart, viewEnd) => start >= viewStart - 0.5 && end <= viewEnd + 0.5;
 var hiddenWaiting = (boxes, viewStart, viewEnd) => {
@@ -6372,14 +6373,14 @@ var startAsk = (deps, link, finish) => {
   const offers = [];
   let phase = "collect";
   let chosen;
-  let cancel = () => {
+  let cancel2 = () => {
   };
   const end = (outcome) => {
     if (phase === "done") {
       return;
     }
     phase = "done";
-    cancel();
+    cancel2();
     finish(outcome);
   };
   const pick = () => {
@@ -6391,10 +6392,10 @@ var startAsk = (deps, link, finish) => {
     phase = "go";
     chosen = offer.from;
     deps.post({ type: "go", id, to: offer.from });
-    cancel = deps.setTimer(() => end("fallback"), ACK_WAIT_MS);
+    cancel2 = deps.setTimer(() => end("fallback"), ACK_WAIT_MS);
   };
   deps.post({ type: "ask", id, repo: link.repo, session: link.session });
-  cancel = deps.setTimer(pick, OFFER_WAIT_MS);
+  cancel2 = deps.setTimer(pick, OFFER_WAIT_MS);
   return {
     receive(message) {
       if (message.id !== id) {
@@ -6408,7 +6409,7 @@ var startAsk = (deps, link, finish) => {
     },
     cancel() {
       phase = "done";
-      cancel();
+      cancel2();
     }
   };
 };
@@ -6662,6 +6663,22 @@ var byBlockPlace = (agentId) => {
 var agentFollowups = (session, agentId) => {
   return session.followups.filter((followup) => followup.origin.agentId === agentId).sort(byBlockPlace(agentId));
 };
+var FOLLOWUP_WORDS = [
+  { type: "fix", one: "fix", many: "fixes" },
+  { type: "improve", one: "improvement", many: "improvements" },
+  { type: "issue", one: "issue", many: "issues" }
+];
+var followupChips = (session, agentId) => {
+  const own = agentFollowups(session, agentId);
+  const chips = [];
+  for (const { type, one, many } of FOLLOWUP_WORDS) {
+    const count2 = own.filter((followup) => followup.type === type).length;
+    if (count2 > 0) {
+      chips.push({ type, count: count2, text: count2 === 1 ? one : many });
+    }
+  }
+  return chips;
+};
 var isReviewer = (session, agent) => {
   return agent.stage === "review" || session.rows.some((row2) => row2.reviewers.some((reviewer) => reviewer.agentId === agent.id));
 };
@@ -6699,9 +6716,9 @@ var partsOf = (progress) => {
   const shares = phases !== void 0 && phases.length === flags.length ? phases : flags.map(() => 1 / flags.length);
   return flags.map((done, index) => ({ share: shares[index], done }));
 };
-var currentOf = (progress, count) => {
+var currentOf = (progress, count2) => {
   const current = progress.current;
-  return current !== void 0 && Number.isInteger(current) && current >= 0 && current < count ? current : void 0;
+  return current !== void 0 && Number.isInteger(current) && current >= 0 && current < count2 ? current : void 0;
 };
 var improvementsOf = (progress) => {
   const improvements = progress.improvements;
@@ -6770,9 +6787,9 @@ var arcRing = (progress, done, text2) => {
   const kinds = kindArcsOf(progress, done);
   return kinds === void 0 ? { kind: "arc", done, text: text2 } : { kind: "arc", done, kinds, text: text2 };
 };
-var leadReach = (parts, shown2) => {
+var leadReach = (parts, shown3) => {
   const open2 = parts.flatMap((part, index) => part.done ? [] : [index]);
-  const extra = Math.min(shown2 - (parts.length - open2.length), open2.length);
+  const extra = Math.min(shown3 - (parts.length - open2.length), open2.length);
   return extra > 1 ? open2[extra - 1] : void 0;
 };
 var fromProgress = (progress) => {
@@ -6792,9 +6809,9 @@ var fromProgress = (progress) => {
   return current !== void 0 && current < parts.length ? { kind: "parts", parts, current, text: text2 } : { kind: "parts", parts, text: text2 };
 };
 var isAscendingCount = (value2, index, counts) => {
-  const count = Number.isInteger(value2) ? value2 : -1;
+  const count2 = Number.isInteger(value2) ? value2 : -1;
   const previous = index === 0 ? 0 : counts[index - 1];
-  return count >= previous;
+  return count2 >= previous;
 };
 var isTypicalLength = (value2) => {
   if (typeof value2 !== "object" || value2 === null) {
@@ -6816,7 +6833,7 @@ var typicalText = (used, length, share2) => {
   const p25 = percentile(length.calls, 25);
   const p75 = percentile(length.calls, 75);
   const range = p25 === p75 ? `${p25}` : `${p25} to ${p75}`;
-  const shorter = length.calls.filter((count) => count < used).length;
+  const shorter = length.calls.filter((count2) => count2 < used).length;
   if (share2 >= TYPICAL_HOLD && shorter > 0) {
     return `${calls}, longer than ${shorter} of ${length.runs} earlier runs (usually ${range})`;
   }
@@ -6833,17 +6850,17 @@ var medianFrom = (calls, from) => {
   return (calls.length - from) % 2 === 1 ? calls[middle] : (calls[middle - 1] + calls[middle]) / 2;
 };
 var expectedShare = (calls, used) => {
-  const from = calls.findIndex((count) => count >= used);
+  const from = calls.findIndex((count2) => count2 >= used);
   return from < 0 ? TYPICAL_HOLD : Math.min(used / medianFrom(calls, from), TYPICAL_HOLD);
 };
 var typicalShare = ({ length, used }) => {
   let share2 = expectedShare(length.calls, used);
-  for (const count of length.calls) {
-    if (count >= used) {
+  for (const count2 of length.calls) {
+    if (count2 >= used) {
       break;
     }
-    if (count >= 1) {
-      share2 = Math.max(share2, expectedShare(length.calls, count));
+    if (count2 >= 1) {
+      share2 = Math.max(share2, expectedShare(length.calls, count2));
     }
   }
   return share2;
@@ -6882,10 +6899,10 @@ var fromFiles = (agent, progress, typical, forms) => {
   if (!filesLead && forms?.get(agent.id) !== legStart(agent)) {
     return { ...fromTypical(typical), text: text2 };
   }
-  const shown2 = Math.max(done, Math.floor(share2 * total));
-  const lit = parts.map((part, index) => ({ share: part.share, done: index < shown2 }));
-  if (shown2 < lit.length) {
-    return { kind: "parts", parts: lit, current: shown2, text: text2 };
+  const shown3 = Math.max(done, Math.floor(share2 * total));
+  const lit = parts.map((part, index) => ({ share: part.share, done: index < shown3 }));
+  if (shown3 < lit.length) {
+    return { kind: "parts", parts: lit, current: shown3, text: text2 };
   }
   return { kind: "parts", parts: lit, text: text2 };
 };
@@ -6913,11 +6930,11 @@ var fromFixes = (agent, progress, phase, forms) => {
     const phases = PHASE_SHARES.implement.map((part, index) => ({ share: part, done: index < phase }));
     return { kind: "parts", parts: phases, current: phase, text: text2 };
   }
-  const shown2 = Math.max(done, Math.floor(share2 * total));
+  const shown3 = Math.max(done, Math.floor(share2 * total));
   const kinds = parts.some((part) => part.kind !== void 0);
-  const lit = kinds ? parts : parts.map((part, index) => ({ share: part.share, done: index < shown2 }));
+  const lit = kinds ? parts : parts.map((part, index) => ({ share: part.share, done: index < shown3 }));
   const current = lit.findIndex((part) => !part.done);
-  const reach = kinds ? leadReach(lit, shown2) : void 0;
+  const reach = kinds ? leadReach(lit, shown3) : void 0;
   if (current >= 0 && reach !== void 0) {
     return { kind: "parts", parts: lit, current, reach, text: text2 };
   }
@@ -7132,9 +7149,9 @@ var MAX_PIPS = 7;
 var KINDS = ["typecheck", "lint", "test"];
 var entriesOf = (results, kind) => results?.[kind] ?? [];
 var verifyRounds = (results) => {
-  const count = Math.max(...KINDS.map((kind) => entriesOf(results, kind).length));
+  const count2 = Math.max(...KINDS.map((kind) => entriesOf(results, kind).length));
   const rounds = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < count2; index += 1) {
     const entries = KINDS.flatMap((kind) => entriesOf(results, kind)[index] ?? []);
     if (entries.includes("fail")) {
       rounds.push("fail");
@@ -7151,9 +7168,9 @@ var verifyPips = (meter, agentRunning) => {
   const rounds = verifyRounds(meter.results);
   const used = usedRounds(meter);
   const limit = meter.limit > 0 ? meter.limit : 0;
-  const count = Math.max(limit, used);
+  const count2 = Math.max(limit, used);
   const pips = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < count2; index += 1) {
     const over = limit > 0 && index >= limit;
     let state = "empty";
     if (index < used) {
@@ -7166,7 +7183,7 @@ var verifyPips = (meter, agentRunning) => {
   }
   return pips;
 };
-var noun2 = (count) => count === 1 ? "round" : "rounds";
+var noun2 = (count2) => count2 === 1 ? "round" : "rounds";
 var roundLine = (results, index, agentRunning) => {
   const parts = [];
   for (const kind of KINDS) {
@@ -7235,8 +7252,8 @@ var nowCell = (agent, state, waitingText) => {
 };
 var ratioOf2 = (meter) => meter.limit > 0 ? Math.min(1, meter.used / meter.limit) : void 0;
 var countText3 = (meter) => meter.limit > 0 ? `${meter.used}/${meter.limit}` : String(meter.used);
-var contextSize = (count) => {
-  const value2 = Math.max(0, count);
+var contextSize = (count2) => {
+  const value2 = Math.max(0, count2);
   if (value2 >= 999500) {
     return `${Number((value2 / 1e6).toFixed(1))}M`;
   }
@@ -7407,12 +7424,12 @@ var compareRows = (a, b) => {
   const recency = (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt);
   return recency !== 0 ? recency : a.id.localeCompare(b.id);
 };
-var moreText = (rows, shown2, showAll) => {
-  const hidden = rows.length - shown2;
+var moreText = (rows, shown3, showAll) => {
+  const hidden = rows.length - shown3;
   if (hidden <= 0) {
     return void 0;
   }
-  const kinds = rows.slice(shown2).some((row2) => row2.state === "stale") ? "finished or stale" : "finished";
+  const kinds = rows.slice(shown3).some((row2) => row2.state === "stale") ? "finished or stale" : "finished";
   return showAll ? "Show fewer" : `Show all ${rows.length} agents (${hidden} more ${kinds})`;
 };
 var sessionTableModel = (session, config, showAll) => {
@@ -7422,9 +7439,9 @@ var sessionTableModel = (session, config, showAll) => {
   const activeSubagents = subagents.filter((row2) => row2.active).length;
   const active = activeSubagents + mains.filter((row2) => row2.state !== "done").length;
   const finished = subagents.length - activeSubagents;
-  const shown2 = mains.length + activeSubagents + Math.min(finished, Math.max(2, 4 - active));
+  const shown3 = mains.length + activeSubagents + Math.min(finished, Math.max(2, 4 - active));
   const rows = [...mains, ...subagents];
-  return { rows, shown: shown2, more: moreText(rows, shown2, showAll) };
+  return { rows, shown: shown3, more: moreText(rows, shown3, showAll) };
 };
 var pad2 = (value2) => String(value2).padStart(2, "0");
 var sinceStart = (ms) => {
@@ -7491,8 +7508,8 @@ var lineOf = (followup) => {
   return { id, text: text2, file, category };
 };
 var followupSections = (own) => {
-  const sectionOf2 = (type) => ({ type, items: own.filter((followup) => followup.type === type).map(lineOf) });
-  return LIST_TYPES.map(sectionOf2).filter((section2) => section2.items.length > 0);
+  const sectionOf = (type) => ({ type, items: own.filter((followup) => followup.type === type).map(lineOf) });
+  return LIST_TYPES.map(sectionOf).filter((section2) => section2.items.length > 0);
 };
 var itemFiles = (own) => {
   const files = own.map((followup) => bareItemFile(followup.file ?? ""));
@@ -7588,7 +7605,7 @@ var firstLine = (text2) => {
   }
   return "";
 };
-var replyCount = (count) => count === 1 ? "1 reply" : `${count} replies`;
+var replyCount = (count2) => count2 === 1 ? "1 reply" : `${count2} replies`;
 var isProgress2 = (message) => message.progress === true;
 var stripModel = (messages, waits = () => false) => {
   const newest2 = messages.at(-1);
@@ -7596,10 +7613,10 @@ var stripModel = (messages, waits = () => false) => {
     return void 0;
   }
   const waiting = !isProgress2(newest2) && waits(newest2);
-  const shown2 = !isProgress2(newest2) && (newest2.kind === "plan" || newest2.kind === "ask" && waiting);
-  const label = shown2 ? KIND_LABEL[newest2.kind] : "";
-  const count = replyCount(messages.filter((message) => !isProgress2(message)).length);
-  return { id: newest2.id, text: firstLine(newest2.text), kind: newest2.kind, label, at: parseTime(newest2.at), count, waiting };
+  const shown3 = !isProgress2(newest2) && (newest2.kind === "plan" || newest2.kind === "ask" && waiting);
+  const label = shown3 ? KIND_LABEL[newest2.kind] : "";
+  const count2 = replyCount(messages.filter((message) => !isProgress2(message)).length);
+  return { id: newest2.id, text: firstLine(newest2.text), kind: newest2.kind, label, at: parseTime(newest2.at), count: count2, waiting };
 };
 var sessionStillWaits = (message, session) => {
   if (message.kind !== "ask") {
@@ -7751,9 +7768,9 @@ var mainWorking = (source, now) => {
     return false;
   }
   const before = byTime(source.messages.filter((message) => !isProgress2(message))).at(-1);
-  const after = before === void 0 ? NEVER : timeOf2(before);
-  const developer = source.developerMessages.filter((message) => timeOf2(message) > after);
-  const progress = source.messages.filter((message) => isProgress2(message) && timeOf2(message) > after);
+  const after2 = before === void 0 ? NEVER : timeOf2(before);
+  const developer = source.developerMessages.filter((message) => timeOf2(message) > after2);
+  const progress = source.messages.filter((message) => isProgress2(message) && timeOf2(message) > after2);
   return openState(source, { developer, progress, before }, now)?.typing === true;
 };
 var endOfTurn = (items, from, reply) => {
@@ -7786,9 +7803,9 @@ var turnsModel = (source, now) => {
     turns.push(toTurn(open2, void 0, source));
   }
   const newestFirst4 = turns.reverse();
-  const count = source.developerMessages === void 0 ? void 0 : developer.length;
+  const count2 = source.developerMessages === void 0 ? void 0 : developer.length;
   const card = { pending: state?.state, typing: state?.typing === true, quietAt: state?.quietAt };
-  return { latest: newestFirst4[0], ...card, earlier: newestFirst4.slice(1), replies: replies.length, developer: count };
+  return { latest: newestFirst4[0], ...card, earlier: newestFirst4.slice(1), replies: replies.length, developer: count2 };
 };
 var messagePlace = (model, messageId) => {
   if (messageId === void 0) {
@@ -7851,7 +7868,7 @@ var createSessionModalSource = (sessions, sessionId, fallback = () => void 0) =>
     return memo.source;
   };
 };
-var earlierLabel = (count) => `Earlier turns (${count})`;
+var earlierLabel = (count2) => `Earlier turns (${count2})`;
 var modalTitle = (run) => {
   const title = cardTitle(run);
   return run.key ? `${run.key}: ${title}` : title;
@@ -7975,17 +7992,17 @@ var heightFrames = (from, to) => [{ height: px2(from) }, { height: px2(to) }];
 var dropFrames = () => [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }];
 var bubbleFrames = () => [{ opacity: 0, transform: `translateX(${BUBBLE_SHIFT_PX}px)` }, { opacity: 1, transform: "none" }];
 var riseFrames = () => [{ opacity: 0, transform: "translateY(10px)" }, { opacity: 1, transform: "none" }];
-var latestChange = (before, after) => {
-  if (after === void 0) {
+var latestChange = (before, after2) => {
+  if (after2 === void 0) {
     return before === void 0 ? "none" : "turn";
   }
-  if (before === void 0 || before.key !== after.key) {
+  if (before === void 0 || before.key !== after2.key) {
     return "turn";
   }
-  if (before.reply === void 0 && after.reply !== void 0) {
+  if (before.reply === void 0 && after2.reply !== void 0) {
     return "reply";
   }
-  return before.reply === after.reply ? "same" : "turn";
+  return before.reply === after2.reply ? "same" : "turn";
 };
 var anchorIndex = (tops) => {
   const below = tops.findIndex((top) => top >= 0);
@@ -8363,9 +8380,9 @@ var endLeave = (bubble) => {
 };
 var setTyping = (bubble, show, animate) => {
   const out = leaving.get(bubble);
-  const shown2 = !bubble.hidden && out === void 0;
+  const shown3 = !bubble.hidden && out === void 0;
   const going = bubble.hidden || out !== void 0 && animate;
-  if (show ? shown2 : going) {
+  if (show ? shown3 : going) {
     return;
   }
   const from = animate && out !== void 0 ? opacityNow(bubble) : 0;
@@ -8629,8 +8646,8 @@ var mainTag = (label = "main") => {
   return tag;
 };
 var drawModalTitle = (title, source, keyUrl) => {
-  const { key, after } = modalTitleKey(source);
-  setTicketKey(title, key, keyUrl, after, source.title);
+  const { key, after: after2 } = modalTitleKey(source);
+  setTicketKey(title, key, keyUrl, after2, source.title);
   title.title = source.title;
 };
 var drawHealthTitle = (title, text2) => {
@@ -8893,9 +8910,9 @@ var createModal = () => {
   const drawnHeight = (element) => element.hidden ? 0 : element.getBoundingClientRect().height;
   const fadeOutPrevious = () => {
     ghost?.remove();
-    const shown2 = [...latestArea.children].filter((child) => child instanceof HTMLElement && !child.hidden);
+    const shown3 = [...latestArea.children].filter((child) => child instanceof HTMLElement && !child.hidden);
     const copy = el("div", "main-latest-ghost");
-    copy.append(...shown2.map((child) => child.cloneNode(true)));
+    copy.append(...shown3.map((child) => child.cloneNode(true)));
     for (const named2 of copy.querySelectorAll("[id]")) {
       named2.removeAttribute("id");
     }
@@ -9222,15 +9239,15 @@ var createModal = () => {
     }
     return [head, [latestArea.hidden ? empty : latestArea], earlier.hidden ? [] : [earlier]];
   };
-  const openDelays = (contentAt, count) => {
+  const openDelays = (contentAt, count2) => {
     if (mode === "main") {
       return contentDelays(contentAt);
     }
-    return Array.from({ length: count }, (_, index) => contentAt + Math.min(index, HEALTH_DELAYED_PARTS) * CONTENT_STAGGER_MS);
+    return Array.from({ length: count2 }, (_, index) => contentAt + Math.min(index, HEALTH_DELAYED_PARTS) * CONTENT_STAGGER_MS);
   };
-  const closeDelays = (count) => {
-    const reverse = (index) => Math.min(count - 1 - index, HEALTH_CLOSE_DELAYED) * HEALTH_CLOSE_STAGGER_MS;
-    return Array.from({ length: count }, (_, index) => mode === "main" ? 0 : reverse(index));
+  const closeDelays = (count2) => {
+    const reverse = (index) => Math.min(count2 - 1 - index, HEALTH_CLOSE_DELAYED) * HEALTH_CLOSE_STAGGER_MS;
+    return Array.from({ length: count2 }, (_, index) => mode === "main" ? 0 : reverse(index));
   };
   const focusTarget = (current) => {
     if (isShown(current.opener)) {
@@ -9254,10 +9271,10 @@ var createModal = () => {
     if (own !== token) {
       return;
     }
-    const after = afterClose;
+    const after2 = afterClose;
     afterClose = void 0;
     land(animate, landing);
-    after?.();
+    after2?.();
   };
   const land = (animate, landing) => {
     const current = opened;
@@ -9553,7 +9570,7 @@ var createModal = () => {
       closeModal(() => current.open(sessionId));
     }
   };
-  const closeModal = (after) => {
+  const closeModal = (after2) => {
     const current = opened;
     if (!current || phase !== "opening" && phase !== "open") {
       return;
@@ -9564,7 +9581,7 @@ var createModal = () => {
     phase = "closing";
     root.dataset.phase = phase;
     setPageInert(false);
-    afterClose = after;
+    afterClose = after2;
     if (reducedMotion()) {
       finish(own, false);
       return;
@@ -9739,16 +9756,16 @@ var createHealthLink = (openHealth) => {
   const text2 = el("span");
   element.append(dot, text2, chevronIcon());
   element.addEventListener("click", () => openHealth(element));
-  let count = 0;
+  let count2 = 0;
   return {
     element,
     draw(report) {
       const next = report ? costChanges(report) : 0;
       element.hidden = next === 0;
-      if (next > 0 && next !== count) {
+      if (next > 0 && next !== count2) {
         setText(text2, costLinkText(next));
       }
-      count = next;
+      count2 = next;
     }
   };
 };
@@ -9843,14 +9860,14 @@ var createRanking = (context, link, openHealth, reveal, still) => {
     }
   };
   const place2 = (list, models, grow) => {
-    const made = [];
+    const made2 = [];
     let previous;
     for (const model of models) {
       let row2 = rows.get(model.key);
       if (!row2) {
         row2 = createRow(model.key, link);
         rows.set(model.key, row2);
-        made.push(row2);
+        made2.push(row2);
       }
       const expected = previous ? previous.nextSibling : list.firstChild;
       if (row2.element !== expected || row2.element.parentNode !== list) {
@@ -9861,7 +9878,7 @@ var createRanking = (context, link, openHealth, reveal, still) => {
       row2.element.classList.toggle("hl", lit?.has(model.key) ?? false);
       row2.element.classList.toggle("opens", link?.opens({ kind: "ticket", key: model.key }) ?? false);
     }
-    return made;
+    return made2;
   };
   return {
     element,
@@ -9905,7 +9922,7 @@ var createRanking = (context, link, openHealth, reveal, still) => {
       const grow = [];
       const active = [...rows.values()].find((row2) => row2.element === document.activeElement)?.element;
       const focused = active && reportingRows.has(active) ? active : void 0;
-      const made = [...place2(top, ranking.top, grow), ...place2(rest, ranking.rest, grow)];
+      const made2 = [...place2(top, ranking.top, grow), ...place2(rest, ranking.rest, grow)];
       if (focused && document.activeElement !== focused) {
         focused.focus({ preventScroll: true });
       }
@@ -9918,7 +9935,7 @@ var createRanking = (context, link, openHealth, reveal, still) => {
         }
       }
       if (motion && drawn) {
-        for (const row2 of made) {
+        for (const row2 of made2) {
           row2.element.animate(ENTER3, { duration: ENTER_MS2, easing: EASE5 });
         }
         for (const [key, row2] of rows) {
@@ -9950,8 +9967,8 @@ var branchGlance = (branches) => {
     return { branch: lane.branch, color, waiting: lane.head.waiting, title: `${laneName(lane)}: ${state}` };
   });
   const waiting = live.filter((lane) => lane.head.waiting).length;
-  const merged = branches.lanes.filter((lane) => lane.mergedAt !== void 0).length;
-  return { dots, more: live.length - dots.length, live: live.length, waiting, merged, none: live.length === 0 && merged === 0 };
+  const merged2 = branches.lanes.filter((lane) => lane.mergedAt !== void 0).length;
+  return { dots, more: live.length - dots.length, live: live.length, waiting, merged: merged2, none: live.length === 0 && merged2 === 0 };
 };
 var tokenGlance = (entries, packages) => {
   const split = /* @__PURE__ */ new Map();
@@ -9962,13 +9979,13 @@ var tokenGlance = (entries, packages) => {
   }
   const order = stageOrder(split.keys(), packages).filter((stage) => (split.get(stage) ?? 0) > 0);
   const sum = order.reduce((total2, stage) => total2 + (split.get(stage) ?? 0), 0);
-  const segments = order.map((stage) => {
+  const segments2 = order.map((stage) => {
     const width = (split.get(stage) ?? 0) / sum * 100;
     return { stage, color: stageKeyColor(stage), title: stageKeyTitle(stage, packages), width };
   });
-  const total = entries.reduce((count, entry) => count + entry.tokens, 0);
-  const usd = entries.reduce((count, entry) => count + entry.usd, 0);
-  return { tokens: total, usd, segments };
+  const total = entries.reduce((count2, entry) => count2 + entry.tokens, 0);
+  const usd = entries.reduce((count2, entry) => count2 + entry.usd, 0);
+  return { tokens: total, usd, segments: segments2 };
 };
 var createGlance = (context) => {
   const branches = el("span", "ovs ovb");
@@ -9987,9 +10004,9 @@ var createGlance = (context) => {
   const tokenPart = el("span", "ovs ovt");
   const bar = el("span", "ovm");
   bar.setAttribute("aria-hidden", "true");
-  const tokenText = el("span", "ovv");
-  tokenPart.append(el("span", "ovk", "Tokens"), bar, tokenText);
-  const segments = /* @__PURE__ */ new Map();
+  const tokenText2 = el("span", "ovv");
+  tokenPart.append(el("span", "ovk", "Tokens"), bar, tokenText2);
+  const segments2 = /* @__PURE__ */ new Map();
   let drawnDots = "";
   const drawBranches = (glance) => {
     const nextDots = JSON.stringify([glance.dots, glance.more]);
@@ -10011,20 +10028,20 @@ var createGlance = (context) => {
     setText(mergedText2, `${glance.merged} merged`);
   };
   const drawTokens = (glance) => {
-    const shown2 = glance.tokens > 0 ? glance.segments : [];
-    const present = new Set(shown2.map((segment) => segment.stage));
-    for (const [stage, drawn] of segments) {
+    const shown3 = glance.tokens > 0 ? glance.segments : [];
+    const present = new Set(shown3.map((segment) => segment.stage));
+    for (const [stage, drawn] of segments2) {
       if (!present.has(stage)) {
         drawn.element.remove();
-        segments.delete(stage);
+        segments2.delete(stage);
       }
     }
     let previous;
-    for (const segment of shown2) {
-      let drawn = segments.get(segment.stage);
+    for (const segment of shown3) {
+      let drawn = segments2.get(segment.stage);
       if (!drawn) {
         drawn = { element: el("i"), width: "", color: "", title: "" };
-        segments.set(segment.stage, drawn);
+        segments2.set(segment.stage, drawn);
       }
       const item2 = drawn.element;
       const width = `${segment.width.toFixed(2)}%`;
@@ -10046,8 +10063,8 @@ var createGlance = (context) => {
       }
       previous = item2;
     }
-    bar.hidden = shown2.length === 0;
-    setText(tokenText, glance.tokens > 0 ? `${tokens(glance.tokens)} \xB7 ${cost(glance.usd)}` : "none yet");
+    bar.hidden = shown3.length === 0;
+    setText(tokenText2, glance.tokens > 0 ? `${tokens(glance.tokens)} \xB7 ${cost(glance.usd)}` : "none yet");
   };
   return {
     branches,
@@ -10089,16 +10106,16 @@ var createOverview = (host, context, link, openHealth) => {
   let open2 = readValue(openKey, true) === "1";
   const layout = () => {
     branchesHost.hidden = !branches || branchesFailed || branches.isEmpty();
-    const shown2 = [branchesHost, ranking.element].filter((panel) => !panel.hidden).length;
-    section2.dataset.panels = String(shown2);
-    element.hidden = shown2 === 0;
+    const shown3 = [branchesHost, ranking.element].filter((panel) => !panel.hidden).length;
+    section2.dataset.panels = String(shown3);
+    element.hidden = shown3 === 0;
   };
   const ranking = createRanking(
     context,
     link,
     openHealth,
-    (shown2) => {
-      ranking.element.hidden = !shown2;
+    (shown3) => {
+      ranking.element.hidden = !shown3;
       layout();
     },
     () => !open2
@@ -10478,15 +10495,15 @@ var popsAtArrival = (keys2, dots) => {
 // src/model/leg-row.ts
 var agentLegNodes = (rows, fixes) => {
   const nodes = /* @__PURE__ */ new Map();
-  const add = (agentId, node) => {
+  const add2 = (agentId, node) => {
     nodes.set(agentId, [...nodes.get(agentId) ?? [], node]);
   };
   for (const row2 of rows) {
     for (const node of [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]) {
-      add(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
+      add2(node.agentId, { branch: row2.branch, startedAt: node.startedAt, ...node.earlierLeg ? { earlierLeg: true } : {} });
     }
     for (const fix of fixes ? row2.fixes : []) {
-      add(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
+      add2(fix.agentId, { branch: row2.branch, ...fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt } });
     }
   }
   return nodes;
@@ -10524,8 +10541,8 @@ var agentColumn = (rows, agentId, branch, docsAgentId) => {
 };
 
 // src/ui/graph/columns.ts
-var buildColumns = (shown2, natural, x0, room = {}) => {
-  const ids = STAGE_IDS.filter((id) => shown2[id]);
+var buildColumns = (shown3, natural, x0, room = {}) => {
+  const ids = STAGE_IDS.filter((id) => shown3[id]);
   const byId = {};
   const columns = [];
   let x = x0;
@@ -10539,8 +10556,8 @@ var buildColumns = (shown2, natural, x0, room = {}) => {
   }
   return { ids, byId, columns, end: x };
 };
-var columnAnchors = (set, natural, y, after) => set.ids.map((id, index) => {
-  const previous = index === 0 ? after : set.ids[index - 1];
+var columnAnchors = (set, natural, y, after2) => set.ids.map((id, index) => {
+  const previous = index === 0 ? after2 : set.ids[index - 1];
   const from = previous ? { from: { key: keys.column(previous), dx: natural[previous] - COLUMN_LEAD } } : {};
   return { kind: "anchor", key: keys.column(id), at: { x: set.byId[id]?.start ?? 0, y }, ...from };
 });
@@ -10725,6 +10742,49 @@ var clickTarget = (layout, key) => {
   }
   return void 0;
 };
+var cardStage = (session, card) => {
+  const ref = card.ref;
+  if (ref.kind === "fix" || ref.kind === "pr" || ref.kind === "docs") {
+    return ref.kind;
+  }
+  if (ref.kind !== "agent") {
+    return "plan";
+  }
+  if (session.rows.some((row2) => row2.reviewers.some((node) => node.agentId === card.agentId))) {
+    return "review";
+  }
+  const runs = session.rows.flatMap((row2) => row2.streams.flatMap((stream) => stream.runs));
+  return runs.some((run) => run.agentId === card.agentId) ? "implement" : "plan";
+};
+var cardOrder = (layout, session) => {
+  const byKey = new Map(layout.items.map((item2) => [item2.key, item2]));
+  const pointOf = (item2, depth) => {
+    const own = targetOf(item2);
+    const ref = own === void 0 ? attachmentOf(item2) : void 0;
+    const base = ref === void 0 || depth > 8 ? void 0 : byKey.get(ref.key);
+    const at = base === void 0 ? void 0 : pointOf(base, depth + 1);
+    if (own !== void 0 || at === void 0 || ref === void 0) {
+      return own;
+    }
+    return [at[0] + (ref.dx ?? 0), at[1] + (ref.dy ?? 0)];
+  };
+  const placed = [];
+  for (const item2 of layout.items) {
+    const card = item2.kind === "node" ? cardOf(item2) : void 0;
+    const point2 = card === void 0 ? void 0 : pointOf(item2, 0);
+    if (card !== void 0 && point2 !== void 0) {
+      placed.push({ card, column: STAGE_IDS.indexOf(cardStage(session, card)), x: point2[0], y: point2[1] });
+    }
+  }
+  return placed.sort((a, b) => a.column - b.column || a.y - b.y || a.x - b.x).map((entry) => entry.card);
+};
+var cardOf = (item2) => {
+  if (isCompactKey(item2.key) || item2.card === void 0 || item2.agentId === void 0) {
+    return void 0;
+  }
+  const { ref, startedAt } = item2.card;
+  return startedAt === void 0 ? { key: item2.key, agentId: item2.agentId, ref } : { key: item2.key, agentId: item2.agentId, ref, startedAt };
+};
 var cardTarget = (layout, key) => {
   const item2 = isCompactKey(key) ? void 0 : layout.items.find((entry) => entry.key === key);
   if (item2?.kind !== "node" || item2.card === void 0 || item2.agentId === void 0) {
@@ -10753,9 +10813,9 @@ var foldedPipelines = (session, expanded) => {
 var pipelineLabel = (index) => `Pipeline ${index + 1}`;
 var mergedRows = (rows) => rows.filter((row2) => row2.merge?.state === "done");
 var headerText = (index, title) => title ? `${pipelineLabel(index)} \xB7 ${title}` : pipelineLabel(index);
-var compactTip = (index, title, merged) => {
-  const count = merged === 1 ? "1 branch merged" : `${merged} branches merged`;
-  const text2 = title ? `${pipelineLabel(index)}: ${title} \xB7 ${count}` : `${pipelineLabel(index)} \xB7 ${count}`;
+var compactTip = (index, title, merged2) => {
+  const count2 = merged2 === 1 ? "1 branch merged" : `${merged2} branches merged`;
+  const text2 = title ? `${pipelineLabel(index)}: ${title} \xB7 ${count2}` : `${pipelineLabel(index)} \xB7 ${count2}`;
   return `${text2}
 ${OPEN_HINT}`;
 };
@@ -10783,8 +10843,8 @@ var fixCountOf = (session, reviewer) => {
   if (reviewer.state !== "changes") {
     return {};
   }
-  const count = session.followups.filter((item2) => item2.type === "fix" && item2.origin.agentId === reviewer.agentId).length;
-  return count > 0 ? { count } : {};
+  const count2 = session.followups.filter((item2) => item2.type === "fix" && item2.origin.agentId === reviewer.agentId).length;
+  return count2 > 0 ? { count: count2 } : {};
 };
 var improvementCountOf = (session, reviewer) => {
   if (reviewer.state !== "approved" && reviewer.state !== "changes") {
@@ -10811,8 +10871,8 @@ var staleOf = (row2, tipped) => {
   }
   return tipped ? { staleApproval: files, tip: staleApprovalText(files) } : { staleApproval: files };
 };
-var fixesText = (count) => count === 1 ? "1 fix" : `${count} fixes`;
-var improvementsText = (count) => count === 1 ? "1 improvement" : `${count} improvements`;
+var fixesText = (count2) => count2 === 1 ? "1 fix" : `${count2} fixes`;
+var improvementsText = (count2) => count2 === 1 ? "1 improvement" : `${count2} improvements`;
 var drawsText = (session, ref) => {
   if (ref.kind === "fix") {
     return "Fix";
@@ -10997,7 +11057,7 @@ ${ring.text}` };
 };
 var placeSession = (session, options, room) => {
   const items = [];
-  const add = (item2) => {
+  const add2 = (item2) => {
     items.push(item2);
   };
   const edge = (key, a, b, state, color, shape, extra = {}) => {
@@ -11021,7 +11081,7 @@ var placeSession = (session, options, room) => {
     groupOf4(session.agents[agentId].pipeline).agents.push(agentId);
   }
   const planAgents = groups2.filter((group) => !group.folded).flatMap((group) => group.agents);
-  const shown2 = {
+  const shown3 = {
     plan: true,
     implement: rows.length > 0,
     join: rows.some((row2) => row2.join !== void 0),
@@ -11032,7 +11092,7 @@ var placeSession = (session, options, room) => {
     promote: session.promote !== void 0,
     docs: docs !== void 0
   };
-  const wrap = options.wrap && LINE_B.some((id) => shown2[id]);
+  const wrap = options.wrap && LINE_B.some((id) => shown3[id]);
   const plans = rows.map((row2) => {
     const pill = pillText(row2);
     const { parents, depths } = streamParents(row2.streams);
@@ -11207,9 +11267,9 @@ var placeSession = (session, options, room) => {
     merge: Math.ceil(Math.max(NATURAL.merge, ...mergeLabels.map((width2) => width2 + 24)))
   };
   const inLineB = (id) => wrap && LINE_B.includes(id);
-  const setA = buildColumns({ ...shown2, ...Object.fromEntries(LINE_B.map((id) => [id, shown2[id] && !wrap])) }, natural, X0, room.a);
+  const setA = buildColumns({ ...shown3, ...Object.fromEntries(LINE_B.map((id) => [id, shown3[id] && !wrap])) }, natural, X0, room.a);
   const bStart = setA.byId.implement?.start ?? setA.end;
-  const shownB = { ...shown2, plan: false, implement: false, join: false, review: false };
+  const shownB = { ...shown3, plan: false, implement: false, join: false, review: false };
   const setB = wrap ? buildColumns(shownB, natural, bStart, room.b) : { ids: [], byId: {}, columns: [], end: bStart };
   const lacking = { a: {}, b: {} };
   let lacks = false;
@@ -11224,8 +11284,8 @@ var placeSession = (session, options, room) => {
   const planAt = { x: px4, y: midY };
   const planState = session.plan.state === "idle" ? "running" : session.plan.state;
   const idle = session.plan.state === "idle" ? { idle: true } : {};
-  add({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R2, agentId: "main", ...idle, ...slide2("plan", planAt) });
-  add({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R2 + LABEL_GAP), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
+  add2({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R2, agentId: "main", ...idle, ...slide2("plan", planAt) });
+  add2({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R2 + LABEL_GAP), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
   const agentKeys = /* @__PURE__ */ new Map([["main", sessionKeys.plan]]);
   const keyRows = legRows(session, session.rows, homeRow, false);
   const targetRows = legRows(session, rows, legRow, true);
@@ -11241,17 +11301,17 @@ var placeSession = (session, options, room) => {
       if (foldable) {
         const hitAt = { x: headerAt.x - HEADER_HIT_PAD, y: headerAt.y - 3.5 - HEADER_HIT / 2 };
         const hitTip = group.folded ? OPEN_HINT : FOLD_HINT;
-        add({ kind: "rect", key: sessionKeys.headerHit(group.index), role: "hit", at: hitAt, width: textWidth(header) + 2 * HEADER_HIT_PAD, height: HEADER_HIT, tip: hitTip, ...base });
+        add2({ kind: "rect", key: sessionKeys.headerHit(group.index), role: "hit", at: hitAt, width: textWidth(header) + 2 * HEADER_HIT_PAD, height: HEADER_HIT, tip: hitTip, ...base });
       }
       const headerTip = foldable ? { tip: group.folded ? OPEN_HINT : FOLD_HINT } : {};
-      add({ kind: "text", key: sessionKeys.header(group.index), at: headerAt, text: header, tone: "group", anchor: "start", ...base, ...headerTip });
+      add2({ kind: "text", key: sessionKeys.header(group.index), at: headerAt, text: header, tone: "group", anchor: "start", ...base, ...headerTip });
       extent = Math.max(extent, headerAt.x + textWidth(header));
       if (group !== current) {
         const label = group.title ? `${pipelineLabel(group.index)}: ${group.title}` : pipelineLabel(group.index);
         const tip = group.folded ? {} : { tip: foldable ? `${label}
 ${FOLD_HINT}` : label };
         const at = { x: px4, y: group.mid };
-        add({ kind: "node", key: sessionKeys.pipelineDot(group.index), at, state: "done", color: "shared", mark: "", radius: DOT_R2, ...tip, ...base, from: { key: sessionKeys.plan } });
+        add2({ kind: "node", key: sessionKeys.pipelineDot(group.index), at, state: "done", color: "shared", mark: "", radius: DOT_R2, ...tip, ...base, from: { key: sessionKeys.plan } });
       }
     }
     edge(sessionKeys.mainLine, { key: sessionKeys.pipelineDot(groups2[0].index), dy: DOT_R2 }, { key: sessionKeys.plan, dy: -NODE_R2 }, "done", "shared", "line");
@@ -11277,9 +11337,9 @@ ${FOLD_HINT}` : label };
       }
       const dot = { edges: [`edge:agent:${agentId}`], when: "start", color: "shared", back: true };
       const card = { ref: { kind: "agent", agentId } };
-      add({ kind: "node", key, at, state: agent.state, color: "shared", mark: markOf(agent.model, options), radius: SMALL_R, stale, ...base, from: { key: anchor.key }, dot, card });
+      add2({ kind: "node", key, at, state: agent.state, color: "shared", mark: markOf(agent.model, options), radius: SMALL_R, stale, ...base, from: { key: anchor.key }, dot, card });
       const tone2 = isActive3(agent.state) ? "reviewer" : "reviewer-dim";
-      add({ kind: "text", key: `text:agent:${agentId}`, at: { key, dx: -(SMALL_R + LABEL_GAP), dy: 3.5 }, text: agent.role, tone: tone2, anchor: "end", ...base });
+      add2({ kind: "text", key: `text:agent:${agentId}`, at: { key, dx: -(SMALL_R + LABEL_GAP), dy: 3.5 }, text: agent.role, tone: tone2, anchor: "end", ...base });
     });
   }
   const forkRunKey = (plan) => {
@@ -11289,8 +11349,8 @@ ${FOLD_HINT}` : label };
   };
   const lineBStarted = /* @__PURE__ */ new Set();
   const intoLineB = (plan, fromY) => wrap ? { shape: "wrap", extra: { drop: plan.split - fromY } } : { shape: "curve", extra: {} };
-  const fixRun = (plan, index, count, fromY) => {
-    const nest = count - 1 - index;
+  const fixRun = (plan, index, count2, fromY) => {
+    const nest = count2 - 1 - index;
     const reach = nest > 0 ? { reach: nest * LANE_STEP } : {};
     const turn = index > 0 ? { turn: TURN + index * NEST_TURN } : {};
     return { drop: plan.split + nest * LANE_STEP - fromY, ...reach, ...turn };
@@ -11346,7 +11406,7 @@ ${FOLD_HINT}` : label };
     const pillFrom = unfolds ? { from: { key: sessionKeys.compactPill(branch) }, fromElse: sessionKeys.compactMore(row2.pipeline) } : { from: { key: origin.key } };
     const branchEdge = `edge:branch:${branch}`;
     const worktree = { edges: [branchEdge], when: "appear", color };
-    add({ kind: "pill", key: pillKey, at: { x: pl + pillW / 2, y }, text: pill, color, ...pillTip(row2), ...base, ...pillFrom, dot: worktree });
+    add2({ kind: "pill", key: pillKey, at: { x: pl + pillW / 2, y }, text: pill, color, ...pillTip(row2), ...base, ...pillFrom, dot: worktree });
     edge(branchEdge, origin, { key: pillKey, dx: -pillW / 2 }, forked ? "fork" : "done", color, branchShape.shape, { ...base, ...branchShape.extra });
     placedY.set(pillKey, y);
     const pillExit = { key: pillKey, dx: pillW / 2 };
@@ -11372,9 +11432,9 @@ ${FOLD_HINT}` : label };
         const joinEdge = plan.multi ? `edge:join:${branch}:${stream.id}` : `edge:join:${branch}`;
         const dot = { edges: [inKey], when: "start", color: laneColor, ...last ? { out: [joinEdge] } : {} };
         const card = { ref: { kind: "agent", agentId: run.agentId }, startedAt: run.startedAt };
-        add({ kind: "node", key, at, state: run.state, color: laneColor, mark, radius: NODE_R2, stale: run.stale, ...nodeBase, from: { key: previousKey }, dot, card });
+        add2({ kind: "node", key, at, state: run.state, color: laneColor, mark, radius: NODE_R2, stale: run.stale, ...nodeBase, from: { key: previousKey }, dot, card });
         if (index > 0) {
-          add({ kind: "text", key: `text:run:${token}`, at: { key, dy: -(NODE_R2 + LABEL_GAP) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
+          add2({ kind: "text", key: `text:run:${token}`, at: { key, dy: -(NODE_R2 + LABEL_GAP) }, text: `run ${index + 1}`, tone: "note", anchor: "middle", ...nodeBase });
         }
         previous = { key, dx: NODE_R2 };
         previousKey = key;
@@ -11395,7 +11455,7 @@ ${FOLD_HINT}` : label };
         const width2 = pillWidth(stream.package);
         const laneKey = sessionKeys.lanePill(branch, stream.id);
         const left = laneBase + FORK_STEP * depth;
-        add({ kind: "pill", key: laneKey, at: { x: left + width2 / 2, y: laneY }, text: stream.package, color: laneColor, ...base, from: { key: laneOrigin.key } });
+        add2({ kind: "pill", key: laneKey, at: { x: left + width2 / 2, y: laneY }, text: stream.package, color: laneColor, ...base, from: { key: laneOrigin.key } });
         edge(`edge:lane:${branch}:${stream.id}`, laneOrigin, { key: laneKey, dx: -width2 / 2 }, stream.runs.length > 0 ? "done" : "pending", laneColor, "curve", base);
         runChain(stream, { key: laneKey, dx: width2 / 2 }, laneKey, left + plan.lanePillW + RUN_GAP, laneY, laneColor);
       });
@@ -11417,7 +11477,7 @@ ${FOLD_HINT}` : label };
     };
     if (plan.fromText !== void 0) {
       const at = { key: pillKey, dx: -pillW / 2, dy: plan.labelTop + TEXT_ASCENT };
-      add({ kind: "text", key: sessionKeys.from(branch), at, text: plan.fromText, tone: "note", anchor: "start", ...base });
+      add2({ kind: "text", key: sessionKeys.from(branch), at, text: plan.fromText, tone: "note", anchor: "start", ...base });
     }
     const join = column("join");
     if (row2.join && join) {
@@ -11431,7 +11491,7 @@ ${FOLD_HINT}` : label };
       }
       const diffEdge = plan.multi && middleLane ? `edge:join:${branch}:${middleLane.streamId}` : `edge:join:${branch}`;
       const dot = { edges: [diffEdge], when: "appear", color };
-      add({ kind: "bar", key: barKey, x: join.center, y0: Math.min(...ys) - 13, y1: Math.max(...ys) + 13, state: barState, ...base, ...slide2("join", { x: join.center, y }), dot });
+      add2({ kind: "bar", key: barKey, x: join.center, y0: Math.min(...ys) - 13, y1: Math.max(...ys) + 13, state: barState, ...base, ...slide2("join", { x: join.center, y }), dot });
       if (plan.multi) {
         for (const lane of laneExits) {
           edge(`edge:join:${branch}:${lane.streamId}`, lane.exit, { xKey: barKey, dx: -3, yKey: lane.lane }, "done", color, "curve", base);
@@ -11456,7 +11516,7 @@ ${FOLD_HINT}` : label };
       const nestOut = Math.max(0, ...dys.filter((dy) => dy !== 0).map(outRank)) * LANE_STEP;
       const outX = rx + SMALL_R + LABEL_GAP + 5 + labelWidth + 10 + nestOut;
       const reviewKey = sessionKeys.review(branch);
-      add({ kind: "anchor", key: reviewKey, at: { x: outX, y }, ...base, ...slide2("review", { x: outX, y }) });
+      add2({ kind: "anchor", key: reviewKey, at: { x: outX, y }, ...base, ...slide2("review", { x: outX, y }) });
       const feed = exit;
       row2.reviewers.forEach((reviewer, index) => {
         const ry = y + dys[index];
@@ -11481,9 +11541,9 @@ ${FOLD_HINT}` : label };
         const dot = { edges: [loopKey], when: "start", color: "review", out: [`${edgeKey}>review`], ...firstRound };
         const counts = { ...fixCountOf(session, reviewer), ...improvementCountOf(session, reviewer) };
         const card = { ref: { kind: "agent", agentId: reviewer.agentId }, startedAt: reviewer.startedAt };
-        add({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...counts, ...nodeBase, ...enter, dot, card });
+        add2({ kind: "node", key, at: nodeAt, state: reviewer.state, color: "review", mark, radius: SMALL_R, stale: reviewer.stale, ...counts, ...nodeBase, ...enter, dot, card });
         const tone2 = isEnded(reviewer.state) ? "reviewer-dim" : "reviewer";
-        add({ kind: "text", key: `text:agent:${token}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
+        add2({ kind: "text", key: `text:agent:${token}`, at: { key, dx: SMALL_R + LABEL_GAP, dy: 3.5 }, text: label, tone: tone2, anchor: "start", ...nodeBase });
         labelledRight.add(key);
         if (isEnded(reviewer.state) || answered) {
           const labelOut = { xKey: key, dx: SMALL_R + LABEL_GAP + 1 + textWidth(label), yKey: key };
@@ -11533,10 +11593,10 @@ ${FOLD_HINT}` : label };
         const fixStart = fix.startedAt === void 0 ? {} : { startedAt: fix.startedAt };
         const card = byMain ? {} : { card: { ref: { kind: "fix", branch, fixId: fix.id }, ...fixStart } };
         const fixNode = { at: { x: fx, y: fy }, state: fix.state, color: byMain ? "shared" : color, mark, radius: NODE_R2, stale: fix.stale };
-        add({ kind: "node", key, ...fixNode, ...nodeBase, ...from, dot, ...card });
+        add2({ kind: "node", key, ...fixNode, ...nodeBase, ...from, dot, ...card });
         const label = fixLabelOf(fix);
         const labelAt = stacked ? { key, dx: NODE_R2 + LABEL_GAP, dy: 3.5 } : { key, dy: FIX_LABEL_DY + plan.labelShift };
-        add({ kind: "text", key: `text:fix:${branch}:${fix.id}`, at: labelAt, text: label, tone: "note", anchor: stacked ? "start" : "middle", ...nodeBase });
+        add2({ kind: "text", key: `text:fix:${branch}:${fix.id}`, at: labelAt, text: label, tone: "note", anchor: stacked ? "start" : "middle", ...nodeBase });
         if (stacked) {
           labelledRight.add(key);
         }
@@ -11598,9 +11658,9 @@ ${FOLD_HINT}` : label };
       const dot = { edges: [inKey], when: "appear", color };
       const card = agentId === void 0 ? {} : { card: { ref: { kind: "pr", branch } } };
       const stale = staleOf(row2, card.card === void 0);
-      add({ kind: "node", key, at: { x: prX, y: lineY }, state: row2.pr.state, color, mark, radius: NODE_R2, ...nodeBase, from: { key: exit.key }, dot, ...card, ...stale });
+      add2({ kind: "node", key, at: { x: prX, y: lineY }, state: row2.pr.state, color, mark, radius: NODE_R2, ...nodeBase, from: { key: exit.key }, dot, ...card, ...stale });
       if (row2.pr.pr) {
-        add({ kind: "text", key: `text:pr:${branch}`, at: { key, dy: FIX_LABEL_DY + plan.labelShift }, text: `#${row2.pr.pr.number}`, tone: "note", anchor: "middle", ...base });
+        add2({ kind: "text", key: `text:pr:${branch}`, at: { key, dy: FIX_LABEL_DY + plan.labelShift }, text: `#${row2.pr.pr.number}`, tone: "note", anchor: "middle", ...base });
       }
       exit = { key, dx: NODE_R2 };
       exitReach = void 0;
@@ -11619,11 +11679,11 @@ ${FOLD_HINT}` : label };
       edge(inKey, exit, { key, dx: -NODE_R2 }, waiting ? "waiting" : "done", color, into.shape, { ...base, ...into.extra });
       const mergeFrom = unfolds ? sessionKeys.compactMerge(row2.pipeline) : exit.key;
       const dot = { edges: [inKey], when: "done", color };
-      add({ kind: "node", key, at: { x: mergeX, y: lineY }, state: waiting ? "waiting" : "done", color, mark: "", radius: NODE_R2, ...base, from: { key: mergeFrom }, dot });
+      add2({ kind: "node", key, at: { x: mergeX, y: lineY }, state: waiting ? "waiting" : "done", color, mark: "", radius: NODE_R2, ...base, from: { key: mergeFrom }, dot });
       if (!waiting) {
         const text2 = mergeText(session, row2);
         const labelAt = { key, dy: FIX_LABEL_DY + plan.labelShift };
-        add({ kind: "text", key: `text:merge:${branch}`, at: labelAt, text: text2, tone: row2.merge.afterEnd ? "late" : "note", anchor: "middle", ...base });
+        add2({ kind: "text", key: `text:merge:${branch}`, at: labelAt, text: text2, tone: row2.merge.afterEnd ? "late" : "note", anchor: "middle", ...base });
         reach("merge", mergeX + textWidth(text2) / 2);
       }
       exit = { key, dx: NODE_R2 };
@@ -11637,14 +11697,14 @@ ${FOLD_HINT}` : label };
       const abovePr = { x: wrap ? prX - NODE_R2 : prX, y: lineY - NODE_R2 - 6 };
       const at = mergeX === void 0 ? abovePr : { x: (prX + mergeX) / 2, y: lineY - 8 };
       const anchor = mergeX === void 0 && wrap ? "start" : "middle";
-      add({ kind: "text", key: `text:rebased:${branch}`, at, text: "rebased", tone: "note", anchor, ...base });
+      add2({ kind: "text", key: `text:rebased:${branch}`, at, text: "rebased", tone: "note", anchor, ...base });
     }
     rowExits.set(branch, { exit, y: exitY });
     if (row2.continuedIn) {
       const text2 = `continued in ${linkLabel(session, row2.continuedIn, LINK_FALLBACK.continuedIn)}`;
       const onB = endB > 0;
       const x = (onB ? endB : endX) + CONTINUED_DX;
-      add({ kind: "text", key: sessionKeys.continued(branch), at: { x, y: endY + 3.5 }, text: text2, tone: "note", anchor: "start", ...base });
+      add2({ kind: "text", key: sessionKeys.continued(branch), at: { x, y: endY + 3.5 }, text: text2, tone: "note", anchor: "start", ...base });
       extent = Math.max(extent, x + textWidth(text2));
       rowsRight = Math.max(rowsRight, x + textWidth(text2));
       const set = onB ? setB : setA;
@@ -11673,34 +11733,34 @@ ${FOLD_HINT}` : label };
     const cy = group.mid;
     const base = { pipeline: index };
     const widths = group.rows.map((row2) => pillWidth(pillText(row2)) - 4);
-    const moreWidth = (count) => pillWidth(`+${count}`) - 4;
-    const endOf = (count) => pillsLeft + widths.slice(0, count).reduce((sum, width2) => sum + width2 + COMPACT_GAP, 0) - COMPACT_GAP;
+    const moreWidth = (count2) => pillWidth(`+${count2}`) - 4;
+    const endOf = (count2) => pillsLeft + widths.slice(0, count2).reduce((sum, width2) => sum + width2 + COMPACT_GAP, 0) - COMPACT_GAP;
     const pillRoom = summaryMin - SUMMARY_GAP;
-    let shown3 = group.rows.length;
-    if (endOf(shown3) > pillRoom) {
-      shown3 = Math.max(1, shown3 - 1);
-      while (shown3 > 1 && endOf(shown3) + COMPACT_GAP + moreWidth(group.rows.length - shown3) > pillRoom) {
-        shown3 -= 1;
+    let shown4 = group.rows.length;
+    if (endOf(shown4) > pillRoom) {
+      shown4 = Math.max(1, shown4 - 1);
+      while (shown4 > 1 && endOf(shown4) + COMPACT_GAP + moreWidth(group.rows.length - shown4) > pillRoom) {
+        shown4 -= 1;
       }
     }
     const hitKey = sessionKeys.compactHit(index);
     const hitAt = { x: px4 - HIT_LEFT, y: cy - HIT_HALF };
     const hitIndex = items.length;
     let x = pillsLeft;
-    group.rows.slice(0, shown3).forEach((row2, slot) => {
+    group.rows.slice(0, shown4).forEach((row2, slot) => {
       const key = sessionKeys.compactPill(row2.branch);
       const pillAt = { x: x + widths[slot] / 2, y: cy };
-      add({ kind: "pill", key, at: pillAt, text: pillText(row2), color: rowColor(row2), compact: true, branch: row2.branch, ...pillTip(row2), ...base, from: { key: sessionKeys.pill(row2.branch) } });
+      add2({ kind: "pill", key, at: pillAt, text: pillText(row2), color: rowColor(row2), compact: true, branch: row2.branch, ...pillTip(row2), ...base, from: { key: sessionKeys.pill(row2.branch) } });
       x += widths[slot] + COMPACT_GAP;
     });
-    const hidden = group.rows.slice(shown3);
+    const hidden = group.rows.slice(shown4);
     if (hidden.length > 0) {
       const width2 = moreWidth(hidden.length);
       const tip = hidden.map((row2) => row2.branch).join(", ");
       const moreKey = sessionKeys.compactMore(index);
       const moreAt = { x: x + width2 / 2, y: cy };
       const moreFrom = { key: sessionKeys.pill(hidden[0].branch) };
-      add({ kind: "pill", key: moreKey, at: moreAt, text: `+${hidden.length}`, color: "shared", compact: true, tip, ...base, from: moreFrom });
+      add2({ kind: "pill", key: moreKey, at: moreAt, text: `+${hidden.length}`, color: "shared", compact: true, tip, ...base, from: moreFrom });
       x += width2 + COMPACT_GAP;
     }
     const first = group.rows[0];
@@ -11715,10 +11775,10 @@ ${FOLD_HINT}` : label };
     const summary = agents.length === 0 ? "main thread" : `${plural(agents.length, "agent")} \xB7 ${cost(spent)}`;
     const summaryKey = sessionKeys.compactSummary(index);
     const sx = Math.max(x - COMPACT_GAP + SUMMARY_GAP, summaryMin);
-    add({ kind: "text", key: summaryKey, at: { x: sx, y: cy + 3.5 }, text: summary, tone: "note", anchor: "start", ...base });
+    add2({ kind: "text", key: summaryKey, at: { x: sx, y: cy + 3.5 }, text: summary, tone: "note", anchor: "start", ...base });
     let end = sx + textWidth(summary);
-    const merged = mergedRows(group.rows);
-    if (merged.length > 0) {
+    const merged2 = mergedRows(group.rows);
+    if (merged2.length > 0) {
       const checkKey = sessionKeys.compactMerge(index);
       const feeders = promotedOf(group.rows);
       const feedsPromote2 = session.promote !== void 0 && feeders.length > 0;
@@ -11728,13 +11788,13 @@ ${FOLD_HINT}` : label };
         column2 = Math.max(column2, rowsRight + SUMMARY_GAP, gateReach + SUMMARY_GAP);
       }
       const checkX = Math.max(column2, end + 2 * SUMMARY_GAP + DOT_R2);
-      const mergeRow = merged.find(mergeDrawn);
+      const mergeRow = merged2.find(mergeDrawn);
       const from = mergeRow ? { from: { key: sessionKeys.merge(mergeRow.branch) } } : {};
-      const label = mergedText(merged);
+      const label = mergedText(merged2);
       const tailFrom = { key: summaryKey, dx: textWidth(summary) + SUMMARY_GAP, dy: -3.5 };
       edge(`edge:compact-tail:${index}`, tailFrom, { key: checkKey, dx: -DOT_R2 }, "compact", "shared", "line", base);
-      add({ kind: "node", key: checkKey, at: { x: checkX, y: cy }, state: "done", color: "review", mark: "", radius: DOT_R2, ...base, ...from });
-      add({ kind: "text", key: sessionKeys.compactMerged(index), at: { key: checkKey, dx: CHECK_LABEL, dy: 3.5 }, text: label, tone: "late", anchor: "start", ...base });
+      add2({ kind: "node", key: checkKey, at: { x: checkX, y: cy }, state: "done", color: "review", mark: "", radius: DOT_R2, ...base, ...from });
+      add2({ kind: "text", key: sessionKeys.compactMerged(index), at: { key: checkKey, dx: CHECK_LABEL, dy: 3.5 }, text: label, tone: "late", anchor: "start", ...base });
       end = checkX + CHECK_LABEL + textWidth(label);
       if (feedsPromote2 && wrap && promoteHost) {
         compactFeeds.push({ index, key: checkKey, y: cy + DOT_R2, x: checkX, state: feedState });
@@ -11745,7 +11805,7 @@ ${FOLD_HINT}` : label };
       }
     }
     const hitWidth = end + SUMMARY_GAP - hitAt.x;
-    const hitTip = compactTip(index, group.title, merged.length);
+    const hitTip = compactTip(index, group.title, merged2.length);
     const hit = { kind: "rect", key: hitKey, role: "hit", at: hitAt, width: hitWidth, height: 2 * HIT_HALF, tip: hitTip, ...base };
     items.splice(hitIndex, 0, hit);
     return end + SUMMARY_GAP;
@@ -11762,7 +11822,7 @@ ${FOLD_HINT}` : label };
     if (newestKey !== void 0) {
       dot = { edges: joined ? [newestKey, sessionKeys.promoteIn] : [newestKey], when: "appear", color: "amber" };
     }
-    add({ kind: "node", key: sessionKeys.promote, at, state: session.promote.state, color: "amber", mark: "", radius: NODE_R2, ...slide2("promote", at), ...dot ? { dot } : {} });
+    add2({ kind: "node", key: sessionKeys.promote, at, state: session.promote.state, color: "amber", mark: "", radius: NODE_R2, ...slide2("promote", at), ...dot ? { dot } : {} });
     const mergeLineB = setB.byId.merge;
     const promoteRight = Math.max(rowsRight, gateReach) + SUMMARY_GAP;
     extent = Math.max(extent, promoteRight + TURN_REACH);
@@ -11859,7 +11919,7 @@ ${FOLD_HINT}` : label };
     }
     const dot = inKey === void 0 ? void 0 : { edges: [inKey], when: "start", color: "shared" };
     const card = agentId === void 0 ? {} : { card: { ref: { kind: "docs" } } };
-    add({ kind: "node", key: sessionKeys.docs, at, state: docs.state, color: "shared", mark, radius: NODE_R2, ...base, ...slide2("docs", at), ...dot ? { dot } : {}, ...card });
+    add2({ kind: "node", key: sessionKeys.docs, at, state: docs.state, color: "shared", mark, radius: NODE_R2, ...base, ...slide2("docs", at), ...dot ? { dot } : {}, ...card });
   }
   const you = session.plan.you;
   let planGate = false;
@@ -11871,7 +11931,7 @@ ${FOLD_HINT}` : label };
       state = "done";
     }
     planGate = true;
-    add({ kind: "gate", key: sessionKeys.planGate, gate: "plan", at: { x: px4, y: GATE_Y }, state, agentId: "main", from: { key: sessionKeys.plan } });
+    add2({ kind: "gate", key: sessionKeys.planGate, gate: "plan", at: { x: px4, y: GATE_Y }, state, agentId: "main", from: { key: sessionKeys.plan } });
     const stem = state === "waiting" ? "gate-link-on" : "gate-link";
     edge("edge:gate:plan", { key: sessionKeys.planGate, dy: 9 }, { key: sessionKeys.plan, dy: -(NODE_R2 + 2) }, stem, "shared", "line", { agentId: "main" });
   }
@@ -11896,12 +11956,12 @@ ${FOLD_HINT}` : label };
     if (wrap && targetPlan) {
       const half = mergeWaits ? GATE_HALF.waiting : GATE_HALF.done;
       const gateAt = { x: gateColumn.center + NODE_R2 + MERGE_STEM + half, y: targetPlan.yB };
-      add({ kind: "gate", key: mergeGate, gate: "merge", at: gateAt, state, ...base, from: { key: target } });
+      add2({ kind: "gate", key: mergeGate, gate: "merge", at: gateAt, state, ...base, from: { key: target } });
       edge(stemKey, { key: target, dx: NODE_R2 + 2 }, { key: mergeGate, dx: -half }, stem, "shared", "line", base);
       extent = Math.max(extent, gateAt.x + GATE_BUBBLE.dx + BUBBLE_RADIUS + 2);
     } else {
       const gateAt = { x: gateColumn.center, y: GATE_Y };
-      add({ kind: "gate", key: mergeGate, gate: "merge", at: gateAt, state, ...base, from: { key: target } });
+      add2({ kind: "gate", key: mergeGate, gate: "merge", at: gateAt, state, ...base, from: { key: target } });
       edge(stemKey, { key: mergeGate, dy: 9 }, { key: target, dy: -(NODE_R2 + 2) }, stem, "shared", "line", base);
     }
   }
@@ -11968,7 +12028,7 @@ ${FOLD_HINT}` : label };
       continue;
     }
     const tip = `${question.source.role} asked the main thread: ${question.text} \xB7 handled`;
-    add({ kind: "node", key, at, state: "done", color: "review", mark: "", radius: CHECK_R, agentId: question.source.agentId, tip });
+    add2({ kind: "node", key, at, state: "done", color: "review", mark: "", radius: CHECK_R, agentId: question.source.agentId, tip });
   }
   const now = /* @__PURE__ */ new Set();
   if (session.endedAt === void 0) {
@@ -12000,7 +12060,7 @@ ${FOLD_HINT}` : label };
   const labelY = height - 7;
   items.push(...stageLabels(setA, wrap ? labelY - SECOND_LABEL_ROW : labelY, tone, labelX, midY), ...stageLabels(setB, labelY, tone, labelX, midY));
   for (const group of multi ? groups2.slice(1) : []) {
-    add({ kind: "rect", key: sessionKeys.separator(group.index), role: "separator", at: { x: X0, y: group.top - SEPARATOR_ABOVE }, width: extent - X0, height: 1, pipeline: group.index });
+    add2({ kind: "rect", key: sessionKeys.separator(group.index), role: "separator", at: { x: X0, y: group.top - SEPARATOR_ABOVE }, width: extent - X0, height: 1, pipeline: group.index });
   }
   const width = Math.ceil(extent + RIGHT_PAD);
   const layout = { width, height, columns: [...setA.columns, ...setB.columns], items, feeds: {}, lines: wrap ? 2 : 1 };
@@ -12229,14 +12289,14 @@ var createScene = (host, context) => {
     const width = Math.floor(box.pw + PIXEL_EPSILON);
     const height = Math.floor(box.h * box.pw / box.w + PIXEL_EPSILON);
     const viewBox = `0 0 ${fixed2(box.w)} ${fixed2(box.h)}`;
-    const shown2 = `${viewBox} ${width} ${height}`;
-    if (shown2 === shownView) {
+    const shown3 = `${viewBox} ${width} ${height}`;
+    if (shown3 === shownView) {
       return;
     }
     svg.setAttribute("viewBox", viewBox);
     svg.style.setProperty("width", `${width}px`);
     svg.style.setProperty("height", `${height}px`);
-    shownView = shown2;
+    shownView = shown3;
   };
   const position = (ref) => placeOf(entries, ref);
   const layerOf = (item2) => {
@@ -12365,8 +12425,6 @@ var createScene = (host, context) => {
     const open2 = card && item2.key === cardKey;
     setAttribute(element, "tabindex", card ? "0" : void 0);
     setAttribute(element, "role", card ? "button" : void 0);
-    setAttribute(element, "aria-haspopup", card ? "dialog" : void 0);
-    setAttribute(element, "aria-expanded", card ? String(open2) : void 0);
     setAttribute(element, "aria-label", card ? item2.name : void 0);
     element.classList.toggle("open", open2);
   };
@@ -12376,13 +12434,13 @@ var createScene = (host, context) => {
       return;
     }
     const badge = [...element.children].find((child) => child.classList.contains("node-badge") && child.classList.contains("amber"));
-    const count = item2.staleApproval ?? 0;
-    if (count <= 0) {
+    const count2 = item2.staleApproval ?? 0;
+    if (count2 <= 0) {
       badge?.remove();
     } else if (badge) {
-      setBadgeCount(badge, count);
+      setBadgeCount(badge, count2);
     } else {
-      drawBadge(element, item2.radius, count, entry.badgeLow === true, true);
+      drawBadge(element, item2.radius, count2, entry.badgeLow === true, true);
     }
   };
   const placeBadge = (entry, before, still) => {
@@ -12474,18 +12532,18 @@ var createScene = (host, context) => {
         break;
       }
       case "bubble": {
-        const count = item2.questionIds.length;
+        const count2 = item2.questionIds.length;
         const title = svgEl("title");
         title.textContent = item2.summary;
-        const ring = svgEl("rect", { class: "bubble-ring", x: -RING, y: -RING, width: RING + bubbleReach(count) + 3, height: 2 * RING, rx: RING });
+        const ring = svgEl("rect", { class: "bubble-ring", x: -RING, y: -RING, width: RING + bubbleReach(count2) + 3, height: 2 * RING, rx: RING });
         const core = svgEl("g", { class: "bubble-core" });
         if (item2.blocking) {
           core.append(svgEl("circle", { class: "bubble-halo", r: BUBBLE_RADIUS }));
         }
         core.append(svgEl("circle", { r: BUBBLE_RADIUS }), textElement("bubble-text", "?", { y: 4 }));
         const parts = [title, ring, core];
-        if (count > 1) {
-          parts.push(textElement("bubble-count", String(count), { x: BUBBLE_COUNT_X, y: 3.2 }));
+        if (count2 > 1) {
+          parts.push(textElement("bubble-count", String(count2), { x: BUBBLE_COUNT_X, y: 3.2 }));
         }
         element.setAttribute("class", item2.blocking ? "bubble" : "bubble non-blocking");
         element.classList.toggle("quiet", item2.quiet);
@@ -12570,8 +12628,8 @@ var createScene = (host, context) => {
     const share2 = tweenShare(elapsed2);
     tweenPlacements(entries, tween.starts, share2);
     const from = tween.view;
-    const along = (start, goal) => share2 === 1 ? goal : start + (goal - start) * share2;
-    view = { w: along(from.w, viewTarget.w), h: along(from.h, viewTarget.h), pw: along(from.pw, viewTarget.pw) };
+    const along2 = (start, goal) => share2 === 1 ? goal : start + (goal - start) * share2;
+    view = { w: along2(from.w, viewTarget.w), h: along2(from.h, viewTarget.h), pw: along2(from.pw, viewTarget.pw) };
     return elapsed2 >= TWEEN_MS;
   };
   const step = (share2, time2) => {
@@ -12633,12 +12691,12 @@ var createScene = (host, context) => {
       }
       const lengths = paths.map((path) => path.getTotalLength());
       const total = lengths.reduce((sum, length) => sum + length, 0);
-      dot.trail.forEach((circle, index) => {
+      dot.trail.forEach((circle2, index) => {
         const progress = Math.min(1, Math.max(0, (time2 - index * TRAIL_LAG_MS - dot.start) / DOT_MS));
         const travelled = easeInOutCubic(progress);
         const point2 = pointAlong(paths, lengths, total * (dot.reverse ? 1 - travelled : travelled));
-        circle.setAttribute("cx", fixed2(point2.x));
-        circle.setAttribute("cy", fixed2(point2.y));
+        circle2.setAttribute("cx", fixed2(point2.x));
+        circle2.setAttribute("cy", fixed2(point2.y));
       });
       if (time2 - dot.start >= DOT_LIFE_MS) {
         dot.group.remove();
@@ -12902,8 +12960,8 @@ var branchChip = (session, row2) => {
 var foldChip = (session, index, open2) => {
   const rows = session.rows.filter((row2) => row2.pipeline === index);
   const title = session.pipelines.find((pipeline) => pipeline.index === index)?.title;
-  const merged = `${mergedRows(rows).length} merged`;
-  return { kind: "fold", pipeline: index, label: pipelineLabel(index), detail: title ? `${title} \xB7 ${merged}` : merged, branches: rows.map((row2) => row2.branch), open: open2 };
+  const merged2 = `${mergedRows(rows).length} merged`;
+  return { kind: "fold", pipeline: index, label: pipelineLabel(index), detail: title ? `${title} \xB7 ${merged2}` : merged2, branches: rows.map((row2) => row2.branch), open: open2 };
 };
 var sessionChips2 = (session, folded) => {
   const chips = [];
@@ -13320,8 +13378,8 @@ var createPanelShell = (context, options, make) => {
   const bar = el("div", "finished-bar");
   const toggle = el("button", "finished-toggle");
   toggle.type = "button";
-  const count = el("span", "section-count num", "0");
-  toggle.append(chevronIcon(), el("span", "section-title", options.title), count, el("span", "finished-hint", FINISHED_HINT));
+  const count2 = el("span", "section-count num", "0");
+  toggle.append(chevronIcon(), el("span", "section-title", options.title), count2, el("span", "finished-hint", FINISHED_HINT));
   const clearAll = el("button", "button finished-clear", CLEAR_ALL_TEXT);
   clearAll.type = "button";
   bar.append(toggle, clearAll);
@@ -13335,7 +13393,7 @@ var createPanelShell = (context, options, make) => {
   body.append(inner);
   element.append(bar, body);
   const cards = /* @__PURE__ */ new Map();
-  const shown2 = /* @__PURE__ */ new Set();
+  const shown3 = /* @__PURE__ */ new Set();
   let open2 = false;
   let incoming = 0;
   let displayed = -1;
@@ -13350,10 +13408,10 @@ var createPanelShell = (context, options, make) => {
     }
     const rises = displayed >= 0 && next > displayed;
     displayed = next;
-    setText(count, String(next));
+    setText(count2, String(next));
     toggle.setAttribute("aria-label", `${options.title}, ${next}`);
     if (rises && !context.reducedMotion()) {
-      count.animate(BUMP_FRAMES, { duration: 500, easing: EASE7 });
+      count2.animate(BUMP_FRAMES, { duration: 500, easing: EASE7 });
     }
   };
   const dropCard = (id) => {
@@ -13387,9 +13445,9 @@ var createPanelShell = (context, options, make) => {
         dropCard(id);
       }
     }
-    for (const id of [...shown2]) {
+    for (const id of [...shown3]) {
       if (!keep2.has(id)) {
-        shown2.delete(id);
+        shown3.delete(id);
       }
     }
     const fresh = [];
@@ -13415,7 +13473,7 @@ var createPanelShell = (context, options, make) => {
       guardStep(id, row2.element, () => row2.frame(clock, time2));
     }
     for (const [id, card] of cards) {
-      if (shown2.has(id)) {
+      if (shown3.has(id)) {
         guardStep(id, card.element, () => card.frame(clock, time2));
       }
     }
@@ -13443,12 +13501,12 @@ var createPanelShell = (context, options, make) => {
   };
   return {
     element,
-    count,
+    count: count2,
     toggle,
     body,
     rows,
     cards,
-    shown: shown2,
+    shown: shown3,
     isOpen: () => open2,
     guard: guardStep,
     dropCard,
@@ -13456,7 +13514,7 @@ var createPanelShell = (context, options, make) => {
     sync,
     frame,
     expect,
-    visibleCards: () => open2 ? [...shown2].filter((id) => cards.has(id)) : []
+    visibleCards: () => open2 ? [...shown3].filter((id) => cards.has(id)) : []
   };
 };
 var createFinishedSessionsPanel = (context, options) => {
@@ -13477,7 +13535,7 @@ var createFinishedSessionsPanel = (context, options) => {
     onClearAll: () => clearAll()
   };
   const shell = createPanelShell(context, shellOptions, make);
-  const { rows, cards, shown: shown2 } = shell;
+  const { rows, cards, shown: shown3 } = shell;
   const toastOwner = {};
   let latest;
   let summaryIndex = /* @__PURE__ */ new Map();
@@ -13512,9 +13570,9 @@ var createFinishedSessionsPanel = (context, options) => {
     const row2 = rows.rows.get(id);
     const state = states.get(id) ?? "hidden";
     if (state === "shown") {
-      shown2.add(id);
+      shown3.add(id);
     } else {
-      shown2.delete(id);
+      shown3.delete(id);
     }
     if (!row2) {
       return;
@@ -13650,7 +13708,7 @@ var createFinishedSessionsPanel = (context, options) => {
       for (const [id, row2] of rows.rows) {
         drawRow(id, row2);
       }
-      for (const id of shown2) {
+      for (const id of shown3) {
         if (fullOf(id)) {
           drawCard(id);
         }
@@ -13790,9 +13848,9 @@ var keysOf2 = (questions) => {
   const seen = /* @__PURE__ */ new Map();
   const keys2 = /* @__PURE__ */ new Map();
   for (const question of questions) {
-    const count = (seen.get(question.id) ?? 0) + 1;
-    seen.set(question.id, count);
-    keys2.set(question, count === 1 ? question.id : `${question.id}#${count}`);
+    const count2 = (seen.get(question.id) ?? 0) + 1;
+    seen.set(question.id, count2);
+    keys2.set(question, count2 === 1 ? question.id : `${question.id}#${count2}`);
   }
   return keys2;
 };
@@ -13859,9 +13917,9 @@ var toItem = (question, key, clock, streamName, words) => {
 };
 var questionsModel = (questions, clock, streamName, words) => {
   const keys2 = keysOf2(questions);
-  const shown2 = questions.filter((question) => isVisible(question, clock));
-  const relaying = new Set(shown2.map((question) => question.relays?.id).filter((id) => id !== void 0));
-  const visible = shown2.filter((question) => !(question.state === "relayed" && relaying.has(question.id))).sort(compare);
+  const shown3 = questions.filter((question) => isVisible(question, clock));
+  const relaying = new Set(shown3.map((question) => question.relays?.id).filter((id) => id !== void 0));
+  const visible = shown3.filter((question) => !(question.state === "relayed" && relaying.has(question.id))).sort(compare);
   const open2 = questions.filter((question) => question.state === "open" && question.audience === "user").length;
   const heading2 = visible.some((question) => question.audience === "user") ? HEADING_USER : HEADING_MAIN;
   const items = visible.map((question) => toItem(question, keys2.get(question) ?? question.id, clock, streamName, words));
@@ -13873,9 +13931,9 @@ var newOpenQuestions = (previous, next) => {
   }
   const known = new Set(keysOf2(previous).values());
   const keys2 = keysOf2(next);
-  const keyOf = (question) => keys2.get(question) ?? question.id;
-  const fresh = next.filter((question) => question.state === "open" && question.audience === "user" && !known.has(keyOf(question)));
-  return fresh.map(keyOf);
+  const keyOf2 = (question) => keys2.get(question) ?? question.id;
+  const fresh = next.filter((question) => question.state === "open" && question.audience === "user" && !known.has(keyOf2(question)));
+  return fresh.map(keyOf2);
 };
 var flyFrames = (from, to, steps = 14) => {
   const control = { x: (from.x + to.x) / 2, y: Math.min(from.y, to.y) - 50 };
@@ -13898,9 +13956,9 @@ var latestSlide = /* @__PURE__ */ new WeakMap();
 var slide = (element, open2, scale) => {
   const height = element.offsetHeight;
   const closed = { height: "0px", opacity: 0, transform: scale ? "translateY(-8px) scale(.98)" : "translateY(-8px)" };
-  const shown2 = { height: `${height}px`, opacity: 1, transform: "none" };
+  const shown3 = { height: `${height}px`, opacity: 1, transform: "none" };
   element.classList.add("sliding");
-  const frames = open2 ? [closed, shown2] : [shown2, closed];
+  const frames = open2 ? [closed, shown3] : [shown3, closed];
   const animation = element.animate(frames, { duration: open2 ? 550 : 400, easing: EASE8, fill: open2 ? "none" : "forwards" });
   latestSlide.set(element, animation);
   const done = () => {
@@ -13920,10 +13978,10 @@ var createQuestionsCore = (host, context, options) => {
   const section2 = el("section", "questions");
   section2.setAttribute("aria-label", HEADING_USER);
   section2.hidden = true;
-  const count = el("span", "questions-count");
+  const count2 = el("span", "questions-count");
   const title = el("span", "questions-title", HEADING_USER);
   const heading2 = el("div", "questions-heading");
-  heading2.append(title, count);
+  heading2.append(title, count2);
   const list = el("div", "questions-list");
   section2.append(heading2, list);
   host.append(section2);
@@ -14076,7 +14134,7 @@ var createQuestionsCore = (host, context, options) => {
   };
   const render = (clock, animate) => {
     const model = questionsModel(input.questions, clock, input.streamName, input.words);
-    setText(count, model.count);
+    setText(count2, model.count);
     if (model.items.length > 0) {
       setText(title, model.heading);
       if (section2.getAttribute("aria-label") !== model.heading) {
@@ -14213,100 +14271,67 @@ var createSessionQuestionsView = (host, context, options = {}) => {
   };
 };
 
-// src/ui/fixture-link.ts
-var FIXTURE_LINK_TEXT = "fixture";
-var FIXTURE_LINK_TITLE = "Save this session's spool lines as a replay fixture";
-var FIXTURE_LINK_TEXTS = { idle: FIXTURE_LINK_TEXT, saving: "saving\u2026", busy: "busy", failed: "failed" };
-var FIXTURE_ANNOUNCEMENTS = {
-  idle: "",
-  saving: "Saving the session fixture",
-  busy: "Another fixture is being saved; try again in a moment",
-  failed: "The session fixture could not be saved"
+// src/ui/agent-view/stage.ts
+var windowViewport = () => {
+  const bar = document.querySelector(".topbar")?.getBoundingClientRect();
+  return { width: window.innerWidth, height: window.innerHeight, top: Math.max(0, bar?.bottom ?? 0) };
 };
-var FIXTURE_NOTE_MS = 2e3;
-var dispositionName = (header, fallback) => /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
-var plainClick2 = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
-var saveBlob = (blob, name) => {
-  const url = URL.createObjectURL(blob);
-  const anchor = el("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-};
-var browserDeps = () => ({ save: saveBlob });
-var createFixtureLink = (context, deps = browserDeps()) => {
-  const download = context.config.sessionFixtures ? context.source.fixture : void 0;
-  if (!download) {
-    return void 0;
-  }
-  const element = el("a", "session-fixture", FIXTURE_LINK_TEXT);
-  element.hidden = true;
-  element.title = FIXTURE_LINK_TITLE;
-  element.setAttribute("aria-label", FIXTURE_LINK_TITLE);
-  element.setAttribute("download", "");
-  const status = el("span", "visually-hidden");
-  status.setAttribute("role", "status");
-  let id = "";
-  let state = "idle";
-  let timer;
-  let destroyed = false;
-  const show = (next) => {
-    state = next;
-    clearTimeout(timer);
-    timer = void 0;
-    setText(element, FIXTURE_LINK_TEXTS[next]);
-    setText(status, FIXTURE_ANNOUNCEMENTS[next]);
-    if (next === "busy" || next === "failed") {
-      timer = setTimeout(() => show("idle"), FIXTURE_NOTE_MS);
-    }
-  };
-  const request = async (sessionId) => {
-    try {
-      const response = await download.read(context.repositoryId, sessionId);
-      if (!response.ok) {
-        return response.status === 429 ? "busy" : "failed";
-      }
-      const name = dispositionName(response.headers.get("content-disposition"), `${sessionId.slice(0, 8)}.ndjson`);
-      deps.save(await response.blob(), name);
-      return "idle";
-    } catch {
-      return "failed";
-    }
-  };
-  const save = async () => {
-    if (state === "saving" || id === "") {
-      return;
-    }
-    show("saving");
-    const next = await request(id);
-    if (!destroyed) {
-      show(next);
-    }
-  };
-  element.addEventListener("click", (event) => {
-    if (plainClick2(event)) {
-      event.preventDefault();
-      void save();
-    }
-  });
+var createCardStage = (card, content, viewport2 = windowViewport) => {
+  let state = "closed";
   return {
-    element,
-    status,
-    set(next) {
-      if (next === id) {
+    card,
+    content,
+    enter(view) {
+      if (view.parentElement !== card) {
+        card.append(view);
+      }
+      card.classList.remove("av-leaving");
+      card.classList.add("av-open");
+      content.inert = true;
+      content.setAttribute("aria-hidden", "true");
+      state = "open";
+    },
+    hideContent() {
+      if (state === "open") {
+        content.classList.add("av-away");
+      }
+    },
+    restore() {
+      if (state !== "open") {
         return;
       }
-      id = next;
-      element.hidden = id === "";
-      element.setAttribute("href", download.url(context.repositoryId, id));
+      state = "leaving";
+      card.classList.remove("av-open");
+      card.classList.add("av-leaving");
+      content.inert = false;
+      content.removeAttribute("aria-hidden");
+      content.classList.remove("av-away");
     },
-    save,
-    destroy() {
-      destroyed = true;
-      clearTimeout(timer);
-    }
+    leave(view) {
+      if (view.parentElement !== card) {
+        return;
+      }
+      view.remove();
+      if (state === "leaving") {
+        state = "closed";
+        card.classList.remove("av-leaving");
+      }
+    },
+    viewport: viewport2,
+    isOpen: () => state === "open"
   };
+};
+
+// src/model/call-check.ts
+var checkStateOf = (call) => {
+  const { check: check2 } = call;
+  if (!check2) {
+    return void 0;
+  }
+  if (check2.result !== "running") {
+    return check2.result;
+  }
+  return call.endedAt === void 0 ? "running" : "unknown";
 };
 
 // src/ui/followups.ts
@@ -14317,17 +14342,18 @@ var WORDS = {
   improve: { title: "Improvements", fly: "+ improvement", color: "var(--rev)" },
   fix: { title: "Fix suggestions", fly: "+ fix suggestion", color: "var(--warm)" }
 };
+var followupColor = (type) => WORDS[type].color;
 var flyText = (type) => WORDS[type].fly;
 var flyColor = (type) => WORDS[type].color;
 var followupColumns = (followups, expanded = /* @__PURE__ */ new Set()) => {
   const ordered = [...followups].sort(compareFollowups);
   return FOLLOWUP_TYPES.map((type) => {
     const items = ordered.filter((followup) => followup.type === type);
-    const count = items.length;
+    const count2 = items.length;
     const open2 = expanded.has(type);
-    const shown2 = open2 || count <= SHOWN_ITEMS ? items : items.slice(count - SHOWN_ITEMS);
-    const toggle = count <= SHOWN_ITEMS ? "" : open2 ? "Show fewer" : `Show all (${count})`;
-    return { type, title: WORDS[type].title, items, shown: shown2, count, toggle };
+    const shown3 = open2 || count2 <= SHOWN_ITEMS ? items : items.slice(count2 - SHOWN_ITEMS);
+    const toggle = count2 <= SHOWN_ITEMS ? "" : open2 ? "Show fewer" : `Show all (${count2})`;
+    return { type, title: WORDS[type].title, items, shown: shown3, count: count2, toggle };
   });
 };
 var newFollowups = (previous, next) => {
@@ -14358,11 +14384,11 @@ var followupIcon = (type) => {
   return icon2;
 };
 var SECTION_TITLES = { fix: "Fixes", improve: "Improvements", issue: "Open issues" };
-var followupSection = (type, count) => {
+var followupSection = (type, count2) => {
   const section2 = el("div", "nc-section");
   setVars(section2, { "--c": flyColor(type) });
   const heading2 = el("h4");
-  heading2.append(followupIcon(type), el("span", "nc-section-title", SECTION_TITLES[type]), el("span", "nc-count", String(count)));
+  heading2.append(followupIcon(type), el("span", "nc-section-title", SECTION_TITLES[type]), el("span", "nc-count", String(count2)));
   const list = el("ul", "nc-list");
   section2.append(heading2, list);
   return { section: section2, list };
@@ -14473,9 +14499,9 @@ var createSessionFollowupsView = (host, context, options) => {
     element.dataset.type = type;
     element.style.setProperty("--c", flyColor(type));
     const title = el("span", "followup-column-title");
-    const count = el("span", "followup-column-count", "0");
+    const count2 = el("span", "followup-column-count", "0");
     const head = el("h4");
-    head.append(followupIcon(type), title, count);
+    head.append(followupIcon(type), title, count2);
     const list = el("div", "followup-list");
     const empty = el("div", "followup-empty", "None yet");
     const more = el("button", "show-all");
@@ -14491,7 +14517,7 @@ var createSessionFollowupsView = (host, context, options) => {
     });
     element.append(head, list, empty, more);
     grid.append(element);
-    return { type, element, head, title, count, list, empty, more };
+    return { type, element, head, title, count: count2, list, empty, more };
   };
   const columnOf = (type) => {
     let column = columns.get(type);
@@ -14514,7 +14540,7 @@ var createSessionFollowupsView = (host, context, options) => {
     const entered = [];
     for (const model of followupColumns(followups, expanded)) {
       const column = columnOf(model.type);
-      const shown2 = new Set(model.shown);
+      const shown3 = new Set(model.shown);
       const nodes = [];
       for (const followup of model.items) {
         let entry = items.get(followup.id);
@@ -14525,7 +14551,7 @@ var createSessionFollowupsView = (host, context, options) => {
         const entering2 = entry.at !== followup.at;
         entry.at = followup.at;
         fillItem(entry, followup, session);
-        if (shown2.has(followup)) {
+        if (shown3.has(followup)) {
           nodes.push(entry.element);
           if (entering2) {
             entered.push(entry.element);
@@ -14569,10 +14595,10 @@ var createSessionFollowupsView = (host, context, options) => {
       const box = layer.getBoundingClientRect();
       const half = { x: chip.offsetWidth / 2, y: chip.offsetHeight / 2 };
       const source = options.flySource?.(followup.origin.agentId)?.getBoundingClientRect();
-      const centre = source ? centreIn(source, box) : { x: box.width / 2, y: box.height / 2 };
+      const centre2 = source ? centreIn(source, box) : { x: box.width / 2, y: box.height / 2 };
       const folded = !open2;
       const head = (folded ? toggle : column.head).getBoundingClientRect();
-      const origin = { x: centre.x - half.x, y: centre.y - half.y };
+      const origin = { x: centre2.x - half.x, y: centre2.y - half.y };
       const target = { x: head.left - box.left + 16, y: centreIn(head, box).y - half.y };
       const remove = () => chip.remove();
       const land = () => {
@@ -14598,27 +14624,6 @@ var createSessionFollowupsView = (host, context, options) => {
       first = false;
     },
     frame: () => void 0,
-    revealFollowups(type) {
-      const column = columns.get(type);
-      if (destroyed || section2.hidden || column === void 0) {
-        return;
-      }
-      setOpen2(true);
-      toggle.focus({ preventScroll: true });
-      const reduced = context.reducedMotion();
-      const behavior = reduced ? "auto" : "smooth";
-      column.head.scrollIntoView({ block: "nearest", behavior });
-      if (reduced) {
-        return;
-      }
-      const timer = window.setTimeout(() => {
-        timers.delete(timer);
-        if (!destroyed) {
-          column.element.scrollIntoView({ block: "nearest", behavior });
-        }
-      }, FLASH_DELAY_MS);
-      timers.add(timer);
-    },
     destroy() {
       destroyed = true;
       current = void 0;
@@ -14626,451 +14631,6 @@ var createSessionFollowupsView = (host, context, options) => {
         window.clearTimeout(timer);
       }
       timers.clear();
-    }
-  };
-};
-
-// src/ui/graph/fit.ts
-var SCALE_MAX = 1.06;
-var SCALE_FLOOR = 0.7;
-var UNWRAP_AT = 0.74;
-var fitGraph = (session, options, hostWidth, wrapped) => {
-  if (!(hostWidth > 0)) {
-    const layout = sessionLayout(session, { ...options, wrap: wrapped });
-    return { layout, scale: SCALE_MAX, wrap: layout.lines === 2 };
-  }
-  const single = sessionLayout(session, { ...options, wrap: false });
-  const ratio = hostWidth / single.width;
-  const floor = wrapped ? UNWRAP_AT : SCALE_FLOOR;
-  if (ratio >= floor) {
-    return { layout: single, scale: Math.min(SCALE_MAX, ratio), wrap: false };
-  }
-  const double = sessionLayout(session, { ...options, wrap: true });
-  if (double.lines === 1 || double.width >= single.width) {
-    return { layout: single, scale: Math.min(SCALE_MAX, ratio), wrap: false };
-  }
-  return { layout: double, scale: Math.min(SCALE_MAX, hostWidth / double.width), wrap: true };
-};
-
-// src/ui/graph/session-effects.ts
-var MESSAGE_POP_MS = 80;
-var QUESTION_POP_MS = 80;
-var NONE = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [], badges: [], fills: [] };
-var isEnded2 = (state) => !isActive2(state) && state !== "pending" && state !== "skipped";
-var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
-var SHEEN_STATES = ["done", "approved", "changes"];
-var sheensOf = (previous, current, pops) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
-  const sheens = [];
-  for (const item2 of current.items) {
-    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
-      continue;
-    }
-    const old = before.get(item2.key);
-    if (old?.kind === "node" && old.state === "running" && old.stale !== true) {
-      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
-      sheens.push({ key: item2.key, delay: pop + POP_MS2 });
-    }
-  }
-  return sheens;
-};
-var filledKeys = (previous, current) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
-  const keys2 = [];
-  for (const item2 of current.items) {
-    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
-      continue;
-    }
-    const old = before.get(item2.key);
-    if (old?.kind === "node" && old.state === "running" && old.stale !== true && old.progress !== void 0) {
-      keys2.push(item2.key);
-    }
-  }
-  return keys2;
-};
-var rollsOf = (previous, current, pops) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
-  const rolls = [];
-  for (const item2 of current.items) {
-    const old = before.get(item2.key);
-    if (item2.kind !== "node" || item2.state !== "changes" || item2.count === void 0 || old?.kind !== "node") {
-      continue;
-    }
-    if (old.state === "running") {
-      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
-      rolls.push({ key: item2.key, delay: pop + POP_MS2 + SHEEN_MS });
-    } else if (old.state === "changes" && old.count === void 0) {
-      rolls.push({ key: item2.key, delay: 0 });
-    }
-  }
-  return rolls;
-};
-var VERDICTS = ["approved", "changes"];
-var badgesOf = (previous, current, pops) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
-  const badges = [];
-  for (const item2 of current.items) {
-    const old = before.get(item2.key);
-    if (item2.kind !== "node" || item2.improvements === void 0 || old?.kind !== "node") {
-      continue;
-    }
-    if (old.state === "running") {
-      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
-      badges.push({ key: item2.key, delay: pop + POP_MS2 + SHEEN_MS });
-    } else if (VERDICTS.includes(old.state) && old.improvements === void 0) {
-      badges.push({ key: item2.key, delay: 0 });
-    }
-  }
-  return [...badges, ...staleBadgesOf(before, current, pops)];
-};
-var staleBadgesOf = (before, current, pops) => {
-  const badges = [];
-  for (const item2 of current.items) {
-    const old = before.get(item2.key);
-    if (item2.kind !== "node" || item2.staleApproval === void 0 || old?.kind !== "node" || old.staleApproval !== void 0) {
-      continue;
-    }
-    const stopped = old.state === "running" && SHEEN_STATES.includes(item2.state);
-    const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
-    badges.push({ key: item2.key, delay: stopped ? pop + POP_MS2 + SHEEN_MS : 0 });
-  }
-  return badges;
-};
-var foldsOf = (previous, current) => {
-  const before = foldedPipelines(previous.session, previous.expanded);
-  const after = foldedPipelines(current.session, current.expanded);
-  const opened = [...before].filter((index) => !after.has(index)).map((pipeline) => ({ pipeline, open: true }));
-  const closed = [...after].filter((index) => !before.has(index)).map((pipeline) => ({ pipeline, open: false }));
-  return [...opened, ...closed].sort((a, b) => a.pipeline - b.pipeline);
-};
-var edgeLength = (edge, positions) => {
-  const end = (ref) => {
-    if ("key" in ref) {
-      const at = positions.get(ref.key);
-      return at ? [at[0] + (ref.dx ?? 0), at[1] + (ref.dy ?? 0)] : void 0;
-    }
-    const x = positions.get(ref.xKey);
-    const y = positions.get(ref.yKey);
-    return x && y ? [x[0] + (ref.dx ?? 0), y[1]] : void 0;
-  };
-  const a = end(edge.a);
-  const b = end(edge.b);
-  return a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
-};
-var targetKey = (edge) => "key" in edge.b ? edge.b.key : edge.b.xKey;
-var chain = (queue, current) => {
-  if (!queue.some((dot) => dot.to?.startsWith(sessionKeys.pill("")))) {
-    return queue;
-  }
-  const edges = new Map(current.items.filter((item2) => item2.kind === "edge").map((item2) => [item2.key, item2]));
-  const positions = enterStarts(current.items.filter((item2) => item2.kind !== "edge"), () => void 0, false);
-  const startsAt = (dot, key) => {
-    const first = edges.get(dot.edges[0] ?? "");
-    return first !== void 0 && "key" in first.a && first.a.key === key;
-  };
-  const chained = [...queue];
-  for (const worktree of queue) {
-    const pill = worktree.to;
-    if (pill === void 0 || !pill.startsWith(sessionKeys.pill(""))) {
-      continue;
-    }
-    const next = chained.find((dot) => dot !== worktree && startsAt(dot, pill));
-    if (!next) {
-      continue;
-    }
-    const lengthOf = (keys2) => keys2.reduce((sum, key) => sum + edgeLength(edges.get(key), positions), 0);
-    const first = lengthOf(worktree.edges);
-    const total = first + lengthOf(next.edges);
-    const merged = { edges: [...worktree.edges, ...next.edges], color: worktree.color, to: next.to, stops: [{ key: pill, share: total > 0 ? first / total : 0.5 }] };
-    chained.splice(chained.indexOf(worktree), 1, merged);
-    chained.splice(chained.indexOf(next), 1);
-  }
-  return chained;
-};
-var leaves = (dot, edges) => {
-  const edge = edges.get((dot.reverse ? dot.edges[dot.edges.length - 1] : dot.edges[0]) ?? "");
-  const end = dot.reverse ? edge?.b : edge?.a;
-  if (end === void 0) {
-    return void 0;
-  }
-  return "key" in end ? end.key : end.xKey;
-};
-var dotsOf = (previous, current, unfolded, filled) => {
-  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
-  const edgeItems = new Map(current.items.filter((item2) => item2.kind === "edge").map((item2) => [item2.key, item2]));
-  const queue = [];
-  const fans = /* @__PURE__ */ new Map();
-  const dotted = current.items.filter((item2) => (item2.kind === "node" || item2.kind === "pill" || item2.kind === "bar") && item2.dot !== void 0);
-  for (const item2 of dotted) {
-    const dot = item2.dot;
-    const old = before.get(item2.key);
-    if (!old && item2.pipeline !== void 0 && unfolded.has(item2.pipeline)) {
-      continue;
-    }
-    const oldState = stateOf(old);
-    const state = stateOf(item2);
-    const planned = { edges: dot.edges, color: dot.color, to: item2.key };
-    if (dot.when === "start" && state !== void 0) {
-      if (isActive2(state) && !isActive2(oldState)) {
-        if (dot.fan === void 0) {
-          queue.push(planned);
-        } else {
-          fans.set(dot.fan, [...fans.get(dot.fan) ?? [], item2]);
-        }
-      }
-      const handsBack = isActive2(oldState) && isEnded2(state);
-      if (handsBack && dot.back) {
-        queue.push({ edges: dot.edges, color: dot.color, reverse: true });
-      }
-      const out = (dot.out ?? []).filter((key) => edgeItems.has(key) && before.has(targetKey(edgeItems.get(key))));
-      if (handsBack && out.length > 0 && out.length === (dot.out ?? []).length) {
-        queue.push({ edges: out, color: dot.color });
-      }
-    } else if (dot.when === "appear" && !old) {
-      queue.push(planned);
-    } else if (dot.when === "done" && state === "done" && oldState !== "done") {
-      queue.push(planned);
-    }
-  }
-  const drawn = (dot) => dot.edges.every((key) => edgeItems.has(key));
-  const waits = (dot) => filled.has(leaves(dot, edgeItems) ?? "") ? FILL_MS : 0;
-  const dots = chain(queue.filter(drawn), current).map((dot, index) => ({ ...dot, delay: index * DOT_STAGGER + waits(dot) }));
-  let slot = dots.length;
-  for (const [branch, reviewers] of fans) {
-    if (reviewers.length === 1) {
-      const [only] = reviewers;
-      const dot = only.dot;
-      dots.push({ edges: dot.edges, color: dot.color, to: only.key, delay: slot * DOT_STAGGER });
-      slot += 1;
-      continue;
-    }
-    const bar = current.items.find((item2) => item2.kind === "bar" && item2.branch === branch);
-    const feed = bar ? dots.find((dot) => dot.to === bar.key) : void 0;
-    let start = feed?.delay;
-    if (start === void 0) {
-      start = slot * DOT_STAGGER;
-      slot += 1;
-      if (bar?.dot) {
-        dots.push({ edges: bar.dot.edges, color: bar.dot.color, delay: start });
-      }
-    }
-    reviewers.forEach((reviewer, index) => {
-      const dot = reviewer.dot;
-      dots.push({ edges: dot.edges, color: dot.color, to: reviewer.key, delay: start + FAN_DELAY + index * FAN_STAGGER });
-    });
-  }
-  return dots.filter(drawn);
-};
-var newestMessage = (session) => session.messages.filter((message) => message.progress !== true).at(-1)?.id;
-var sessionEffects = (previous, current) => {
-  if (!previous) {
-    return NONE;
-  }
-  const folds = foldsOf(previous, current);
-  const unfolded = new Set(folds.filter((fold) => fold.open).map((fold) => fold.pipeline));
-  const filled = filledKeys(previous.layout, current.layout);
-  const planned = dotsOf(previous.layout, current.layout, unfolded, new Set(filled));
-  const popKeys = popsOf(previous.layout, current.layout);
-  for (const key of planned.flatMap((dot) => [...dot.to === void 0 ? [] : [dot.to], ...(dot.stops ?? []).map((stop) => stop.key)])) {
-    if (!popKeys.includes(key)) {
-      popKeys.push(key);
-    }
-  }
-  const arrivals = popsAtArrival(popKeys, planned).map((pop) => pop.key.startsWith("bubble:") ? { ...pop, delay: QUESTION_POP_MS } : pop);
-  const fills = filled.map((key) => ({ key, delay: arrivals.find((pop) => pop.key === key)?.delay ?? 0 }));
-  const pops = arrivals.map((pop) => filled.includes(pop.key) ? { ...pop, delay: pop.delay + FILL_MS } : pop);
-  const plan = current.layout.items.find((item2) => item2.key === "node:plan");
-  const message = newestMessage(current.session);
-  if (plan && message !== void 0 && message !== newestMessage(previous.session) && !pops.some((pop) => pop.key === plan.key)) {
-    pops.push({ key: plan.key, delay: MESSAGE_POP_MS });
-  }
-  const sweep = previous.session.chip.tone !== "done" && current.session.chip.tone === "done";
-  const dots = planned.map(({ edges, color, delay, reverse }) => reverse ? { edges, color, delay, reverse } : { edges, color, delay });
-  const sheens = sheensOf(previous.layout, current.layout, pops);
-  const rolls = rollsOf(previous.layout, current.layout, pops);
-  const badges = badgesOf(previous.layout, current.layout, pops);
-  return { pops, dots, sweep, folds, sheens, rolls, badges, fills };
-};
-
-// src/ui/graph/session-view.ts
-var FROM_TEXT = sessionKeys.from("");
-var CONTINUED_TEXT = sessionKeys.continued("");
-var prefixOf = (key) => key(0).slice(0, -1);
-var HEADER_TEXT2 = prefixOf(sessionKeys.header);
-var TOGGLES = [HEADER_TEXT2, prefixOf(sessionKeys.headerHit), prefixOf(sessionKeys.pipelineDot)];
-var createSessionGraphView = (host, context) => {
-  const wrapper = el("div", "session-graph");
-  host.replaceChildren(wrapper);
-  const scene = createScene(wrapper, context);
-  const expandedBySession = /* @__PURE__ */ new Map();
-  const ringForms = /* @__PURE__ */ new Map();
-  let last;
-  let hostWidth = 0;
-  let wrapped = false;
-  let relayoutAt;
-  let refit = false;
-  const expandedOf = (session) => {
-    let expanded = expandedBySession.get(session.id);
-    if (!expanded) {
-      expanded = /* @__PURE__ */ new Set();
-      expandedBySession.set(session.id, expanded);
-    }
-    return expanded;
-  };
-  const labelOf = (session) => `Stage map of ${session.key ?? session.title ?? "the session"}`;
-  const markTargets = (session, layout) => {
-    for (const element of wrapper.querySelectorAll(`[data-key^="${FROM_TEXT}"], [data-key^="${CONTINUED_TEXT}"]`)) {
-      element.classList.toggle("link", linkOf(session, element.dataset.key ?? "") !== void 0);
-    }
-    for (const element of wrapper.querySelectorAll(`[data-key^="${HEADER_TEXT2}"]`)) {
-      element.classList.toggle("toggle", foldablePipeline(session, Number((element.dataset.key ?? "").slice(HEADER_TEXT2.length))));
-    }
-    for (const element of wrapper.querySelectorAll(".node[data-key], .gate[data-key]")) {
-      element.classList.toggle("clickable", clickTarget(layout, element.dataset.key ?? "") !== void 0);
-    }
-  };
-  const draw2 = (session, mode) => {
-    const expanded = new Set(expandedOf(session));
-    const now = context.now();
-    if (!(hostWidth > 0)) {
-      hostWidth = Math.floor(wrapper.clientWidth);
-    }
-    const options = { modelLetters: context.config.modelLetters, expanded, now, typical: context.typical, ringForms };
-    const fit = fitGraph(session, options, hostWidth, wrapped);
-    wrapped = fit.wrap;
-    const current = { session, layout: fit.layout, expanded };
-    scene.set(fit.layout, labelOf(session), fit.scale);
-    if (mode === "play") {
-      scene.play(sessionEffects(last, current));
-    } else if (mode === "snap") {
-      scene.snap();
-    }
-    last = current;
-    relayoutAt = handledCheckEnds(session, now);
-    markTargets(session, fit.layout);
-  };
-  const resize = new ResizeObserver((entries) => {
-    const box = entries[entries.length - 1]?.contentRect;
-    const width = box ? Math.floor(box.width) : hostWidth;
-    if (width !== hostWidth) {
-      hostWidth = width;
-      refit = true;
-    }
-  });
-  resize.observe(wrapper);
-  const toggleFold = (pipeline) => {
-    if (!last || !foldablePipeline(last.session, pipeline)) {
-      return;
-    }
-    const expanded = expandedOf(last.session);
-    if (expanded.has(pipeline)) {
-      expanded.delete(pipeline);
-    } else {
-      expanded.add(pipeline);
-    }
-    scene.clearFocus();
-    draw2(last.session, "play");
-    const detail = { pipeline, open: expanded.has(pipeline) };
-    wrapper.dispatchEvent(new CustomEvent(SESSION_FOLD, { bubbles: true, detail }));
-  };
-  const onClick = (event) => {
-    const target = event.target instanceof Element ? event.target.closest("[data-key]") : null;
-    const key = target?.getAttribute("data-key") ?? "";
-    if (!last || key === "") {
-      return;
-    }
-    const sessionId = linkOf(last.session, key);
-    if (sessionId !== void 0) {
-      const detail = { sessionId };
-      target?.dispatchEvent(new CustomEvent(SESSION_LINK, { bubbles: true, detail }));
-      return;
-    }
-    const pipeline = last.layout.items.find((entry) => entry.key === key)?.pipeline;
-    const toggles = TOGGLES.some((prefix) => key.startsWith(prefix));
-    if (pipeline !== void 0 && (toggles || foldedPipelines(last.session, last.expanded).has(pipeline))) {
-      toggleFold(pipeline);
-      return;
-    }
-    const card = cardTarget(last.layout, key);
-    if (card !== void 0) {
-      const detail = { ...card, keyboard: false };
-      target?.dispatchEvent(new CustomEvent(SESSION_CARD, { bubbles: true, detail }));
-      return;
-    }
-    const click = clickTarget(last.layout, key);
-    if (click?.kind === "agent") {
-      const detail = { agentId: click.agentId };
-      target?.dispatchEvent(new CustomEvent(SESSION_AGENT, { bubbles: true, detail }));
-    } else if (click?.kind === "main") {
-      target?.dispatchEvent(new CustomEvent(SESSION_MAIN, { bubbles: true }));
-    }
-  };
-  wrapper.addEventListener("click", onClick);
-  const cardNodeOf = (event) => {
-    const element = event.target instanceof Element ? event.target.closest("[data-key]") : null;
-    const detail = last && element ? cardTarget(last.layout, element.getAttribute("data-key") ?? "") : void 0;
-    return element && detail ? { element, detail } : void 0;
-  };
-  const onKey = (event) => {
-    const node = event.key === "Enter" || event.key === " " ? cardNodeOf(event) : void 0;
-    if (!node) {
-      return;
-    }
-    event.preventDefault();
-    if (event.repeat) {
-      return;
-    }
-    const detail = { ...node.detail, keyboard: true };
-    node.element.dispatchEvent(new CustomEvent(SESSION_CARD, { bubbles: true, detail }));
-  };
-  const onDown = (event) => {
-    if (cardNodeOf(event)) {
-      event.preventDefault();
-    }
-  };
-  wrapper.addEventListener("keydown", onKey);
-  wrapper.addEventListener("mousedown", onDown);
-  return {
-    update(session) {
-      draw2(session, "play");
-    },
-    frame(clock, time2) {
-      if (refit && last) {
-        refit = false;
-        draw2(last.session, "snap");
-      }
-      scene.frame(time2);
-      if (relayoutAt !== void 0 && clock >= relayoutAt && last) {
-        draw2(last.session, "ease");
-      }
-    },
-    highlightQuestions(questionIds2) {
-      scene.highlight(questionIds2);
-    },
-    toggleFold,
-    folded() {
-      return last ? foldedPipelines(last.session, last.expanded) : /* @__PURE__ */ new Set();
-    },
-    focus(target) {
-      scene.focus(target);
-    },
-    node(key) {
-      return scene.node(key);
-    },
-    markCard(key) {
-      scene.markCard(key);
-    },
-    agentNode(agentId) {
-      const item2 = last?.layout.items.find((entry) => entry.kind === "node" && entry.agentId === agentId);
-      return item2 === void 0 ? void 0 : wrapper.querySelector(`[data-key="${CSS.escape(item2.key)}"]`) ?? void 0;
-    },
-    destroy() {
-      resize.disconnect();
-      wrapper.removeEventListener("click", onClick);
-      wrapper.removeEventListener("keydown", onKey);
-      wrapper.removeEventListener("mousedown", onDown);
-      scene.destroy();
-      last = void 0;
     }
   };
 };
@@ -15122,6 +14682,1885 @@ var detailStep = (state, event) => {
     case "failed":
       return state.phase === "loading" ? keep({ ...state, phase: "failed", due: false }) : keep(state);
   }
+};
+
+// src/ui/agent-view/icons.ts
+var PATHS = {
+  dot: ["M12 9.4a2.6 2.6 0 1 0 0.01 0z"],
+  eye: ["M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z", "M12 9.4a2.6 2.6 0 1 0 0.01 0z"],
+  sparkle: ["M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z"],
+  bolt: ["M13 2.5L4.5 13.5H11l-1 8 8.5-11H12z"],
+  check: ["M5 12.5l4.5 4.5L19 7.5"],
+  person: ["M12 5a3.5 3.5 0 1 0 0.01 0z", "M5.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"],
+  x: ["M6.5 6.5l11 11M17.5 6.5l-11 11"],
+  undo: ["M9 7L4.5 11.5 9 16", "M4.5 11.5H15a4.5 4.5 0 0 1 0 9h-3"],
+  clock: ["M12 3.5a8.5 8.5 0 1 0 0.01 0z", "M12 7.5V12l3 2"]
+};
+var circle = (cx, cy, r) => `M${cx} ${cy - r}a${r} ${r} 0 1 0 0.01 0z`;
+var TOOL_PATHS = {
+  file: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5"],
+  search: [circle(11, 11, 7), "M20 20l-3.6-3.6"],
+  pencil: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z", "M14 8l2 2"],
+  terminal: ["M5 8l4 4-4 4M12 17h7"],
+  branch: [circle(6, 5, 2), circle(6, 19, 2), circle(18, 7, 2), "M6 7v10M18 9c0 4.5-6 4-11 8.5"],
+  pr: [circle(6, 6, 2.5), circle(6, 18, 2.5), circle(18, 18, 2.5), "M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-4", "M13 4.5L10.5 7 13 9.5"],
+  braces: ["M8 4c-2 0-2.5 1-2.5 3v2c0 1.5-.8 2.5-2 3 1.2.5 2 1.5 2 3v2c0 2 .5 3 2.5 3M16 4c2 0 2.5 1 2.5 3v2c0 1.5.8 2.5 2 3-1.2.5-2 1.5-2 3v2c0 2-.5 3-2.5 3"],
+  lint: ["M4 7l2 2 3.5-3.5M4 14l2 2 3.5-3.5M13 7.5h7M13 14.5h7M4 20h16"],
+  flask: ["M9 3h6M10 3v6l-5.4 9.4A1.7 1.7 0 0 0 6.1 21h11.8a1.7 1.7 0 0 0 1.5-2.6L14 9V3", "M7.3 15h9.4"],
+  checkCircle: [circle(12, 12, 9), "M8 12.3l2.8 2.8L16 9.8"],
+  globe: [circle(12, 12, 8.5), "M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5c-2.4-2.6-3.6-5.4-3.6-8.5s1.2-5.9 3.6-8.5z"],
+  monitor: ["M5.5 4h13A2.5 2.5 0 0 1 21 6.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 14.5v-8A2.5 2.5 0 0 1 5.5 4z", "M8 21h8M12 17v4"],
+  users: [circle(9, 8.5, 3.2), "M3.5 19.5c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5", circle(16.5, 9.5, 2.6), "M15.5 14.6c2.6.2 4.4 1.9 5 4.9"],
+  list: ["M9 6h11M9 12h11M9 18h11", circle(4.5, 6, 1), circle(4.5, 12, 1), circle(4.5, 18, 1)],
+  plug: ["M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"],
+  dots: [circle(6, 12, 1.4), circle(12, 12, 1.4), circle(18, 12, 1.4)]
+};
+var pathGroup = (paths, x, y, size, className) => {
+  const scale = Math.round(size / 24 * 1e3) / 1e3;
+  const group = svgEl("g", { class: className, transform: `translate(${x - size / 2} ${y - size / 2}) scale(${scale})` });
+  for (const d of paths) {
+    group.append(svgEl("path", { d }));
+  }
+  return group;
+};
+var glyph = (name, x, y, size, className) => pathGroup(PATHS[name], x, y, size, className);
+var toolGlyph = (name, size) => {
+  if (name === "question") {
+    const text2 = svgEl("text", { class: "n-q", y: (size * 0.34).toFixed(1) });
+    text2.textContent = "?";
+    return text2;
+  }
+  return pathGroup(TOOL_PATHS[name], 0, 0, size, "n-ic");
+};
+var glyphIcon = (name) => {
+  const icon2 = svgEl("svg", { class: "av-ic", viewBox: "0 0 24 24", "aria-hidden": "true" });
+  for (const d of PATHS[name]) {
+    icon2.append(svgEl("path", { d }));
+  }
+  return icon2;
+};
+var arrowIcon = () => {
+  const icon2 = svgEl("svg", { class: "av-arrow", viewBox: "0 0 12 12", "aria-hidden": "true" });
+  const stroke2 = { stroke: "currentColor", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round", fill: "none" };
+  icon2.append(svgEl("path", { d: "M9.5 6h-7M5.5 3l-3 3 3 3", ...stroke2 }));
+  return icon2;
+};
+
+// hooks/browser-safe.mjs
+var BROWSER_SERVER = /playwright|puppeteer|browser|chrome|devtools|selenium|webdriver|stagehand/;
+var isBrowserTool = (tool) => {
+  if (typeof tool !== "string" || !tool.startsWith("mcp__")) {
+    return false;
+  }
+  const at = tool.indexOf("__", 5);
+  if (at <= 5) {
+    return false;
+  }
+  return BROWSER_SERVER.test(tool.slice(5, at).toLowerCase()) || tool.slice(at + 2).toLowerCase().startsWith("browser_");
+};
+
+// src/ui/agent-view/families.ts
+var LOOP_PHASES = ["observe", "think", "act", "verify"];
+var PHASE_WORDS = { observe: "Observe", think: "Think", act: "Act", verify: "Verify" };
+var FAMILIES = {
+  read: { label: "read", sector: "observe", phase: "observe", tab: "files" },
+  search: { label: "search", sector: "observe", phase: "observe", tab: "files" },
+  write: { label: "write", sector: "act", phase: "act", tab: "files" },
+  command: { label: "command", sector: "act", phase: "act", tab: "terminal" },
+  git: { label: "git", sector: "act", phase: "act", tab: "terminal" },
+  gh: { label: "gh", sector: "act", phase: "act", tab: "terminal" },
+  "check:typecheck": { label: "typecheck", sector: "verify", phase: "verify", tab: "terminal" },
+  "check:lint": { label: "lint", sector: "verify", phase: "verify", tab: "terminal" },
+  "check:test": { label: "test", sector: "verify", phase: "verify", tab: "terminal" },
+  "check:ci": { label: "ci", sector: "verify", phase: "verify", tab: "terminal" },
+  web: { label: "web", sector: "reach", phase: "observe", tab: void 0 },
+  browser: { label: "browser", sector: "reach", phase: "verify", tab: "browser" },
+  delegate: { label: "delegate", sector: "reach", phase: "act", tab: void 0 },
+  tasks: { label: "task list", sector: "reach", phase: "think", tab: "plan" },
+  ask: { label: "ask", sector: "ask", phase: void 0, tab: void 0 },
+  other: { label: "other", sector: "reach", phase: "act", tab: void 0 }
+};
+var MCP_PREFIX = "mcp:";
+var familyOf = (key) => {
+  const known = ownValue(FAMILIES, key);
+  if (known !== void 0) {
+    return { key, ...known };
+  }
+  if (key.startsWith(MCP_PREFIX)) {
+    return { key, label: key.slice(MCP_PREFIX.length), sector: "reach", phase: "observe", tab: void 0 };
+  }
+  return { key: "other", ...FAMILIES.other };
+};
+var READ_TOOLS = /* @__PURE__ */ new Set(["Read", "LS"]);
+var SEARCH_TOOLS = /* @__PURE__ */ new Set(["Grep", "Glob"]);
+var WRITE_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+var WEB_TOOLS = /* @__PURE__ */ new Set(["WebSearch", "WebFetch"]);
+var DELEGATE_TOOLS = /* @__PURE__ */ new Set(["Agent", "Task", "SendMessage"]);
+var TASK_TOOLS = /* @__PURE__ */ new Set(["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]);
+var CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/;
+var ENV_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+/;
+var bareCommand = (command) => {
+  let rest = command.trim();
+  for (let previous = ""; previous !== rest; ) {
+    previous = rest;
+    rest = rest.replace(CD_PREFIX, "").replace(ENV_PREFIX, "");
+  }
+  return rest;
+};
+var GIT = /^git\s/;
+var GIT_LOOK = /^git\s+(?:-C\s+\S+\s+)?(?:diff|log|show|status|blame)\b/;
+var GH_CHECKS = /^gh\s+pr\s+checks\b/;
+var GH = /^gh\s/;
+var mcpParts = (tool) => {
+  const parts = tool.split("__");
+  return parts.length >= 3 && parts[0] === "mcp" && parts[1] !== "" ? { server: parts[1], name: parts.slice(2).join("__") } : void 0;
+};
+var bashFamily = (call) => {
+  if (call.check !== void 0) {
+    return `check:${call.check.kind}`;
+  }
+  const command = bareCommand(call.summary);
+  if (GH_CHECKS.test(command)) {
+    return "check:ci";
+  }
+  if (GIT.test(command)) {
+    return "git";
+  }
+  return GH.test(command) ? "gh" : "command";
+};
+var callFamily = (call) => {
+  const tool = call.tool;
+  if (READ_TOOLS.has(tool)) {
+    return "read";
+  }
+  if (SEARCH_TOOLS.has(tool)) {
+    return "search";
+  }
+  if (WRITE_TOOLS.has(tool)) {
+    return "write";
+  }
+  if (tool === "Bash") {
+    return bashFamily(call);
+  }
+  if (WEB_TOOLS.has(tool)) {
+    return "web";
+  }
+  const mcp = mcpParts(tool);
+  if (mcp !== void 0) {
+    return isBrowserTool(tool) ? "browser" : `${MCP_PREFIX}${mcp.server}`;
+  }
+  if (DELEGATE_TOOLS.has(tool)) {
+    return "delegate";
+  }
+  if (TASK_TOOLS.has(tool)) {
+    return "tasks";
+  }
+  return tool === "AskUserQuestion" ? "ask" : "other";
+};
+var callPhase = (call) => {
+  const key = callFamily(call);
+  if (key === "git" && GIT_LOOK.test(bareCommand(call.summary))) {
+    return "observe";
+  }
+  return familyOf(key).phase;
+};
+var EXPECTED_PHASES = {
+  implement: ["observe", "think", "act", "verify"],
+  review: ["observe", "think", "verify"],
+  pr: ["think", "act", "verify"],
+  other: ["observe", "think"]
+};
+var toolLabel = (tool) => {
+  const mcp = mcpParts(tool);
+  return mcp === void 0 ? tool : `${mcp.server} ${mcp.name}`;
+};
+var agentCalls = (agent) => {
+  const now = agent.now;
+  if (now === void 0 || agent.recent.some((call) => call.toolUseId === now.toolUseId)) {
+    return agent.recent;
+  }
+  return [...agent.recent, now];
+};
+var clockText = (ms) => {
+  const seconds = Math.max(0, Math.floor(ms / 1e3));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+var lastEventAt = (agent) => {
+  const times = [parseTime(agent.startedAt), parseTime(agent.resumedAt)];
+  for (const call of agentCalls(agent)) {
+    times.push(parseTime(call.startedAt), parseTime(call.endedAt));
+  }
+  return Math.max(0, ...times.filter((time2) => time2 !== void 0));
+};
+var noEventText = (agent, clock) => `no event for ${clockText(clock - lastEventAt(agent))}`;
+var VERIFY_KINDS2 = ["typecheck", "lint", "test"];
+var add = (counts, key, count2) => {
+  if (count2 > 0) {
+    counts.set(key, (counts.get(key) ?? 0) + count2);
+  }
+};
+var familyCounts = (agent) => {
+  const calls = agentCalls(agent);
+  const counts = /* @__PURE__ */ new Map();
+  const endedByTool = /* @__PURE__ */ new Map();
+  const checksByKind = /* @__PURE__ */ new Map();
+  for (const call of calls) {
+    add(counts, callFamily(call), 1);
+    if (call.endedAt !== void 0 || call.outcome !== void 0) {
+      endedByTool.set(call.tool, (endedByTool.get(call.tool) ?? 0) + 1);
+    }
+    if (call.check !== void 0) {
+      checksByKind.set(call.check.kind, (checksByKind.get(call.check.kind) ?? 0) + 1);
+    }
+  }
+  const results = agent.budget.verifyRounds.results;
+  let earlierChecks = 0;
+  for (const kind of VERIFY_KINDS2) {
+    const earlier = Math.max(0, (results[kind]?.length ?? 0) - (checksByKind.get(kind) ?? 0));
+    earlierChecks += earlier;
+    add(counts, `check:${kind}`, earlier);
+  }
+  for (const [tool, output] of Object.entries(agent.budget.toolOutput)) {
+    const earlier = Math.max(0, output.calls - (endedByTool.get(tool) ?? 0));
+    if (tool === "Bash") {
+      add(counts, "command", Math.max(0, earlier - earlierChecks));
+    } else {
+      add(counts, callFamily({ tool, summary: "" }), earlier);
+    }
+  }
+  return counts;
+};
+var earlierByTool = (agent) => {
+  const ended = /* @__PURE__ */ new Map();
+  for (const call of agentCalls(agent)) {
+    if (call.endedAt !== void 0 || call.outcome !== void 0) {
+      ended.set(call.tool, (ended.get(call.tool) ?? 0) + 1);
+    }
+  }
+  const earlier = [];
+  for (const [tool, output] of Object.entries(agent.budget.toolOutput)) {
+    const count2 = Math.max(0, output.calls - (ended.get(tool) ?? 0));
+    if (count2 > 0) {
+      earlier.push([tool, count2]);
+    }
+  }
+  return earlier.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+};
+
+// src/ui/agent-view/model.ts
+var CORE_STATES = {
+  starting: { text: "Starting", color: "var(--c-idle)", glyph: "dot" },
+  observe: { text: "Observing", color: "var(--c-observe)", glyph: "eye" },
+  think: { text: "Thinking", color: "var(--c-think)", glyph: "sparkle" },
+  act: { text: "Acting", color: "var(--c-act)", glyph: "bolt" },
+  verify: { text: "Verifying", color: "var(--c-verify)", glyph: "check" },
+  wait: { text: "Waiting for you", color: "var(--you)", glyph: "person" },
+  done: { text: "Done", color: "var(--rev)", glyph: "check" },
+  failed: { text: "Failed", color: "var(--red)", glyph: "x" },
+  handed: { text: "Handed back", color: "var(--amber)", glyph: "undo" },
+  stale: { text: "Stale", color: "var(--fg-3)", glyph: "clock" }
+};
+var PHASE_GLYPHS = { observe: "eye", think: "sparkle", act: "bolt", verify: "check" };
+var ENDED = { done: "done", approved: "done", changes: "done", failed: "failed", handed: "handed" };
+var isRunning = (agent) => agent.state === "running" || agent.state === "waiting";
+var openCalls = (agent) => agentCalls(agent).filter((call) => call.endedAt === void 0 && call.outcome === void 0);
+var waitingCall = (agent) => {
+  if (!isRunning(agent)) {
+    return void 0;
+  }
+  return openPermission(agent) ?? openCalls(agent).filter((call) => call.tool === "AskUserQuestion").at(-1);
+};
+var coreState = (agent, phase) => {
+  if (!isRunning(agent)) {
+    return ENDED[agent.state] ?? "starting";
+  }
+  if (waitingCall(agent) !== void 0) {
+    return "wait";
+  }
+  if (agent.staleSince !== void 0) {
+    return "stale";
+  }
+  return agentCalls(agent).length === 0 ? "starting" : phase ?? "think";
+};
+var ringShare = (ring) => {
+  if (ring.kind === "arc") {
+    return Math.max(0, Math.min(1, ring.done));
+  }
+  const done = ring.parts.filter((part) => part.done).reduce((sum, part) => sum + part.share, 0);
+  return Math.max(0, Math.min(1, done));
+};
+var coreFill = (agent, typical) => {
+  const running = isRunning(agent);
+  const ring = agentRing(agent, { running, stale: agent.staleSince !== void 0, idle: false }, typical);
+  if (ring !== void 0) {
+    return { level: ringShare(ring), still: false };
+  }
+  return running && agentCalls(agent).length === 0 ? { level: 0, still: true } : { level: 1, still: true };
+};
+var viewHead = (agent) => {
+  const description = agent.description?.trim() ?? "";
+  return { title: description === "" ? agent.role : description.split("\n")[0] };
+};
+var LIVE_BASE = { tool: "", code: false, muted: false, more: 0, sub: "", title: "", chips: [], note: "", dots: false };
+var callText = (call) => call.tool === "Bash" ? bareCommand(call.summary) : call.summary;
+var callTitle = (call) => callText(call) === call.summary ? "" : call.summary;
+var endedLine = (session, agent) => {
+  const state = ENDED[agent.state] ?? "done";
+  const tone = state === "failed" || state === "handed" ? state : "done";
+  const report = agent.report === void 0 ? "" : reportLine(agent.report.text);
+  const chips = followupChips(session, agent.id);
+  const note = chips.length === 0 && isReviewer(session, agent) ? "No follow-ups" : "";
+  return { ...LIVE_BASE, tone, text: report === "" ? CORE_STATES[state].text : report, chips, note };
+};
+var liveLine = (session, agent, clock) => {
+  if (!isRunning(agent)) {
+    return endedLine(session, agent);
+  }
+  const waiting = waitingCall(agent);
+  if (waiting !== void 0) {
+    const ask = waiting.tool === "AskUserQuestion";
+    const sub = `${toolLabel(waiting.tool)} is waiting for you. Answer in the terminal.`;
+    return { ...LIVE_BASE, tone: "wait", text: callText(waiting), title: callTitle(waiting), code: !ask, sub };
+  }
+  if (agent.staleSince !== void 0) {
+    return { ...LIVE_BASE, tone: "stale", text: noEventText(agent, clock), muted: true };
+  }
+  const open2 = openCalls(agent);
+  const newest2 = open2.at(-1);
+  if (newest2 !== void 0) {
+    return { ...LIVE_BASE, tone: "run", tool: toolLabel(newest2.tool), text: callText(newest2), title: callTitle(newest2), more: open2.length - 1, dots: true };
+  }
+  const word = agentCalls(agent).length === 0 ? "starting" : "thinking";
+  return { ...LIVE_BASE, tone: "run", text: word, muted: true, dots: true };
+};
+var SHOWN_CALLS = 20;
+var SEGMENT_MS = 700;
+var PHASE_COLORS = { observe: "var(--c-observe)", think: "var(--c-think)", act: "var(--c-act)", verify: "var(--c-verify)" };
+var callMs = (call, clock) => {
+  if (call.durationMs !== void 0) {
+    return call.durationMs;
+  }
+  const start = parseTime(call.startedAt) ?? clock;
+  return Math.max(0, (parseTime(call.endedAt) ?? clock) - start);
+};
+var isOpen = (call) => call.endedAt === void 0 && call.outcome === void 0;
+var segmentMark = (call) => {
+  if (call.outcome === "denied" || call.permission === "denied") {
+    return "denied";
+  }
+  if (isOpen(call)) {
+    return call.permission === "waiting" || call.tool === "AskUserQuestion" ? "wait" : "run";
+  }
+  return call.outcome === "failed" || checkStateOf(call) === "fail" ? "fail" : "ok";
+};
+var RESULT_WORDS = { run: "running", wait: "waiting for you", fail: "failed", denied: "denied", ok: "done" };
+var callCaption = (call, clock) => {
+  const mark = segmentMark(call);
+  const check2 = checkStateOf(call);
+  let result = RESULT_WORDS[mark];
+  if (mark === "ok" && check2 === "pass") {
+    result = "passed";
+  } else if (mark === "ok" && check2 === "unknown") {
+    result = "no result";
+  } else if (mark === "ok" && call.outcome === "interrupted") {
+    result = "interrupted";
+  }
+  const seconds = (callMs(call, clock) / 1e3).toFixed(1);
+  return `${toolLabel(call.tool)} ${callText(call)} \xB7 ${seconds} s \xB7 ${result}`.replace(/\s+·/, " \xB7");
+};
+var tokenText = (count2) => count2 < 1e3 ? String(Math.max(0, Math.round(count2))) : `${(count2 / 1e3).toFixed(1)}k`;
+var READ_TOOLS2 = /* @__PURE__ */ new Set(["Read", "Grep", "Glob", "LS"]);
+var CHARS_PER_TOKEN = 4;
+var contextMeter = (agent) => {
+  const { context, toolOutput, tokens: tokens2 } = agent.budget;
+  let files = 0;
+  let tools = 0;
+  for (const [tool, output] of Object.entries(toolOutput)) {
+    if (READ_TOOLS2.has(tool)) {
+      files += output.chars / CHARS_PER_TOKEN;
+    } else {
+      tools += output.chars / CHARS_PER_TOKEN;
+    }
+  }
+  const task = (agent.description ?? "").length / CHARS_PER_TOKEN;
+  const reasoning = tokens2.output;
+  const system = Math.max(0, context.used - files - tools - task - reasoning);
+  const used = tokenText(context.used);
+  const limit = context.limit > 0 ? contextSize(context.limit) : "";
+  const share2 = context.limit > 0 ? context.used / context.limit : 0;
+  const sizes = { system, task, files, tools, reasoning };
+  const words = Object.entries(sizes).map(([key, size]) => `${key} ${tokenText(size)}`);
+  const of = limit === "" ? `Context ${used}` : `Context ${used} of ${limit} (${Math.round(share2 * 100)}%)`;
+  const parts = context.limit > 0 ? Object.keys(sizes).map((key) => ({ key, share: sizes[key] / context.limit })) : [];
+  const title = `${of}. Split, an estimate: ${words.join(", ")}`;
+  return { used, rest: limit === "" ? " ctx" : ` / ${limit} ctx`, warn: context.level !== "ok", parts, title };
+};
+var callsRow = (agent, clock) => {
+  const calls = agentCalls(agent);
+  const shown3 = calls.slice(-SHOWN_CALLS);
+  const segments2 = shown3.map((call) => {
+    const family = callFamily(call);
+    const phase = callPhase(call);
+    let color = "var(--c-idle)";
+    if (family === "ask") {
+      color = "var(--you)";
+    } else if (phase !== void 0) {
+      color = PHASE_COLORS[phase];
+    }
+    const grow = Math.max(1, Math.min(5, callMs(call, clock) / SEGMENT_MS));
+    return { id: call.toolUseId, family, color, grow: Math.round(grow * 100) / 100, mark: segmentMark(call), caption: callCaption(call, clock) };
+  });
+  const total = Math.max(agent.budget.toolCalls.used, calls.length);
+  const older = Math.max(0, total - shown3.length);
+  const byTool = earlierByTool(agent);
+  const olderTitle = older === 0 ? "" : `${older} earlier calls${byTool.length === 0 ? "" : `: ${byTool.map(([tool, count2]) => `${toolLabel(tool)} ${count2}`).join(", ")}`}`;
+  return { segments: segments2, older, olderTitle, count: `${total} call${total === 1 ? "" : "s"}`, context: contextMeter(agent) };
+};
+
+// src/ui/agent-view/core.ts
+var CX = 210;
+var CY = 210;
+var RO = 50;
+var RT = 166;
+var RA = 88;
+var PHASE_ANGLES = { observe: 123, think: 101, act: 79, verify: 57 };
+var NODE_R3 = 12;
+var VIEW_BOX = "0 24 420 372";
+var WIPE_MS = 560;
+var WAVE_FLOOR = 0.015;
+var WAVE_CEILING = 0.985;
+var WAVE_AMPLITUDE = 2.4;
+var f1 = (value2) => value2.toFixed(1);
+var f3 = (value2) => value2.toFixed(3);
+var clamp012 = (value2) => Math.max(0, Math.min(1, value2));
+var easeOutBack = (p) => 1 + 2.5 * Math.pow(p - 1, 3) + 1.5 * Math.pow(p - 1, 2);
+var easeOutCubic = (p) => 1 - Math.pow(1 - p, 3);
+var along = (angle, distance) => ({ x: CX + Math.cos(angle * Math.PI / 180) * distance, y: CY + Math.sin(angle * Math.PI / 180) * distance });
+var slotOf = (phase) => along(PHASE_ANGLES[phase], RA);
+var isPhase2 = (state) => state !== void 0 && LOOP_PHASES.includes(state);
+var orbitDashes = (r, count2) => {
+  const dash = 2 * Math.PI * r / count2;
+  return `${(dash * 0.55).toFixed(2)} ${(dash * 0.45).toFixed(2)}`;
+};
+var coreCount = 0;
+var nodeGroup2 = (phase) => {
+  const group = svgEl("g", { class: "av-pnode", "data-phase": phase });
+  group.style.setProperty("--c", PHASE_COLORS[phase]);
+  const title = svgEl("title");
+  title.textContent = PHASE_WORDS[phase];
+  const orbitR = NODE_R3 + 5.5;
+  const node = svgEl("g", { class: "av-node pending" });
+  const core = svgEl("g", { class: "n-core" });
+  const out = svgEl("circle", { class: "n-out", r: NODE_R3 });
+  core.append(out, glyph(PHASE_GLYPHS[phase], 0, 0, NODE_R3 * 1.05, "n-ic"));
+  const ring = svgEl("circle", { class: "n-ring", r: NODE_R3 + 0.5 });
+  const orbit = svgEl("circle", { class: "n-orbit", r: f1(orbitR), "stroke-dasharray": orbitDashes(orbitR, 12) });
+  node.append(ring, orbit, core);
+  group.append(title, node);
+  return { group, node };
+};
+var setNodeState = (node, state) => {
+  node.setAttribute("class", `av-node ${state}`);
+};
+var createCore = () => {
+  coreCount += 1;
+  const id = `av-${coreCount}`;
+  const svg = svgEl("svg", { class: "av-svg", viewBox: VIEW_BOX, role: "img", "aria-label": "The agent's core, loop phases and tools" });
+  const defs = svgEl("defs");
+  const coreClip = svgEl("clipPath", { id: `${id}-core` });
+  coreClip.append(svgEl("circle", { cx: CX, cy: CY, r: RO }));
+  const liquidClip = svgEl("clipPath", { id: `${id}-liquid` });
+  const liquidClipPath = svgEl("path");
+  liquidClip.append(liquidClipPath);
+  const goo = svgEl("filter", { id: `${id}-goo`, filterUnits: "userSpaceOnUse", x: CX - 150, y: CY - 150, width: 300, height: 300, "color-interpolation-filters": "sRGB" });
+  const blur = svgEl("feGaussianBlur", { in: "SourceGraphic", stdDeviation: 5, result: "b" });
+  const threshold = svgEl("feColorMatrix", { in: "b", mode: "matrix", values: "1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -11" });
+  goo.append(blur, threshold);
+  const wipe = svgEl("linearGradient", { id: `${id}-wipe` });
+  const wipeStops = [0, 0, 0, 1].map((offset) => svgEl("stop", { offset }));
+  wipe.append(...wipeStops);
+  defs.append(coreClip, liquidClip, goo, wipe);
+  const track = svgEl("circle", { class: "av-track", cx: CX, cy: CY, r: RT });
+  const beams = svgEl("g", { class: "av-beams" });
+  const sockets = svgEl("g", { class: "av-sockets" });
+  const gooGroup = svgEl("g", { class: "av-goo" });
+  const gooCore = svgEl("circle", { class: "av-goo-core", cx: CX, cy: CY, r: RO - 2 });
+  const blobs = svgEl("g");
+  gooGroup.append(gooCore, blobs);
+  const orbitR = RO + 13;
+  const wrap = svgEl("g", { class: "av-core" });
+  const core = svgEl("circle", { class: "av-core-out", cx: CX, cy: CY, r: RO });
+  const liquid = svgEl("path", { class: "av-liquid" });
+  const liquidGroup = svgEl("g", { "clip-path": `url(#${id}-core)` });
+  liquidGroup.append(liquid);
+  const baseGlyph = svgEl("g", { class: "av-glyph base" });
+  const onLiquid = svgEl("g", { class: "av-glyph onliq" });
+  const onLiquidGroup = svgEl("g", { "clip-path": `url(#${id}-liquid)` });
+  onLiquidGroup.append(onLiquid);
+  const sheen = svgEl("rect", { class: "av-sheen", x: CX - RO - 40, y: CY - RO - 6, width: 22, height: 2 * RO + 12, transform: "skewX(-16)" });
+  const sheenGroup = svgEl("g", { "clip-path": `url(#${id}-core)` });
+  sheenGroup.append(sheen);
+  const coreRing = svgEl("circle", { class: "av-core-ring", cx: CX, cy: CY, r: RO + 1 });
+  const coreOrbit = svgEl("circle", { class: "av-core-orbit", cx: CX, cy: CY, r: orbitR, "stroke-dasharray": orbitDashes(orbitR, 28) });
+  wrap.append(coreRing, coreOrbit, core, liquidGroup, baseGlyph, onLiquidGroup, sheenGroup);
+  const badgeAt = along(-45, RO + 2);
+  const badge = svgEl("g", { class: "av-badge" });
+  const mark = svgEl("g", { transform: `translate(${f1(badgeAt.x)} ${f1(badgeAt.y)}) scale(1.15)` });
+  const knockout = svgEl("circle", { class: "kn", cx: f1(badgeAt.x), cy: f1(badgeAt.y), r: 12 });
+  const disc = svgEl("circle", { class: "bd", cx: f1(badgeAt.x), cy: f1(badgeAt.y), r: 9.5 });
+  badge.append(knockout, disc, mark);
+  const nodesGroup = svgEl("g", { class: "av-phases" });
+  const nodes = /* @__PURE__ */ new Map();
+  for (const phase of LOOP_PHASES) {
+    const at = slotOf(phase);
+    const socket = svgEl("circle", { class: "av-socket", cx: f1(at.x), cy: f1(at.y), r: 13 });
+    sockets.append(socket);
+    const { group, node } = nodeGroup2(phase);
+    nodesGroup.append(group);
+    nodes.set(phase, { phase, group, node, socket, shown: true, absorbed: false, blob: void 0, token: 0 });
+  }
+  const labelY = f1(slotOf("think").y + 40);
+  const labels = [svgEl("text", { class: "av-word", x: CX, y: labelY }), svgEl("text", { class: "av-word", x: CX, y: labelY })];
+  const labelGroup = svgEl("g", { class: "av-words" });
+  labelGroup.append(...labels);
+  const tools = svgEl("g", { class: "av-tools" });
+  svg.append(defs, track, beams, sockets, gooGroup, wrap, badge, nodesGroup, labelGroup, tools);
+  const detail = [{ parts: [sockets, nodesGroup, labelGroup], distance: RA }, { parts: [track], distance: RT }];
+  for (const part of detail.flatMap((band) => band.parts)) {
+    part.style.transformOrigin = `${CX}px ${CY}px`;
+  }
+  let tweens = [];
+  let reduced = false;
+  let paused = false;
+  let state;
+  let level = 0;
+  let target = 1;
+  let still = true;
+  let fillSet = false;
+  let drawnLevel = Number.NaN;
+  let drawnWave = false;
+  let lastTime;
+  let liquidTime = 0;
+  let labelIndex = 0;
+  let labelPhase;
+  let wobbleToken = 0;
+  let markKey;
+  let pending;
+  let hold;
+  let wipeToken = 0;
+  const run = (ms, apply, then) => {
+    tweens.push({ start: void 0, ms, apply, then });
+  };
+  const place2 = (entry, scale, opacity) => {
+    const at = slotOf(entry.phase);
+    entry.group.setAttribute("transform", `translate(${f1(at.x)} ${f1(at.y)}) scale(${f3(scale)})`);
+    entry.group.style.opacity = clamp012(opacity).toFixed(2);
+  };
+  const blobSet = (blob, angle, distance, sx, sy, r) => {
+    const at = along(angle, distance);
+    blob.setAttribute("transform", `translate(${f1(at.x)} ${f1(at.y)}) rotate(${f1(angle)})`);
+    blob.setAttribute("rx", f1(Math.max(0.1, r * sx)));
+    blob.setAttribute("ry", f1(Math.max(0.1, r * sy)));
+  };
+  const newBlob = (color) => {
+    const blob = svgEl("ellipse", { class: "av-blob" });
+    blob.style.fill = color;
+    blobs.append(blob);
+    return blob;
+  };
+  const dropBlob = (entry) => {
+    entry.blob?.remove();
+    entry.blob = void 0;
+  };
+  const drawGlyph = (next) => {
+    const name = CORE_STATES[next].glyph;
+    baseGlyph.replaceChildren(glyph(name, CX, CY, 34, ""));
+    onLiquid.replaceChildren(glyph(name, CX, CY, 34, ""));
+  };
+  const clearHold = () => {
+    wipeToken += 1;
+    hold = void 0;
+    liquid.style.fill = "";
+    gooCore.style.fill = "";
+  };
+  const wipeFrom = (angle) => {
+    if (state === void 0) {
+      return;
+    }
+    wipeToken += 1;
+    const token = wipeToken;
+    const cos = Math.cos(angle * Math.PI / 180);
+    const sin = Math.sin(angle * Math.PI / 180);
+    wipe.setAttribute("x1", f3(0.5 + 0.5 * cos));
+    wipe.setAttribute("y1", f3(0.5 + 0.5 * sin));
+    wipe.setAttribute("x2", f3(0.5 - 0.5 * cos));
+    wipe.setAttribute("y2", f3(0.5 - 0.5 * sin));
+    const color = CORE_STATES[state].color;
+    const old = hold ?? color;
+    wipeStops.forEach((stop, index) => {
+      stop.style.stopColor = index < 2 ? color : old;
+    });
+    wipeStops[1].setAttribute("offset", "0");
+    wipeStops[2].setAttribute("offset", "0");
+    liquid.style.fill = `url(#${id}-wipe)`;
+    gooCore.style.fill = color;
+    const step = (p) => {
+      if (token === wipeToken) {
+        const front = -0.2 + 1.4 * p;
+        wipeStops[1].setAttribute("offset", f3(clamp012(front - 0.16)));
+        wipeStops[2].setAttribute("offset", f3(clamp012(front + 0.16)));
+      }
+    };
+    run(WIPE_MS, step, () => {
+      if (token === wipeToken) {
+        clearHold();
+      }
+    });
+  };
+  const wobble = (angle, amplitude, ms) => {
+    if (reduced) {
+      return;
+    }
+    wobbleToken += 1;
+    const token = wobbleToken;
+    const step = (p) => {
+      if (token === wobbleToken) {
+        const w = amplitude * Math.exp(-4.2 * p) * Math.sin(p * Math.PI * 5);
+        wrap.style.transform = `rotate(${f1(angle)}deg) scale(${(1 + w).toFixed(4)}, ${(1 - w * 0.85).toFixed(4)}) rotate(${f1(-angle)}deg)`;
+      }
+    };
+    run(ms, step, () => {
+      if (token === wobbleToken) {
+        wrap.style.transform = "";
+      }
+    });
+  };
+  const touched = (entry, angle) => {
+    if (pending === entry.phase) {
+      pending = void 0;
+    }
+    if (state !== void 0) {
+      drawGlyph(state);
+    }
+    wobble(angle, 0.055, 900);
+    if (isPhase2(state)) {
+      wipeFrom(angle);
+    } else {
+      clearHold();
+    }
+  };
+  const pick = (entry) => {
+    entry.token += 1;
+    const token = entry.token;
+    const angle = PHASE_ANGLES[entry.phase];
+    const live = () => token === entry.token;
+    const absorb = () => {
+      setNodeState(entry.node, "running");
+      entry.socket.classList.add("empty");
+      dropBlob(entry);
+      const blob = newBlob(PHASE_COLORS[entry.phase]);
+      entry.blob = blob;
+      blobSet(blob, angle, RA, 1, 1, NODE_R3);
+      const touch = RO + 9;
+      const fade = (p) => {
+        if (live()) {
+          place2(entry, 1 - 0.1 * p, 1 - p);
+        }
+      };
+      const fall = (t) => {
+        const e = t * t;
+        if (live()) {
+          blobSet(blob, angle, RA - (RA - touch) * e, 1 + 0.16 * e, 1 - 0.09 * e, NODE_R3);
+        }
+      };
+      const sink = (t) => {
+        const e = easeOutCubic(t);
+        if (live()) {
+          blobSet(blob, angle, touch - (touch - (RO - 14)) * e, 1.16 - 0.16 * e, 0.91 + 0.09 * e, NODE_R3 - 6 * e);
+        }
+      };
+      const sunk = () => {
+        if (live()) {
+          dropBlob(entry);
+          entry.absorbed = true;
+        }
+      };
+      run(200, fade);
+      run(520, fall, () => {
+        if (live()) {
+          touched(entry, angle);
+          run(300, sink, sunk);
+        }
+      });
+    };
+    if (reduced) {
+      entry.shown = true;
+      setNodeState(entry.node, "running");
+      entry.socket.classList.add("empty");
+      place2(entry, 1, 0);
+      entry.absorbed = true;
+      return;
+    }
+    pending = entry.phase;
+    if (entry.shown) {
+      absorb();
+      return;
+    }
+    entry.shown = true;
+    entry.group.classList.add("popin");
+    const pop = (p) => {
+      if (live()) {
+        place2(entry, easeOutBack(p), p);
+      }
+    };
+    run(320, pop, () => {
+      if (live()) {
+        absorb();
+      }
+    });
+  };
+  const release = (entry, next) => {
+    entry.token += 1;
+    const token = entry.token;
+    const live = () => token === entry.token;
+    const angle = PHASE_ANGLES[entry.phase];
+    setNodeState(entry.node, next);
+    dropBlob(entry);
+    if (pending === entry.phase) {
+      pending = void 0;
+      clearHold();
+      if (state !== void 0) {
+        drawGlyph(state);
+      }
+    }
+    if (!entry.absorbed || reduced) {
+      entry.absorbed = false;
+      if (entry.shown) {
+        place2(entry, 1, 1);
+      }
+      entry.socket.classList.remove("empty");
+      return;
+    }
+    entry.absorbed = false;
+    const blob = newBlob(next === "changes" ? "var(--warm)" : PHASE_COLORS[entry.phase]);
+    entry.blob = blob;
+    const neck = RO + 14;
+    wobble(angle, -0.04, 800);
+    const emerge = (t) => {
+      const e = t * t;
+      if (live()) {
+        blobSet(blob, angle, RO - 12 + (neck - (RO - 12)) * e, 1 + 0.22 * e, 1 - 0.12 * e, 6 + 5 * e);
+      }
+    };
+    const travel = (t) => {
+      const e = easeOutCubic(t);
+      if (live()) {
+        blobSet(blob, angle, neck + (RA - neck) * e, 1.22 - 0.22 * e, 0.88 + 0.12 * e, 11 + e);
+      }
+    };
+    const land = (p) => {
+      if (live()) {
+        place2(entry, 0.75 + 0.25 * easeOutBack(p), p * 1.6);
+        blobSet(blob, angle, RA, 1, 1, NODE_R3 * (1 - p));
+      }
+    };
+    const landed = () => {
+      blob.remove();
+      if (entry.blob === blob) {
+        entry.blob = void 0;
+      }
+      if (live()) {
+        place2(entry, 1, 1);
+      }
+    };
+    const arrived = () => {
+      if (!live()) {
+        blob.remove();
+        return;
+      }
+      entry.socket.classList.remove("empty");
+      run(280, land, landed);
+    };
+    run(320, emerge, () => live() ? run(380, travel, arrived) : blob.remove());
+  };
+  const reload = (skip) => {
+    const order = ["verify", "act", "think", "observe"];
+    const tokens2 = new Map([...nodes.values()].map((entry) => [entry.phase, entry.token]));
+    const back = (phase) => {
+      const entry = nodes.get(phase);
+      const away = Number(entry?.group.style.opacity ?? 1) < 0.9;
+      if (entry === void 0 || entry.absorbed || !entry.shown || away || entry.token !== tokens2.get(phase)) {
+        return;
+      }
+      setNodeState(entry.node, reduced ? "pending" : "pending bump");
+    };
+    if (reduced) {
+      order.filter((phase) => !skip.has(phase)).forEach(back);
+      return;
+    }
+    order.forEach((phase, index) => run(700 + 90 * (index + 1), () => void 0, () => back(phase)));
+  };
+  const setWord = (text2, color, phase) => {
+    const current = labels[labelIndex];
+    if (current.textContent === text2) {
+      return;
+    }
+    const next = labels[1 - labelIndex];
+    next.textContent = text2;
+    next.style.setProperty("--lc", color);
+    if (reduced) {
+      current.style.opacity = "0";
+      next.style.transform = "none";
+      next.style.letterSpacing = ".16em";
+      next.style.opacity = "1";
+    } else {
+      const dx = (of) => of === void 0 ? 0 : slotOf(of).x - CX;
+      current.style.transform = `translate(${f1(dx(labelPhase))}px, ${labelPhase === void 0 ? -8 : -28}px) scale(.4)`;
+      current.style.opacity = "0";
+      current.style.letterSpacing = "0em";
+      next.style.transition = "none";
+      next.style.transform = `translate(${f1(dx(phase))}px, ${phase === void 0 ? 10 : -28}px) scale(.4)`;
+      next.style.opacity = "0";
+      next.style.letterSpacing = "0em";
+      void next.getBoundingClientRect();
+      next.style.transition = "";
+      next.style.transform = "none";
+      next.style.opacity = "1";
+      next.style.letterSpacing = ".16em";
+    }
+    labelIndex = 1 - labelIndex;
+    labelPhase = phase;
+  };
+  const waving = () => !still && !reduced && !paused && level < WAVE_CEILING && level > WAVE_FLOOR;
+  const drawLiquid = (dt) => {
+    const wave = waving();
+    if (!wave && !drawnWave && level === drawnLevel) {
+      return;
+    }
+    liquidTime += dt;
+    const t = liquidTime / 1e3;
+    const y0 = CY + RO - level * 2 * RO;
+    const amplitude = wave ? WAVE_AMPLITUDE : 0;
+    let d = `M${CX - RO - 2} ${f1(y0)}`;
+    for (let index = 0; index <= 16; index += 1) {
+      const x = CX - RO - 2 + index * (2 * RO + 4) / 16;
+      const y = y0 + amplitude * Math.sin(x * 0.09 + t * 2.2) + amplitude * 0.5 * Math.sin(x * 0.19 - t * 3.1);
+      d += `L${f1(x)} ${f1(y)}`;
+    }
+    d += `L${CX + RO + 2} ${CY + RO + 2}L${CX - RO - 2} ${CY + RO + 2}Z`;
+    liquid.setAttribute("d", d);
+    liquidClipPath.setAttribute("d", d);
+    drawnLevel = level;
+    drawnWave = wave;
+  };
+  const retrigger = (element, name) => {
+    element.classList.remove(name);
+    void element.getBoundingClientRect();
+    element.classList.add(name);
+  };
+  const view = {
+    svg,
+    core,
+    tools,
+    beams,
+    detail,
+    reset(expected, nextReduced) {
+      reduced = nextReduced;
+      tweens = [];
+      wrap.style.transform = "";
+      wrap.classList.remove("shake");
+      sheen.classList.remove("go");
+      if (reduced) {
+        gooGroup.removeAttribute("filter");
+      } else {
+        gooGroup.setAttribute("filter", `url(#${id}-goo)`);
+      }
+      blobs.replaceChildren();
+      for (const entry of nodes.values()) {
+        entry.token += 1;
+        entry.blob = void 0;
+        entry.absorbed = false;
+        entry.shown = expected.includes(entry.phase);
+        setNodeState(entry.node, "pending");
+        entry.group.classList.remove("popin");
+        entry.socket.classList.remove("empty");
+        place2(entry, entry.shown ? 1 : 0, entry.shown ? 1 : 0);
+      }
+      state = void 0;
+      pending = void 0;
+      clearHold();
+      level = 0;
+      target = 1;
+      still = true;
+      fillSet = false;
+      drawnLevel = Number.NaN;
+      lastTime = void 0;
+      for (const label of labels) {
+        label.textContent = "";
+        label.style.opacity = "0";
+      }
+      labelPhase = void 0;
+    },
+    settle({ done, failed, current }) {
+      for (const entry of nodes.values()) {
+        if (pending === entry.phase || entry.blob !== void 0) {
+          continue;
+        }
+        if (entry.phase === current) {
+          entry.shown = true;
+          entry.absorbed = true;
+          setNodeState(entry.node, "running");
+          entry.socket.classList.add("empty");
+          place2(entry, 1, 0);
+        } else if (done.includes(entry.phase)) {
+          entry.shown = true;
+          setNodeState(entry.node, entry.phase === "verify" && failed ? "changes" : "done");
+          place2(entry, 1, 1);
+        }
+      }
+    },
+    setState(next) {
+      if (next === state) {
+        return;
+      }
+      const previous = state;
+      state = next;
+      const { color, text: text2 } = CORE_STATES[next];
+      const willPick = isPhase2(next) && pending === next && !reduced;
+      if (willPick && previous !== void 0) {
+        wipeToken += 1;
+        hold = CORE_STATES[previous].color;
+        liquid.style.fill = hold;
+        gooCore.style.fill = hold;
+      }
+      svg.dataset.state = next;
+      svg.style.setProperty("--av-state", color);
+      if (!willPick) {
+        drawGlyph(next);
+      }
+      const phase = isPhase2(next) ? next : void 0;
+      setWord(text2, color, phase);
+      if (next === "done" && previous !== void 0 && !reduced) {
+        retrigger(sheen, "go");
+      }
+    },
+    setFill(fill) {
+      target = clamp012(fill.level);
+      still = fill.still;
+      if (!fillSet || reduced) {
+        fillSet = true;
+        level = target;
+        drawLiquid(0);
+      }
+    },
+    setMark(next) {
+      if (next === markKey) {
+        return;
+      }
+      markKey = next;
+      mark.replaceChildren();
+      drawMark(mark, next, 11);
+      badge.style.display = next === "" ? "none" : "";
+    },
+    phase(left, entered, nextReload, failed) {
+      if (left !== void 0) {
+        const entry = nodes.get(left);
+        if (entry !== void 0) {
+          release(entry, left === "verify" && failed ? "changes" : "done");
+        }
+      }
+      if (entered !== void 0) {
+        const entry = nodes.get(entered);
+        if (entry !== void 0) {
+          pick(entry);
+        }
+      }
+      if (nextReload) {
+        const skip = new Set([left, entered].filter((phase) => phase !== void 0));
+        reload(skip);
+      }
+    },
+    setPaused(next) {
+      paused = next;
+    },
+    shake() {
+      if (!reduced) {
+        retrigger(wrap, "shake");
+      }
+    },
+    frame(time2) {
+      const dt = lastTime === void 0 ? 16 : Math.min(100, time2 - lastTime);
+      lastTime = time2;
+      const active = tweens;
+      tweens = [];
+      const kept = [];
+      for (const tween of active) {
+        tween.start ??= time2;
+        const p = tween.ms <= 0 ? 1 : Math.min(1, (time2 - tween.start) / tween.ms);
+        tween.apply(p);
+        if (p >= 1) {
+          tween.then?.();
+        } else {
+          kept.push(tween);
+        }
+      }
+      tweens = [...kept, ...tweens];
+      if (level !== target) {
+        level += (target - level) * (1 - Math.exp(-dt / 250));
+        if (Math.abs(target - level) < 1e-3) {
+          level = target;
+        }
+      }
+      drawLiquid(dt);
+    },
+    busy() {
+      return tweens.length > 0 || level !== target || waving();
+    }
+  };
+  return view;
+};
+
+// src/ui/agent-view/beams.ts
+var BEAM_MIN_MS = 700;
+var BEAM_DRAW_MS = 220;
+var PACKET_DELAY_MS = 120;
+var PACKET_MS = 340;
+var BEAM_FADE_MS = 200;
+var newBeams = () => ({ list: [], drawn: /* @__PURE__ */ new Set() });
+var isEnded2 = (call) => call.endedAt !== void 0 || call.outcome !== void 0;
+var isWaiting = (call) => !isEnded2(call) && (call.permission === "waiting" || call.tool === "AskUserQuestion");
+var isDenied = (call) => call.outcome === "denied" || call.permission === "denied";
+var syncBeams = (beams, calls, open2, time2, familyOf2, delay = 0) => {
+  for (const call of calls) {
+    if (open2.has(call.toolUseId) && !beams.drawn.has(call.toolUseId)) {
+      beams.drawn.add(call.toolUseId);
+      beams.list.push({ id: call.toolUseId, family: familyOf2(call), start: time2 + delay, end: void 0, waiting: false, denied: false });
+    }
+  }
+  const byId = new Map(calls.map((call) => [call.toolUseId, call]));
+  for (const beam of beams.list) {
+    const call = byId.get(beam.id);
+    if (beam.end === void 0 && (call === void 0 || isEnded2(call))) {
+      beam.end = Math.max(time2, beam.start + BEAM_MIN_MS);
+    }
+    beam.waiting = call !== void 0 && isWaiting(call);
+    beam.denied = call !== void 0 && isDenied(call);
+  }
+};
+var clamp013 = (value2) => Math.max(0, Math.min(1, value2));
+var beamLook = (beam, time2, reduced) => {
+  const since = time2 - beam.start;
+  const end = beam.end;
+  const denied = beam.denied && end !== void 0;
+  if (reduced) {
+    const goneAt = end === void 0 ? Number.POSITIVE_INFINITY : end + (denied ? PACKET_MS : 0);
+    return { drawn: since < 0 ? 0 : 1, packet: void 0, live: false, waiting: beam.waiting, denied, gone: time2 >= goneAt };
+  }
+  const home = end === void 0 ? Number.POSITIVE_INFINITY : end + PACKET_MS;
+  const drawn = time2 < home ? clamp013(since / BEAM_DRAW_MS) : 1 - clamp013((time2 - home) / BEAM_FADE_MS);
+  const live = drawn >= 1 && !beam.waiting && !denied && (end === void 0 || time2 < end);
+  let packet;
+  if (since > PACKET_DELAY_MS && since < PACKET_DELAY_MS + PACKET_MS) {
+    packet = (since - PACKET_DELAY_MS) / PACKET_MS;
+  } else if (end !== void 0 && time2 >= end && time2 < home && !denied) {
+    packet = 1 - (time2 - end) / PACKET_MS;
+  }
+  return { drawn, packet, live, waiting: beam.waiting, denied, gone: time2 >= home + BEAM_FADE_MS };
+};
+var beamHolds = (beam, time2, reduced) => {
+  if (beam.end === void 0) {
+    return true;
+  }
+  return !beam.denied && time2 < beam.end + (reduced ? 0 : PACKET_MS);
+};
+var pruneBeams = (beams, time2, reduced) => {
+  const gone = beams.list.filter((beam) => beamLook(beam, time2, reduced).gone);
+  if (gone.length > 0) {
+    beams.list = beams.list.filter((beam) => !gone.includes(beam));
+  }
+  return gone;
+};
+
+// src/ui/agent-view/ring.ts
+var FAMILY_CENTRE = { observe: 160, act: 222, verify: 284, reach: 340, ask: 390 };
+var RING_MIN = 138;
+var RING_MAX = 402;
+var SPACING = 24;
+var MAX_TOOL_NODES = 8;
+var OTHER = "other";
+var PIP_COUNT = 6;
+var LOOKS = {
+  read: { icon: "file", color: "var(--c-observe)" },
+  search: { icon: "search", color: "var(--c-observe)" },
+  write: { icon: "pencil", color: "var(--c-act)" },
+  command: { icon: "terminal", color: "var(--c-run)" },
+  git: { icon: "branch", color: "var(--c-handoff)" },
+  gh: { icon: "pr", color: "var(--c-handoff)" },
+  "check:typecheck": { icon: "braces", color: "var(--c-verify)" },
+  "check:lint": { icon: "lint", color: "var(--c-verify)" },
+  "check:test": { icon: "flask", color: "var(--c-verify)" },
+  "check:ci": { icon: "checkCircle", color: "var(--c-verify)" },
+  web: { icon: "globe", color: "var(--c-browser)" },
+  browser: { icon: "monitor", color: "var(--c-browser)" },
+  delegate: { icon: "users", color: "var(--c-think)" },
+  tasks: { icon: "list", color: "var(--shared)" },
+  ask: { icon: "question", color: "var(--you)" },
+  other: { icon: "dots", color: "var(--c-idle)" }
+};
+var MCP_LOOK = { icon: "plug", color: "var(--c-browser)" };
+var familyLook = (key) => {
+  const known = ownValue(LOOKS, key);
+  if (known !== void 0) {
+    return known;
+  }
+  return key.startsWith("mcp:") ? MCP_LOOK : LOOKS.other;
+};
+var newRing = () => ({ nodes: [], folded: /* @__PURE__ */ new Set(), guessed: /* @__PURE__ */ new Set() });
+var GUESSED = "command";
+var nodeOf = (ring, family) => ring.folded.has(family) ? OTHER : family;
+var nodeCounts = (ring, counts) => {
+  const result = /* @__PURE__ */ new Map();
+  for (const [family, count2] of counts) {
+    const node = nodeOf(ring, family);
+    result.set(node, (result.get(node) ?? 0) + count2);
+  }
+  return result;
+};
+var rarestNode = (ring, counts) => {
+  const shown3 = nodeCounts(ring, counts);
+  let rarest;
+  for (const key of ring.nodes) {
+    if (key !== OTHER && (rarest === void 0 || (shown3.get(key) ?? 0) < (shown3.get(rarest) ?? 0))) {
+      rarest = key;
+    }
+  }
+  return rarest;
+};
+var growRing = (ring, counts, provisional) => {
+  if (!provisional) {
+    ring.nodes = ring.nodes.filter((key) => !ring.guessed.has(key) || (counts.get(key) ?? 0) > 0);
+    ring.guessed.clear();
+  }
+  const fresh = [...counts.keys()].filter((family) => !ring.nodes.includes(family) && !ring.folded.has(family));
+  const add2 = (family) => {
+    ring.nodes.push(family);
+    if (provisional && family === GUESSED) {
+      ring.guessed.add(family);
+    }
+  };
+  if (ring.nodes.length === 0 && fresh.length > MAX_TOOL_NODES) {
+    const families = fresh.filter((family) => family !== OTHER);
+    const ranked = families.map((family, index) => ({ family, index, count: counts.get(family) ?? 0 }));
+    ranked.sort((a, b) => b.count - a.count || a.index - b.index);
+    const kept = new Set(ranked.slice(0, MAX_TOOL_NODES - 1).map((entry) => entry.family));
+    for (const family of families) {
+      if (kept.has(family)) {
+        add2(family);
+      } else {
+        ring.folded.add(family);
+      }
+    }
+    ring.nodes.push(OTHER);
+    return;
+  }
+  for (const family of fresh) {
+    if (ring.nodes.length < MAX_TOOL_NODES) {
+      add2(family);
+      continue;
+    }
+    if (!ring.nodes.includes(OTHER)) {
+      const rarest = rarestNode(ring, counts);
+      if (rarest !== void 0) {
+        ring.nodes.splice(ring.nodes.indexOf(rarest), 1);
+        ring.folded.add(rarest);
+      }
+      ring.nodes.push(OTHER);
+    }
+    if (family !== OTHER) {
+      ring.folded.add(family);
+    }
+  }
+};
+var otherTitle = (ring) => {
+  const folded = [...ring.folded].map((key) => familyOf(key).label);
+  return folded.length === 0 ? OTHER : `${OTHER}: ${folded.join(", ")}`;
+};
+var MCP_LABEL_CHARS = 10;
+var MCP_LABEL_PREFIX = /^(?:plugin_[^_]+_|claude_ai_)/;
+var nodeLabel2 = (key) => {
+  const label = familyOf(key).label;
+  if (!key.startsWith("mcp:")) {
+    return label;
+  }
+  const bare = label.replace(MCP_LABEL_PREFIX, "") || label;
+  return bare.length > MCP_LABEL_CHARS ? `${bare.slice(0, MCP_LABEL_CHARS - 1)}\u2026` : bare;
+};
+var ringAngles = (nodes) => {
+  const bySector = /* @__PURE__ */ new Map();
+  for (const key of nodes) {
+    const sector = familyOf(key).sector;
+    bySector.set(sector, [...bySector.get(sector) ?? [], key]);
+  }
+  const placed = [];
+  for (const [sector, keys2] of bySector) {
+    keys2.forEach((key, index) => placed.push({ key, angle: FAMILY_CENTRE[sector] + (index - (keys2.length - 1) / 2) * SPACING }));
+  }
+  placed.sort((a, b) => a.angle - b.angle);
+  const gap = SPACING - 1;
+  for (let index = 1; index < placed.length; index += 1) {
+    placed[index].angle = Math.max(placed[index].angle, placed[index - 1].angle + gap);
+  }
+  const last = placed.at(-1);
+  if (last !== void 0 && last.angle > RING_MAX) {
+    last.angle = RING_MAX;
+    for (let index = placed.length - 2; index >= 0; index -= 1) {
+      placed[index].angle = Math.min(placed[index].angle, placed[index + 1].angle - gap);
+    }
+  }
+  const first = placed.at(0);
+  if (first !== void 0 && first.angle < RING_MIN) {
+    first.angle = RING_MIN;
+    for (let index = 1; index < placed.length; index += 1) {
+      placed[index].angle = Math.max(placed[index].angle, placed[index - 1].angle + gap);
+    }
+  }
+  return new Map(placed.map(({ key, angle }) => [key, angle]));
+};
+var VERIFY_KINDS3 = ["typecheck", "lint", "test"];
+var checkPips = (agent) => {
+  const own = /* @__PURE__ */ new Map();
+  const checks = /* @__PURE__ */ new Map();
+  for (const call of agentCalls(agent)) {
+    if (call.check === void 0) {
+      continue;
+    }
+    const kind = call.check.kind;
+    checks.set(kind, (checks.get(kind) ?? 0) + 1);
+    const state = checkStateOf(call);
+    if (state === "pass" || state === "fail") {
+      own.set(kind, [...own.get(kind) ?? [], state]);
+    }
+  }
+  const pips = /* @__PURE__ */ new Map();
+  for (const kind of VERIFY_KINDS3) {
+    const results = agent.budget.verifyRounds.results[kind] ?? [];
+    const earlier = results.slice(0, Math.max(0, results.length - (checks.get(kind) ?? 0)));
+    const settled = earlier.filter((result) => result !== "running");
+    const all = [...settled, ...own.get(kind) ?? []].slice(-PIP_COUNT);
+    if (all.length > 0) {
+      pips.set(`check:${kind}`, all);
+    }
+  }
+  return pips;
+};
+var toolNodeState = (count2, pips, hold) => {
+  if (hold !== void 0) {
+    return hold;
+  }
+  if (pips.at(-1) === "fail") {
+    return "changes";
+  }
+  return count2 > 0 ? "done" : "pending";
+};
+
+// src/ui/agent-view/tools.ts
+var TOOL_R = 21;
+var LABEL_BELOW_Y = TOOL_R + 15;
+var PIPS_BELOW_Y = TOOL_R + 23;
+var PIP_STEP = 8;
+var PIP_SIZE = 5;
+var BADGE_X = 16;
+var BADGE_Y = -16;
+var BADGE_H = 15;
+var BADGE_DIGIT = 5;
+var BADGE_RIM = 2;
+var BEAM_GAP = 6;
+var SLIDE_SHARE = 0.12;
+var FRAME_MS = 1e3 / 60;
+var SETTLE_DEG = 0.05;
+var OPEN_DELAY_MS = 260;
+var LEAVE_MS = 200;
+var WAVE_POINTS = 26;
+var WAVE_AMPLITUDE2 = 3.2;
+var f12 = (value2) => value2.toFixed(1);
+var radians = (degrees) => degrees * Math.PI / 180;
+var SLIDE_OPENING = { pop: true, delay: OPEN_DELAY_MS };
+var nodeElements = (key) => {
+  const look = familyLook(key);
+  const group = svgEl("g", { class: "av-tool", "data-family": key });
+  setVars(group, { "--c": look.color });
+  const title = svgEl("title");
+  title.textContent = familyOf(key).label;
+  const node = svgEl("g", { class: "av-node pending" });
+  const orbitR = TOOL_R + 5.5;
+  const ring = svgEl("circle", { class: "n-ring", r: TOOL_R + 0.5 });
+  const orbit = svgEl("circle", { class: "n-orbit", r: f12(orbitR), "stroke-dasharray": orbitDashes(orbitR, 12) });
+  const core = svgEl("g", { class: "n-core" });
+  core.append(svgEl("circle", { class: "n-out", r: TOOL_R }), toolGlyph(look.icon, TOOL_R * 1.05));
+  const label = svgEl("text", { class: "n-lab", y: LABEL_BELOW_Y });
+  label.textContent = nodeLabel2(key);
+  node.append(ring, orbit, core, label);
+  const badge = svgEl("g", { class: "n-badge" });
+  const knockout = svgEl("rect", { class: "kn" });
+  const disc = svgEl("rect", { class: "bd" });
+  const count2 = svgEl("text", { x: BADGE_X, y: BADGE_Y + 3 });
+  badge.append(knockout, disc, count2);
+  const pips = svgEl("g", { class: "n-pips" });
+  group.append(title, node, badge, pips);
+  return { group, title, node, label, badge, knockout, disc, count: count2, pips };
+};
+var shapeBadge = (rect, digits, rim) => {
+  const width = BADGE_H + Math.max(0, digits - 2) * BADGE_DIGIT + 2 * rim;
+  const height = BADGE_H + 2 * rim;
+  rect.setAttribute("x", f12(BADGE_X - width / 2));
+  rect.setAttribute("y", f12(BADGE_Y - height / 2));
+  rect.setAttribute("width", f12(width));
+  rect.setAttribute("height", f12(height));
+  rect.setAttribute("rx", f12(height / 2));
+};
+var beamElements = (color) => {
+  const group = svgEl("g", { class: "av-beam" });
+  setVars(group, { "--lc": color });
+  const glow = svgEl("path", { class: "lz-glow" });
+  const core = svgEl("path", { class: "lz-core" });
+  const waves = [svgEl("path", { class: "lz-wave" }), svgEl("path", { class: "lz-wave w2" })];
+  const hot = svgEl("path", { class: "lz-hot" });
+  const flow = svgEl("path", { class: "lz-flow" });
+  const packet = svgEl("circle", { class: "lz-pkt", r: 3.4 });
+  packet.style.setProperty("opacity", "0");
+  group.append(glow, core, ...waves, hot, flow, packet);
+  return { group, base: [glow, core, hot], core, lines: [glow, core, hot, flow], waves, packet, marks: "", shape: "", packetShown: false };
+};
+var strand = (sx, sy, ex, ey, index, sibling, seconds) => {
+  const dx = ex - sx;
+  const dy = ey - sy;
+  const length = Math.hypot(dx, dy) || 1;
+  const nx = -dy / length;
+  const ny = dx / length;
+  let d = "";
+  for (let point2 = 0; point2 <= WAVE_POINTS; point2 += 1) {
+    const q = point2 / WAVE_POINTS;
+    const envelope = Math.pow(Math.sin(Math.PI * q), 0.7);
+    const amplitude = WAVE_AMPLITUDE2 * envelope * (1 + 0.3 * Math.sin(seconds * 9 + index * 2 + q * 6 + sibling));
+    const offset = amplitude * Math.sin(Math.PI * 2 * (3.2 * q - seconds * 2.6) + index * Math.PI + sibling);
+    d += `${point2 === 0 ? "M" : "L"}${f12(sx + dx * q + nx * offset)} ${f12(sy + dy * q + ny * offset)}`;
+  }
+  return d;
+};
+var beamEnds = (angle, index, count2) => {
+  const offset = (index - (count2 - 1) / 2) * BEAM_GAP;
+  const dx = Math.cos(radians(angle));
+  const dy = Math.sin(radians(angle));
+  const ex = CX + dx * (RT - TOOL_R - 2) - dy * offset;
+  const ey = CY + dy * (RT - TOOL_R - 2) + dx * offset;
+  const towards = Math.atan2(ey - CY, ex - CX);
+  return { sx: CX + Math.cos(towards) * (RO + 6), sy: CY + Math.sin(towards) * (RO + 6), ex, ey };
+};
+var createTools = (groups2) => {
+  let reduced = false;
+  let paused = false;
+  let ring = newRing();
+  const nodes = /* @__PURE__ */ new Map();
+  let leaving2 = [];
+  let beams = newBeams();
+  const parts = /* @__PURE__ */ new Map();
+  let lit;
+  let lastTime;
+  let openWith = SLIDE_OPENING;
+  const siblings = /* @__PURE__ */ new Map();
+  const drawnTo = /* @__PURE__ */ new Map();
+  const holds = /* @__PURE__ */ new Map();
+  const still = () => reduced || paused;
+  const place2 = (node) => {
+    node.x = CX + Math.cos(radians(node.angle)) * RT;
+    node.y = CY + Math.sin(radians(node.angle)) * RT;
+    node.group.setAttribute("transform", `translate(${f12(node.x)} ${f12(node.y)})`);
+  };
+  const drawPips = (node) => {
+    const width = node.results.length * PIP_STEP - (PIP_STEP - PIP_SIZE);
+    const y = PIPS_BELOW_Y;
+    const pips = node.results.map((result, index) => {
+      const x = f12(-width / 2 + index * PIP_STEP);
+      return svgEl("rect", { class: `pip ${result === "pass" ? "ok" : "bad"}`, x, y, width: PIP_SIZE, height: PIP_SIZE, rx: 1.2 });
+    });
+    node.pips.replaceChildren(...pips);
+  };
+  const addNode = (key, angle, opening) => {
+    const elements = nodeElements(key);
+    const node = { key, ...elements, angle, target: angle, x: 0, y: 0, state: void 0, calls: -1, results: [] };
+    if (!still() && (!opening || openWith.pop)) {
+      elements.group.classList.add("in");
+      if (opening) {
+        setVars(elements.group, { "--av-delay": `${openWith.delay}ms` });
+      }
+    }
+    elements.group.classList.toggle("hl", key === lit);
+    place2(node);
+    groups2.tools.append(elements.group);
+    return node;
+  };
+  const leave = (node, time2) => {
+    if (still()) {
+      node.group.remove();
+      return;
+    }
+    node.group.classList.remove("in", "hl");
+    node.group.classList.add("out");
+    leaving2.push({ group: node.group, at: time2 + LEAVE_MS });
+  };
+  const showCount = (node, calls) => {
+    if (node.calls === calls) {
+      return;
+    }
+    node.calls = calls;
+    const text2 = String(calls);
+    node.count.textContent = text2;
+    shapeBadge(node.knockout, text2.length, BADGE_RIM);
+    shapeBadge(node.disc, text2.length, 0);
+    node.badge.classList.toggle("has", calls > 0);
+  };
+  const showPips = (node, results) => {
+    if (node.results.join() === results.join()) {
+      return;
+    }
+    node.results = results;
+    drawPips(node);
+  };
+  const showStates = (time2) => {
+    holds.clear();
+    for (const beam of beams.list) {
+      if (beamHolds(beam, time2, still())) {
+        const key = nodeOf(ring, beam.family);
+        const waiting = beam.waiting || holds.get(key) === "waiting";
+        holds.set(key, waiting ? "waiting" : "running");
+      }
+    }
+    for (const node of nodes.values()) {
+      const state = toolNodeState(node.calls, node.results, holds.get(node.key));
+      if (state !== node.state) {
+        node.state = state;
+        node.node.setAttribute("class", `av-node ${state}`);
+      }
+    }
+  };
+  const removeBeam = (id) => {
+    parts.get(id)?.group.remove();
+    parts.delete(id);
+  };
+  const drawBeam = (beam, look, node, index, count2, seconds) => {
+    let drawn = parts.get(beam.id);
+    if (drawn === void 0) {
+      drawn = beamElements(familyLook(node.key).color);
+      drawn.group.setAttribute("data-node", node.key);
+      parts.set(beam.id, drawn);
+      groups2.beams.append(drawn.group);
+    }
+    const { sx, sy, ex, ey } = beamEnds(node.angle, index, count2);
+    let marks = "av-beam";
+    marks += look.live ? " live" : "";
+    marks += look.waiting ? " wait" : "";
+    marks += look.denied ? " denied" : "";
+    marks += node.key === lit ? " hl" : "";
+    if (marks !== drawn.marks) {
+      drawn.marks = marks;
+      drawn.group.setAttribute("class", marks);
+    }
+    const shape = `${f12(sx)} ${f12(sy)} ${f12(ex)} ${f12(ey)} ${look.drawn.toFixed(3)} ${look.waiting}`;
+    if (shape !== drawn.shape) {
+      drawn.shape = shape;
+      const length = Math.hypot(ex - sx, ey - sy);
+      const d = `M${f12(sx)} ${f12(sy)}L${f12(ex)} ${f12(ey)}`;
+      for (const path of drawn.lines) {
+        path.setAttribute("d", d);
+      }
+      for (const path of drawn.base) {
+        const dashed = look.waiting && path === drawn.core;
+        path.setAttribute("stroke-dasharray", dashed ? "4 4" : `${f12(length)} ${f12(length)}`);
+        path.setAttribute("stroke-dashoffset", dashed ? "0" : f12(length * (1 - look.drawn)));
+      }
+    }
+    const packet = look.packet !== void 0 && !still();
+    if (packet !== drawn.packetShown) {
+      drawn.packetShown = packet;
+      drawn.packet.style.setProperty("opacity", packet ? "1" : "0");
+    }
+    if (packet && look.packet !== void 0) {
+      drawn.packet.setAttribute("cx", f12(sx + (ex - sx) * look.packet));
+      drawn.packet.setAttribute("cy", f12(sy + (ey - sy) * look.packet));
+    }
+    if (look.live && !still()) {
+      drawn.waves.forEach((wave, strandIndex) => wave.setAttribute("d", strand(sx, sy, ex, ey, strandIndex, index, seconds)));
+    }
+  };
+  const drawBeams = (time2) => {
+    for (const beam of pruneBeams(beams, time2, still())) {
+      removeBeam(beam.id);
+    }
+    siblings.clear();
+    drawnTo.clear();
+    for (const beam of beams.list) {
+      const key = nodeOf(ring, beam.family);
+      siblings.set(key, (siblings.get(key) ?? 0) + 1);
+    }
+    for (const beam of beams.list) {
+      const key = nodeOf(ring, beam.family);
+      const node = nodes.get(key);
+      const index = drawnTo.get(key) ?? 0;
+      drawnTo.set(key, index + 1);
+      if (node !== void 0) {
+        drawBeam(beam, beamLook(beam, time2, still()), node, index, siblings.get(key) ?? 1, time2 / 1e3);
+      }
+    }
+  };
+  const clear = () => {
+    for (const id of [...parts.keys()]) {
+      removeBeam(id);
+    }
+    beams = newBeams();
+  };
+  const view = {
+    reset(nextReduced, opening = SLIDE_OPENING) {
+      reduced = nextReduced;
+      openWith = opening;
+      clear();
+      for (const node of nodes.values()) {
+        node.group.remove();
+      }
+      for (const entry of leaving2) {
+        entry.group.remove();
+      }
+      leaving2 = [];
+      nodes.clear();
+      ring = newRing();
+      lit = void 0;
+      lastTime = void 0;
+      groups2.tools.classList.remove("lit");
+      groups2.beams.classList.remove("lit");
+    },
+    sync(agent, open2, time2, opening, provisional) {
+      const counts = familyCounts(agent);
+      growRing(ring, counts, provisional);
+      for (const [key, node] of nodes) {
+        if (!ring.nodes.includes(key)) {
+          leave(node, time2);
+          nodes.delete(key);
+        }
+      }
+      const angles = ringAngles(ring.nodes);
+      for (const key of ring.nodes) {
+        const target = angles.get(key) ?? FAMILY_CENTRE.reach;
+        const node = nodes.get(key) ?? addNode(key, target, opening);
+        nodes.set(key, node);
+        node.target = target;
+        if (still() && node.angle !== target) {
+          node.angle = target;
+          place2(node);
+        }
+      }
+      const calls = nodeCounts(ring, counts);
+      const pips = checkPips(agent);
+      for (const node of nodes.values()) {
+        showCount(node, Math.max(node.calls, calls.get(node.key) ?? 0));
+        showPips(node, pips.get(node.key) ?? []);
+      }
+      const other = nodes.get(OTHER);
+      if (other !== void 0) {
+        setText(other.title, otherTitle(ring));
+      }
+      const delay = opening && !still() ? openWith.delay : 0;
+      syncBeams(beams, agentCalls(agent), open2, time2, (call) => callFamily(call), delay);
+      showStates(time2);
+    },
+    nodes: () => [...nodes.values()].map((node) => ({ group: node.group, angle: node.angle })),
+    highlight(family) {
+      const key = family === void 0 || family === "" ? void 0 : nodeOf(ring, family);
+      if (key === lit) {
+        return;
+      }
+      lit = key;
+      for (const node of nodes.values()) {
+        node.group.classList.toggle("hl", node.key === key);
+      }
+    },
+    setPaused(next) {
+      paused = next;
+    },
+    frame(time2) {
+      if (!view.busy()) {
+        lastTime = void 0;
+        return;
+      }
+      const since = lastTime === void 0 ? FRAME_MS : Math.min(100, Math.max(0, time2 - lastTime));
+      lastTime = time2;
+      if (leaving2.length > 0) {
+        leaving2 = leaving2.filter((entry) => {
+          if (time2 < entry.at) {
+            return true;
+          }
+          entry.group.remove();
+          return false;
+        });
+      }
+      const share2 = 1 - Math.pow(1 - SLIDE_SHARE, since / FRAME_MS);
+      for (const node of nodes.values()) {
+        if (node.angle === node.target) {
+          continue;
+        }
+        node.angle += (node.target - node.angle) * share2;
+        if (still() || Math.abs(node.target - node.angle) <= SETTLE_DEG) {
+          node.angle = node.target;
+        }
+        place2(node);
+      }
+      drawBeams(time2);
+      showStates(time2);
+    },
+    busy() {
+      if (beams.list.length > 0 || leaving2.length > 0) {
+        return true;
+      }
+      for (const node of nodes.values()) {
+        if (node.angle !== node.target) {
+          return true;
+        }
+      }
+      return false;
+    },
+    clear
+  };
+  return view;
+};
+
+// src/ui/agent-view/phases.ts
+var THINK_DELAY_MS = 550;
+var MIN_PHASE_MS = 860;
+var PHASE_IDLE = { phase: void 0, since: Number.NEGATIVE_INFINITY, lastOpenAt: Number.NEGATIVE_INFINITY, sawCall: false, wasOpen: false, sawVerify: false, rounds: 0 };
+var strongestPhase = (open2) => {
+  for (const phase of ["verify", "act", "observe", "think"]) {
+    if (open2.includes(phase)) {
+      return phase;
+    }
+  }
+  return void 0;
+};
+var targetPhase = (state, input) => {
+  const strongest = strongestPhase(input.open);
+  if (strongest !== void 0) {
+    return strongest;
+  }
+  if (!input.running) {
+    return void 0;
+  }
+  return state.sawCall && input.time - state.lastOpenAt < THINK_DELAY_MS ? state.phase : "think";
+};
+var phaseStep = (state, input) => {
+  const opening = input.open.length > 0;
+  let next = state;
+  if (opening && !state.wasOpen) {
+    next = { ...next, sawCall: true, wasOpen: true };
+  } else if (!opening && state.wasOpen) {
+    next = { ...next, wasOpen: false, lastOpenAt: input.time };
+  }
+  const target = targetPhase(next, input);
+  if (target === next.phase || input.time - next.since < MIN_PHASE_MS) {
+    return { state: next, reload: false };
+  }
+  let reload = false;
+  let rounds = next.rounds;
+  let sawVerify = next.sawVerify;
+  if (target !== void 0) {
+    rounds = Math.max(rounds, 1);
+    if (target === "verify") {
+      sawVerify = true;
+    } else if ((target === "observe" || target === "act") && sawVerify) {
+      rounds += 1;
+      sawVerify = false;
+      reload = true;
+    }
+  }
+  const step = { state: { ...next, phase: target, since: input.time, rounds, sawVerify }, reload };
+  if (next.phase !== void 0) {
+    step.left = next.phase;
+  }
+  if (target !== void 0) {
+    step.entered = target;
+  }
+  return step;
+};
+var newTracker = () => ({ seen: /* @__PURE__ */ new Map(), late: [] });
+var isEnded3 = (call) => call.endedAt !== void 0 || call.outcome !== void 0;
+var LATE_CAP = 6;
+var trackCalls = (tracker, calls, time2, history) => {
+  for (const call of calls) {
+    if (tracker.seen.has(call.toolUseId)) {
+      continue;
+    }
+    tracker.seen.set(call.toolUseId, time2);
+    if (!history && isEnded3(call)) {
+      tracker.late.push({ id: call.toolUseId, from: void 0 });
+    }
+  }
+  if (tracker.late.length > LATE_CAP) {
+    tracker.late.splice(0, tracker.late.length - LATE_CAP);
+  }
+  while (tracker.late.length > 0) {
+    const head2 = tracker.late[0];
+    if (head2.from === void 0) {
+      head2.from = time2;
+    }
+    if (time2 - head2.from < MIN_PHASE_MS) {
+      break;
+    }
+    tracker.late.shift();
+  }
+  const open2 = new Set(calls.filter((call) => !isEnded3(call)).map((call) => call.toolUseId));
+  const head = tracker.late[0];
+  if (head !== void 0) {
+    open2.add(head.id);
+  }
+  return open2;
+};
+var phaseHistory = (calls) => {
+  let round4 = /* @__PURE__ */ new Set();
+  let sawVerify = false;
+  let previousEnd;
+  let failed = false;
+  for (const call of calls) {
+    const phase = call.tool === "AskUserQuestion" ? void 0 : callPhase(call);
+    if (phase === void 0) {
+      continue;
+    }
+    if (phase === "verify") {
+      sawVerify = true;
+    } else if ((phase === "observe" || phase === "act") && sawVerify) {
+      round4 = /* @__PURE__ */ new Set();
+      sawVerify = false;
+    }
+    const start = parseTime(call.startedAt);
+    if (previousEnd !== void 0 && start !== void 0 && start - previousEnd >= THINK_DELAY_MS) {
+      round4.add("think");
+    }
+    if (isEnded3(call)) {
+      round4.add(phase);
+    }
+    previousEnd = parseTime(call.endedAt) ?? previousEnd;
+    const check2 = checkStateOf(call);
+    if (check2 === "pass" || check2 === "fail") {
+      failed = check2 === "fail";
+    }
+  }
+  return { done: LOOP_PHASES.filter((phase) => round4.has(phase)), failed: failed && round4.has("verify") };
+};
+
+// src/ui/card-parts.ts
+var CHECK_MS = 300;
+var CHECK_EASE = "cubic-bezier(.3, 1.45, .5, 1)";
+var CHECK_FRAMES = [{ transform: "scale(.4)" }, { transform: "none" }];
+var CHECK_STROKE = [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }];
+var TRUST_LEVELS = ["ok", "one", "both"];
+var OUT_PATH = "M5 2.5H2.5v7h7V7M7 2.5h2.5V5M9.3 2.7 5.5 6.5";
+var lineIcon = (d) => {
+  const icon2 = svgEl("svg", { viewBox: "0 0 12 12", "aria-hidden": "true" });
+  icon2.append(svgEl("path", { d, fill: "none", stroke: "currentColor", "stroke-width": 1.4, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  return icon2;
+};
+var MARK_WORDS = { edited: "edited", working: "working on", todo: "to do" };
+var markIcon2 = (mark) => {
+  const icon2 = svgEl("svg", { class: "nc-mark", viewBox: "0 0 14 14", "aria-hidden": "true" });
+  if (mark === "edited") {
+    const check2 = svgEl("path", { class: "nc-mark-check", d: "M4.3 7.2l1.8 1.8 3.6-3.8", pathLength: 1 });
+    icon2.append(svgEl("circle", { class: "nc-mark-disc", cx: 7, cy: 7, r: 6 }), check2);
+    return { icon: icon2, check: check2 };
+  }
+  if (mark === "working") {
+    icon2.append(svgEl("circle", { class: "nc-mark-track", cx: 7, cy: 7, r: 5.4 }), svgEl("path", { class: "nc-mark-spin", d: "M7 1.6A5.4 5.4 0 0 1 12.4 7" }));
+  } else {
+    icon2.append(svgEl("circle", { class: "nc-mark-todo", cx: 7, cy: 7, r: 5.4 }));
+  }
+  return { icon: icon2 };
+};
+var popCheck = (icon2, check2) => {
+  icon2.animate(CHECK_FRAMES, { duration: CHECK_MS, easing: CHECK_EASE });
+  check2?.animate(CHECK_STROKE, { duration: CHECK_MS, easing: EASE4 });
+};
+var fixRowElement = (row2, pop) => {
+  const item2 = el("li", "nc-row");
+  item2.dataset.mark = row2.mark;
+  const { icon: mark, check: check2 } = markIcon2(row2.mark);
+  const file = el("p", "nc-file");
+  const name = el("code", void 0, row2.file);
+  name.title = row2.path;
+  file.append(name, el("span", void 0, row2.reviewer));
+  if (row2.mark === "working") {
+    const tag = el("span", "nc-tag", "working on");
+    tag.setAttribute("aria-hidden", "true");
+    file.append(tag);
+  }
+  const text2 = el("p", "nc-text");
+  text2.append(el("span", "visually-hidden", `${MARK_WORDS[row2.mark]}: `), row2.text);
+  item2.append(mark, text2, file);
+  if (pop) {
+    popCheck(mark, check2);
+  }
+  return item2;
+};
+var coveredTag = () => {
+  const tag = el("span", "av-covered");
+  tag.setAttribute("aria-hidden", "true");
+  const icon2 = svgEl("svg", { viewBox: "0 0 12 12", "aria-hidden": "true" });
+  icon2.append(svgEl("path", { d: "M2.5 6.3l2.2 2.2 4.8-5", fill: "none", stroke: "currentColor", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  tag.append(icon2, "covered");
+  return tag;
+};
+var trustMarks = (item2, missing, covered = false) => {
+  item2.dataset.trust = TRUST_LEVELS[missing.length] ?? "both";
+  if (missing.length === 0) {
+    item2.append(el("span", "visually-hidden", ", reviewed and checked"));
+    if (covered) {
+      item2.append(coveredTag());
+    }
+    return;
+  }
+  item2.append(el("span", "visually-hidden", `, missing ${missing.join(" and ")}`));
+  const tags = el("span", "nc-trust-tags");
+  tags.setAttribute("aria-hidden", "true");
+  for (const tag of missing) {
+    tags.append(el("span", "nc-trust-tag", tag));
+  }
+  item2.append(tags);
+};
+var staleElement = (line) => {
+  const stale = el("p", "nc-stale", line.text);
+  if (line.at !== "") {
+    stale.append(" ", el("span", void 0, `at ${line.at}`));
+  }
+  return stale;
+};
+var prElement = (block) => {
+  const box = el("div", "nc-pr");
+  const line = el("p", "nc-pr-title");
+  line.append(el("b", void 0, `#${block.number}`), block.title);
+  const facts = el("p", "nc-pr-facts");
+  for (const fact of block.facts) {
+    const item2 = el("span", void 0, fact.text);
+    if (fact.tone !== void 0) {
+      item2.dataset.tone = fact.tone;
+    }
+    facts.append(item2);
+  }
+  box.append(line, facts);
+  if (block.stale !== void 0) {
+    box.append(staleElement(block.stale));
+  }
+  return box;
+};
+var githubLink = (className) => {
+  const link = el("a", className);
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  const text2 = el("span");
+  link.append(text2, lineIcon(OUT_PATH));
+  return { link, text: text2 };
 };
 
 // src/ui/table/details.ts
@@ -15452,13 +16891,13 @@ var createTableCore = (host, context, source) => {
     const meters = el("span", "agent-meters");
     const calls = meterParts("agent-calls");
     const pips = cell("verify-pips");
-    const contextMeter = meterParts("agent-context");
+    const contextMeter2 = meterParts("agent-context");
     const costCell = cell("agent-cost");
     const cost2 = el("span");
     const costMark = el("span", "cost-mark");
     costMark.setAttribute("aria-hidden", "true");
     costCell.append(cost2, costMark);
-    meters.append(calls.cell, pips, contextMeter.cell, costCell);
+    meters.append(calls.cell, pips, contextMeter2.cell, costCell);
     const time2 = cell("agent-time");
     const chevron = cell("row-chevron");
     chevron.append(rowChevron());
@@ -15478,7 +16917,7 @@ var createTableCore = (host, context, source) => {
       now,
       calls,
       pips,
-      context: contextMeter,
+      context: contextMeter2,
       costCell,
       cost: cost2,
       costMark,
@@ -15569,7 +17008,7 @@ var createTableCore = (host, context, source) => {
       previous = entry.item;
     }
   };
-  const reorder = (ordered, shown2, created, toggled) => {
+  const reorder = (ordered, shown3, created, toggled) => {
     const animate = motion();
     const before = /* @__PURE__ */ new Map();
     if (animate) {
@@ -15579,10 +17018,10 @@ var createTableCore = (host, context, source) => {
         }
       }
     }
-    place2(shownList, ordered.slice(0, shown2));
-    place2(moreList, ordered.slice(shown2));
+    place2(shownList, ordered.slice(0, shown3));
+    place2(moreList, ordered.slice(shown3));
     ordered.forEach((entry, index) => {
-      entry.visible = index < shown2 || showAll;
+      entry.visible = index < shown3 || showAll;
     });
     if (!animate) {
       return;
@@ -15606,6 +17045,16 @@ var createTableCore = (host, context, source) => {
       }
     }
   };
+  let currentId;
+  const setCurrent = (entry) => {
+    const on = entry.id === currentId;
+    entry.item.classList.toggle("current", on);
+    if (on) {
+      entry.row.setAttribute("aria-current", "true");
+    } else {
+      entry.row.removeAttribute("aria-current");
+    }
+  };
   const render = (toggled) => {
     const model = source.model(showAll);
     if (!model) {
@@ -15627,6 +17076,7 @@ var createTableCore = (host, context, source) => {
         created.add(entry);
       }
       updateItem(entry, row2, source.agent(row2.id));
+      setCurrent(entry);
       return entry;
     });
     const nextOrderKey = `${model.shown} ${showAll} ${model.rows.map((row2) => row2.id).join(" ")}`;
@@ -15676,6 +17126,12 @@ var createTableCore = (host, context, source) => {
     mark(marked) {
       for (const entry of items.values()) {
         entry.item.classList.toggle("hl", marked(entry.id));
+      }
+    },
+    markCurrent(id) {
+      currentId = id;
+      for (const entry of items.values()) {
+        setCurrent(entry);
       }
     },
     reveal(id) {
@@ -15834,6 +17290,9 @@ var createSessionTableView = (host, context) => {
     revealAgent(agentId) {
       core.reveal(agentId);
     },
+    markCurrent(agentId) {
+      core.markCurrent(agentId);
+    },
     destroy() {
       destroyed = true;
       for (const load2 of loads.values()) {
@@ -15842,6 +17301,2687 @@ var createSessionTableView = (host, context) => {
       loads.clear();
       core.destroy();
       current = void 0;
+    }
+  };
+};
+
+// src/ui/node-card-model.ts
+var WEB_URL = /^https?:\/\//i;
+var isWebUrl = (url) => WEB_URL.test(url);
+var linkablePr = (pr) => {
+  return pr !== void 0 && isWebUrl(pr.url) ? { number: pr.number, url: pr.url } : void 0;
+};
+var VERDICTS = {
+  changes: { text: "changes requested", color: "var(--warm)", solid: false },
+  approved: { text: "approved", color: "var(--rev)", solid: false }
+};
+var STATE_COLORS = {
+  approved: "var(--rev)",
+  changes: "var(--warm)",
+  handed: "var(--amber)",
+  failed: "var(--red)",
+  waiting: "var(--you)",
+  stale: "var(--fg-3)",
+  idle: "var(--fg-3)",
+  pending: "var(--fg-3)",
+  skipped: "var(--fg-3)"
+};
+var LEG_COLOR = "var(--fg-2)";
+var KINDS2 = ["fix", "improve"];
+var legStarts = (session, agentId) => {
+  const starts = /* @__PURE__ */ new Set();
+  const add2 = (startedAt) => {
+    const start = parseTime(startedAt);
+    if (start !== void 0) {
+      starts.add(start);
+    }
+  };
+  for (const row2 of session.rows) {
+    for (const run of row2.streams.flatMap((stream) => stream.runs)) {
+      if (run.agentId === agentId) {
+        add2(run.startedAt);
+      }
+    }
+    for (const fix of row2.fixes) {
+      if (fix.agentId === agentId) {
+        add2(fix.startedAt);
+      }
+    }
+  }
+  return [...starts].sort((a, b) => a - b);
+};
+var legOf = (session, target) => {
+  const starts = legStarts(session, target.agentId);
+  const start = parseTime(target.startedAt);
+  const index = start === void 0 ? -1 : starts.indexOf(start);
+  return starts.length > 1 && index >= 0 ? { n: index + 1, m: starts.length } : void 0;
+};
+var legChip = (leg) => ({ text: `Leg ${leg.n} of ${leg.m}`, color: LEG_COLOR, solid: false });
+var isNewest = (leg) => leg === void 0 || leg.n === leg.m;
+var isRunning2 = (state) => state === "running" || state === "waiting";
+var missingOf = (mark) => {
+  const missing = [];
+  if (!mark.reviewed) {
+    missing.push("review");
+  }
+  if (!mark.checked) {
+    missing.push("check");
+  }
+  return missing;
+};
+var groupOf3 = (file) => file.missing === void 0 ? 3 : 2 - file.missing.length;
+var markedFiles = (paths, trust) => {
+  const files = paths.map((path) => {
+    const mark = trust === void 0 ? void 0 : ownValue(trust.files, path);
+    return mark === void 0 ? { path } : { path, missing: missingOf(mark) };
+  });
+  return files.sort((a, b) => groupOf3(a) - groupOf3(b));
+};
+var staleLine = (trust) => {
+  const stale = trust?.stale;
+  if (stale === void 0 || stale.files <= 0) {
+    return void 0;
+  }
+  return { text: staleApprovalText(stale.files), at: timeOfDay(parseTime(stale.approvedAt)) };
+};
+var stateChip = (state, nodeColor) => ({ text: STATE_TEXT[state], color: STATE_COLORS[state] ?? nodeColor, solid: false });
+var nodeState = (session, target) => {
+  const ref = target.ref;
+  if (ref.kind === "fix") {
+    return fixOf(session, ref.branch, ref.fixId)?.state;
+  }
+  if (ref.kind === "pr") {
+    return session.rows.find((row2) => row2.branch === ref.branch)?.pr?.state;
+  }
+  if (ref.kind === "docs") {
+    return session.docs?.state;
+  }
+  const start = parseTime(target.startedAt);
+  const drawn = session.rows.flatMap((row2) => [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]);
+  const nodes = drawn.filter((node) => node.agentId === target.agentId);
+  return (nodes.find((node) => parseTime(node.startedAt) === start) ?? nodes[0])?.state;
+};
+var fixOf = (session, branch, fixId) => {
+  return session.rows.find((row2) => row2.branch === branch)?.fixes.find((fix) => fix.id === fixId);
+};
+var baseName = (path) => path.split("/").filter((part) => part !== "").at(-1) ?? path;
+var roleOf = (session, agentId) => ownValue(session.agents, agentId)?.role ?? agentId;
+var markOf2 = (item2, index, working) => {
+  if (item2.edited) {
+    return "edited";
+  }
+  return index === working ? "working" : "todo";
+};
+var fixRows = (session, fix, running) => {
+  const working = running && fix.state === "running" ? fix.working : void 0;
+  return (fix.items ?? []).map((item2, index) => ({
+    index,
+    kind: item2.kind,
+    mark: markOf2(item2, index, working),
+    text: item2.text,
+    file: baseName(item2.file),
+    path: item2.file,
+    reviewer: roleOf(session, item2.reviewerAgentId)
+  }));
+};
+var CHECKS = {
+  pending: { text: "checks running" },
+  passed: { text: "checks passing", tone: "ok" },
+  failed: { text: "checks failing", tone: "bad" }
+};
+var REVIEWS = {
+  approved: { text: "approved", tone: "ok" },
+  "changes-requested": { text: "changes requested", tone: "bad" },
+  required: { text: "review required" }
+};
+var prBlock = (pr, trust) => {
+  const facts = [{ text: pr.state }];
+  if (pr.checks !== void 0) {
+    facts.push(CHECKS[pr.checks]);
+  }
+  if (pr.review !== void 0) {
+    facts.push(REVIEWS[pr.review]);
+  }
+  if (pr.additions !== void 0) {
+    facts.push({ text: `+${pr.additions}`, tone: "add" });
+  }
+  if (pr.deletions !== void 0) {
+    facts.push({ text: `-${pr.deletions}`, tone: "del" });
+  }
+  const block = { kind: "pr", number: pr.number, title: pr.title, facts };
+  const stale = staleLine(trust);
+  if (stale !== void 0) {
+    block.stale = stale;
+  }
+  return block;
+};
+var nodeColorOf = (session, agent, kind) => {
+  if (kind === "docs") {
+    return "var(--st-docs)";
+  }
+  if (agent.branch === void 0) {
+    return "var(--st-plan)";
+  }
+  return kind === "pr" ? "var(--st-pr)" : colorValue2(branchCell(session, agent).color);
+};
+var chipsOf = (session, agent, target, state, leg) => {
+  const ref = target.ref;
+  const legs = leg === void 0 ? [] : [legChip(leg)];
+  if (ref.kind === "fix") {
+    return fixOf(session, ref.branch, ref.fixId) === void 0 ? void 0 : [{ text: "Fix", color: "var(--st-fix)", solid: true }, ...legs];
+  }
+  if (ref.kind === "pr") {
+    const drawn = session.rows.find((row2) => row2.branch === ref.branch)?.pr !== void 0;
+    return drawn ? [stateChip(state, nodeColorOf(session, agent, "pr")), ...legs] : void 0;
+  }
+  if (ref.kind === "docs") {
+    return [stateChip(state, nodeColorOf(session, agent, "docs")), ...legs];
+  }
+  if (isReviewer(session, agent)) {
+    return [VERDICTS[state] ?? stateChip(state, "var(--rev)"), ...legs];
+  }
+  return [stateChip(state, nodeColorOf(session, agent, "agent")), ...legs];
+};
+var nodePreview = (session, target, config, clock, typical) => {
+  const agent = ownValue(session.agents, target.agentId);
+  if (agent === void 0 || agent.id === MAIN_AGENT) {
+    return void 0;
+  }
+  const leg = legOf(session, target);
+  const newest2 = isNewest(leg);
+  const row2 = sessionAgentRow(session, agent, config);
+  const state = newest2 ? row2.state : nodeState(session, target) ?? row2.state;
+  const chips = chipsOf(session, agent, target, state, leg);
+  if (chips === void 0) {
+    return void 0;
+  }
+  const running = newest2 && isRunning2(row2.state);
+  const start = leg === void 0 ? agent.startedAt : target.startedAt ?? agent.startedAt;
+  const fixModel = target.ref.kind === "fix" ? fixOf(session, target.ref.branch, target.ref.fixId)?.model : void 0;
+  const model = fixModel ?? agent.model;
+  const preview = { agentId: agent.id, role: agent.role, mark: modelMark(model, config.modelLetters), chips };
+  if (model !== void 0) {
+    preview.model = model;
+  }
+  const task = agent.description?.trim().split("\n")[0]?.trim() ?? "";
+  if (task !== "") {
+    preview.task = task;
+  }
+  const pr = target.ref.kind === "pr" ? prOf(session, target.ref.branch) : void 0;
+  if (pr !== void 0) {
+    preview.pr = prBlock(pr, void 0).facts.filter((fact) => fact.tone !== "add" && fact.tone !== "del").map((fact) => fact.text).join(" \xB7 ");
+  }
+  if (newest2 && row2.state === "pending") {
+    return preview;
+  }
+  if (newest2 && row2.state === "stale") {
+    preview.line = { kind: "now", ...lastCall(agent), time: "", quiet: noEventText(agent, clock) };
+    return preview;
+  }
+  if (running) {
+    const since = parseTime(start);
+    const time2 = since === void 0 ? "" : elapsed(clock - since);
+    preview.line = { kind: "now", tool: row2.now.tool, text: row2.now.text, failed: row2.now.failed, time: time2 };
+    const ring = agentRing(agent, { running: true, stale: false, idle: false }, typical);
+    if (ring !== void 0) {
+      preview.progress = ring.text;
+    }
+    return preview;
+  }
+  const at = timeOfDay(parseTime(newest2 ? agent.endedAt : void 0));
+  const line = { kind: "ended", text: at === "" ? "" : `at ${at}`, chips: newest2 ? followupChips(session, agent.id) : [] };
+  if (newest2 && row2.now.kind === "report") {
+    line.report = row2.now.text;
+  }
+  if (newest2 && line.chips.length === 0 && isReviewer(session, agent)) {
+    line.note = "No follow-ups";
+  }
+  preview.line = line;
+  return preview;
+};
+var prOf = (session, branch) => session.rows.find((row2) => row2.branch === branch)?.pr?.pr;
+var lastCall = (agent) => {
+  const last = agent.now ?? agent.recent.at(-1);
+  if (last === void 0) {
+    return { tool: "", text: "", failed: false };
+  }
+  const failed = last.outcome !== void 0 && last.outcome !== "ok";
+  return { tool: last.tool, text: last.summary === last.tool ? "" : last.summary, failed };
+};
+
+// src/ui/agent-view/workspace-model.ts
+var WORKSPACE_TABS = ["files", "terminal", "browser", "plan"];
+var TAB_WORDS = { files: "Files", terminal: "Terminal", browser: "Browser", plan: "Plan" };
+var newNode = () => ({ dirs: /* @__PURE__ */ new Map(), files: [], first: Number.POSITIVE_INFINITY });
+var segments = (path) => path.split(/[\\/]/).filter((part) => part !== "");
+var ABSOLUTE = /^(?:\/|~\/|[A-Za-z]:[\\/])/;
+var isOutside = (path) => ABSOLUTE.test(path);
+var folderOf = (path) => path.replace(/[\\/][^\\/]*$/, "");
+var outsideLabel = (folder) => `${segments(folder).slice(-2).join("/")}/`;
+var fileTree = (files) => {
+  const root = newNode();
+  const outside = /* @__PURE__ */ new Map();
+  files.forEach((file, order) => {
+    if (isOutside(file.path)) {
+      const folder = folderOf(file.path);
+      outside.set(folder, [...outside.get(folder) ?? [], file]);
+      return;
+    }
+    const parts = segments(file.path);
+    let node = root;
+    node.first = Math.min(node.first, order);
+    for (const part of parts.slice(0, -1)) {
+      let next = node.dirs.get(part);
+      if (next === void 0) {
+        next = newNode();
+        node.dirs.set(part, next);
+      }
+      next.first = Math.min(next.first, order);
+      node = next;
+    }
+    node.files.push(file);
+  });
+  const rows = [];
+  const walk = (node, depth, prefix) => {
+    const dirs = [...node.dirs.entries()].sort((a, b) => a[1].first - b[1].first);
+    for (const [name, start] of dirs) {
+      let dir = start;
+      let label = name;
+      while (dir.files.length === 0 && dir.dirs.size === 1) {
+        const [childName, child] = [...dir.dirs.entries()][0];
+        label = `${label}/${childName}`;
+        dir = child;
+      }
+      const key = `${prefix}${label}/`;
+      rows.push({ kind: "dir", key, label: `${label}/`, depth });
+      walk(dir, depth + 1, key);
+    }
+    for (const file of node.files) {
+      rows.push({ kind: "file", key: file.path, name: segments(file.path).at(-1) ?? file.path, depth, file });
+    }
+  };
+  walk(root, 0, "");
+  for (const [folder, inside] of outside) {
+    rows.push({ kind: "dir", key: `outside:${folder}`, label: outsideLabel(folder), depth: 0, outside: true, title: folder });
+    for (const file of inside) {
+      rows.push({ kind: "file", key: file.path, name: segments(file.path).at(-1) ?? file.path, depth: 1, file });
+    }
+  }
+  return rows;
+};
+var readPaths = (agent) => {
+  const paths = agentCalls(agent).filter((call) => call.tool === "Read" && call.summary !== "").map((call) => call.summary);
+  return [...new Set(paths)];
+};
+var workspaceFiles = (agent, trust, rowFiles = []) => {
+  const changed = /* @__PURE__ */ new Set([...agent.filesChanged, ...rowFiles]);
+  const missing = new Map(markedFiles([...changed], trust).map((file) => [file.path, file.missing]));
+  const paths = [.../* @__PURE__ */ new Set([...changed, ...readPaths(agent)])].sort((a, b) => a.localeCompare(b));
+  const files = paths.map((path) => {
+    if (!changed.has(path)) {
+      return { path, mark: "read" };
+    }
+    const lines = agent.fileLines === void 0 ? void 0 : ownValue(agent.fileLines, path);
+    const file = { path, mark: lines?.created ? "new" : "edited" };
+    if (lines !== void 0) {
+      file.added = lines.added;
+      file.removed = lines.removed;
+    }
+    const tags = missing.get(path);
+    if (tags !== void 0) {
+      file.missing = tags;
+    }
+    return file;
+  });
+  return files.sort((a, b) => groupOf3(a) - groupOf3(b));
+};
+var TESTS_LINE = /(?:^|\n)[ \t]*Tests:?[ \t]+(\d+ (?:failed|passed|skipped|todo)[^\n]*)/;
+var FAILED = /(\d+) failed/;
+var PASSED = /(\d+) passed/;
+var TSC_LINE = /(?:^|\n)[ \t]*Found (\d+) errors?\b/;
+var ESLINT_LINE = /\d+ problems? \((\d+) errors?\b/;
+var count = (pattern, text2) => Number(pattern.exec(text2)?.[1] ?? 0);
+var parseTail = (tail) => {
+  const tests = TESTS_LINE.exec(tail);
+  if (tests !== null) {
+    return { kind: "tests", passed: count(PASSED, tests[1]), failed: count(FAILED, tests[1]) };
+  }
+  const tsc = TSC_LINE.exec(tail);
+  if (tsc !== null) {
+    return { kind: "errors", count: Number(tsc[1]) };
+  }
+  const eslint = ESLINT_LINE.exec(tail);
+  return eslint === null ? void 0 : { kind: "errors", count: Number(eslint[1]) };
+};
+var FAILING_LINE = /[✕×✗●]|\bFAIL\b|\bAssertionError\b|\berror\b|\b[Ee]xpected\b|\b[Rr]eceived\b/;
+var FAILING_LINES = 3;
+var failingLines = (tail) => {
+  const lines = tail.split("\n").map((line) => line.trim()).filter((line) => line !== "" && FAILING_LINE.test(line));
+  return [...new Set(lines)].slice(0, FAILING_LINES);
+};
+var MAX_PIPS2 = 34;
+var summaryPips = (passed, failed) => {
+  const total = passed + failed;
+  const shown3 = Math.min(total, MAX_PIPS2);
+  const failing = Math.max(failed > 0 ? 1 : 0, Math.round(failed / total * shown3));
+  return [...Array(shown3 - failing).fill("pass"), ...Array(failing).fill("fail")];
+};
+var WARNINGS = /\b[1-9]\d* warnings?\b/;
+var STATE_WORDS2 = { running: "", pass: "passed", fail: "failed", unknown: "no result" };
+var STATE_PIPS = { running: [], pass: ["pass"], fail: ["fail"], unknown: ["none"] };
+var termCheck = (call) => {
+  const state = checkStateOf(call);
+  if (state === void 0) {
+    return void 0;
+  }
+  const lines = state === "fail" && call.tail !== void 0 ? failingLines(call.tail) : [];
+  const summary = state === "running" || call.tail === void 0 ? void 0 : parseTail(call.tail);
+  const failing = summary === void 0 ? 0 : summary.kind === "tests" ? summary.failed : summary.count;
+  if (state === "fail" && summary !== void 0 && failing === 0) {
+    const label = WARNINGS.test(call.tail ?? "") ? "warnings only" : STATE_WORDS2.fail;
+    return { state, pips: STATE_PIPS.fail, label, lines };
+  }
+  if (summary?.kind === "tests" && summary.passed + summary.failed > 0) {
+    const label = summary.failed > 0 ? `${summary.passed} passed \xB7 ${summary.failed} failed` : `${summary.passed} passed`;
+    return { state, pips: summaryPips(summary.passed, summary.failed), label, lines };
+  }
+  if (summary?.kind === "errors") {
+    const label = summary.count === 0 ? "no errors" : plural(summary.count, "error");
+    return { state, pips: summary.count === 0 ? ["pass"] : summaryPips(0, summary.count), label, lines };
+  }
+  return { state, pips: STATE_PIPS[state], label: STATE_WORDS2[state], lines };
+};
+var secondsText = (ms) => ms < 6e4 ? `${(Math.max(0, ms) / 1e3).toFixed(1)} s` : duration(ms);
+var sizeText = (chars) => chars < 1e3 ? `${chars} characters` : `${(chars / 1e3).toFixed(1)}k characters`;
+var MIN_LONGEST_MS = 3e3;
+var WAITED = /* @__PURE__ */ new Set(["wait", "denied"]);
+var resultText = (state, ms) => {
+  if (state === "wait") {
+    return "waiting for you";
+  }
+  if (state === "denied") {
+    return "denied";
+  }
+  return state === "fail" ? `${secondsText(ms)} \xB7 failed` : secondsText(ms);
+};
+var terminalRows = (agent, clock) => {
+  const calls = agentCalls(agent).filter((call) => call.tool === "Bash");
+  const times = calls.map((call) => WAITED.has(segmentMark(call)) ? 0 : callMs(call, clock));
+  const longest = Math.max(MIN_LONGEST_MS, ...times);
+  return calls.map((call, index) => {
+    const state = segmentMark(call);
+    const family = callFamily(call);
+    const row2 = {
+      id: call.toolUseId,
+      chip: familyOf(family).label,
+      color: familyLook(family).color,
+      command: callText(call),
+      title: call.summary,
+      state,
+      result: resultText(state, times[index]),
+      share: Math.min(1, times[index] / longest)
+    };
+    const check2 = termCheck(call);
+    if (check2 !== void 0) {
+      row2.check = check2;
+    } else if (call.responseChars !== void 0 && (state === "ok" || state === "fail")) {
+      row2.size = `${sizeText(call.responseChars)} of output`;
+    }
+    return row2;
+  });
+};
+var browserAction = (tool) => {
+  const name = tool.split("__").filter((part) => part !== "").at(-1) ?? tool;
+  return name.replace(/^browser_/i, "");
+};
+var browserRows = (agent) => {
+  const start = parseTime(agent.startedAt) ?? 0;
+  return agentCalls(agent).filter((call) => isBrowserTool(call.tool)).map((call) => ({
+    id: call.toolUseId,
+    action: browserAction(call.tool),
+    target: call.summary,
+    time: clockText((parseTime(call.startedAt) ?? start) - start),
+    running: call.endedAt === void 0 && call.outcome === void 0
+  }));
+};
+var planSource = (session, agent, fix) => {
+  const tasks = agent.tasks ?? [];
+  if (tasks.length > 0) {
+    return { kind: "tasks", tasks: tasks.map((task) => ({ id: task.taskId, text: task.subject ?? `Task ${task.taskId}`, completed: task.completed === true })) };
+  }
+  const rows = fix === void 0 ? [] : fixRows(session, fix, isRunning(agent));
+  return rows.length > 0 ? { kind: "fix", rows } : void 0;
+};
+var agentFix2 = (session, agentId, ref) => {
+  if (ref.kind === "fix") {
+    return session.rows.find((row2) => row2.branch === ref.branch)?.fixes.find((fix) => fix.id === ref.fixId);
+  }
+  const fixes = session.rows.flatMap((row2) => row2.fixes).filter((fix) => fix.agentId === agentId);
+  return fixes.at(-1);
+};
+var prRow = (session, agentId, ref) => {
+  if (ref.kind === "pr") {
+    return session.rows.find((row2) => row2.branch === ref.branch);
+  }
+  return session.rows.find((row2) => row2.pr?.agentId === agentId);
+};
+var prFacts = (session, agentId, ref) => {
+  const row2 = prRow(session, agentId, ref);
+  if (row2?.pr === void 0) {
+    return void 0;
+  }
+  const pr = row2.pr.pr;
+  if (pr !== void 0) {
+    const facts = { pr: prBlock(pr, row2.trust) };
+    const link = linkablePr(pr);
+    if (link !== void 0) {
+      facts.link = link;
+    }
+    return facts;
+  }
+  const stale = staleLine(row2.trust);
+  return stale === void 0 ? void 0 : { stale };
+};
+var callTab = (call) => familyOf(callFamily(call)).tab;
+var trustOf = (session, agent, ref) => {
+  const pr = prRow(session, agent.id, ref);
+  if (pr?.pr !== void 0) {
+    return { trust: pr.trust, rowFiles: pr.trust === void 0 ? [] : Object.keys(pr.trust.files) };
+  }
+  if (isRunning(agent) || agent.branch === void 0) {
+    return { trust: void 0, rowFiles: [] };
+  }
+  return { trust: session.rows.find((row2) => row2.branch === agent.branch)?.trust, rowFiles: [] };
+};
+var countText4 = (count2) => count2 > 0 ? String(count2) : "";
+var planCount = (plan) => {
+  if (plan === void 0) {
+    return "";
+  }
+  const done = plan.kind === "tasks" ? plan.tasks.filter((task) => task.completed).length : plan.rows.filter((row2) => row2.mark === "edited").length;
+  const total = plan.kind === "tasks" ? plan.tasks.length : plan.rows.length;
+  return `${done}/${total}`;
+};
+var workspaceModel = (session, agent, target, clock) => {
+  const { trust, rowFiles } = trustOf(session, agent, target.ref);
+  const files = workspaceFiles(agent, trust, rowFiles);
+  const terminal = terminalRows(agent, clock);
+  const browser = browserRows(agent);
+  const plan = planSource(session, agent, agentFix2(session, agent.id, target.ref));
+  const used = /* @__PURE__ */ new Set();
+  for (const key of familyCounts(agent).keys()) {
+    const tab = familyOf(key).tab;
+    if (tab !== void 0) {
+      used.add(tab);
+    }
+  }
+  const calls = agentCalls(agent);
+  const open2 = calls.filter((call) => call.endedAt === void 0 && call.outcome === void 0);
+  const live = /* @__PURE__ */ new Set();
+  for (const call of calls) {
+    const tab = callTab(call);
+    if (tab !== void 0) {
+      used.add(tab);
+    }
+  }
+  for (const call of open2) {
+    const tab = callTab(call);
+    if (tab !== void 0) {
+      live.add(tab);
+    }
+  }
+  if (files.length > 0) {
+    used.add("files");
+  }
+  if (plan !== void 0) {
+    used.add("plan");
+  }
+  const tabs = WORKSPACE_TABS.filter((tab) => used.has(tab));
+  const newest2 = open2.map((call) => callTab(call)).filter((tab) => tab !== void 0 && used.has(tab));
+  const counts = { files: countText4(files.length), terminal: countText4(terminal.length), browser: countText4(browser.length), plan: planCount(plan) };
+  return { tabs, counts, running: isRunning(agent), live: tabs.filter((tab) => live.has(tab)), follow: newest2.at(-1), files: fileTree(files), terminal, browser, plan };
+};
+
+// src/ui/agent-view/workspace.ts
+var PATHS2 = {
+  folder: ["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"],
+  file: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5"],
+  locate: ["M12 5a7 7 0 1 0 .01 0z", "M12 9.5a2.5 2.5 0 1 0 .01 0z", "M12 2v3M12 19v3M2 12h3M19 12h3"],
+  ban: ["M12 4a8 8 0 1 0 .01 0z", "M6.4 6.4l11.2 11.2"]
+};
+var strokeIcon = (name, className) => {
+  const icon2 = svgEl("svg", { class: className, viewBox: "0 0 24 24", "aria-hidden": "true" });
+  for (const d of PATHS2[name]) {
+    icon2.append(svgEl("path", { d }));
+  }
+  return icon2;
+};
+var EMPTY_WORDS = {
+  files: "No file read or changed in the newest calls.",
+  terminal: "No command in the newest calls.",
+  browser: "No browser call in the newest calls.",
+  plan: "No task list yet."
+};
+var AT_END_PX = 40;
+var FADE_PX = 2;
+var TAB_FADE_PX = 24;
+var PANEL_FRAMES = [{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "none" }];
+var PANEL_MS = 500;
+var PIP_FRAMES = [{ transform: "scaleY(0)" }, { transform: "none" }];
+var PIP_MS = 300;
+var reconcile = (list, items, drawn, primed) => {
+  const after2 = /* @__PURE__ */ new Map();
+  for (const item2 of items) {
+    const old = drawn.get(item2.key);
+    after2.set(item2.key, old !== void 0 && old.sig === item2.sig ? old : { element: item2.make(primed && old === void 0), sig: item2.sig });
+  }
+  for (const [key, entry] of drawn) {
+    if (after2.get(key) !== entry) {
+      entry.element.remove();
+    }
+  }
+  items.forEach((item2, index) => {
+    const entry = after2.get(item2.key);
+    const at = list.children[index];
+    if (at !== entry.element) {
+      list.insertBefore(entry.element, at ?? null);
+    }
+  });
+  drawn.clear();
+  for (const [key, entry] of after2) {
+    drawn.set(key, entry);
+  }
+};
+var markBorn = (element) => {
+  element.classList.add("born");
+  const done = () => element.classList.remove("born");
+  element.addEventListener("animationend", done, { once: true });
+  element.addEventListener("animationcancel", done, { once: true });
+};
+var MARK_TEXT = { new: "new", edited: "edited", read: "read" };
+var fileRow = (row2, born) => {
+  const item2 = el("div", row2.kind === "dir" ? "av-fr dir" : "av-fr");
+  item2.setAttribute("role", "listitem");
+  setVars(item2, { "--dp": String(row2.depth) });
+  if (born) {
+    markBorn(item2);
+  }
+  if (row2.kind === "dir") {
+    item2.append(strokeIcon("folder", "av-fi"), el("span", "av-fn", row2.label));
+    if (row2.outside) {
+      item2.classList.add("outside");
+      item2.title = row2.title ?? row2.label;
+      item2.append(el("span", "visually-hidden", ", outside the repository"));
+    }
+    return item2;
+  }
+  const file = row2.file;
+  item2.dataset.mark = file.mark;
+  item2.title = file.path;
+  item2.append(strokeIcon("file", "av-fi"), el("span", "av-fn", row2.name), el("span", `av-fbadge ${file.mark}`, MARK_TEXT[file.mark]));
+  if (file.added !== void 0 && file.removed !== void 0 && file.added + file.removed > 0) {
+    const lines = el("span", "av-fd");
+    lines.append(el("span", "add", `+${file.added}`));
+    if (file.removed > 0) {
+      lines.append(el("span", "del", `-${file.removed}`));
+    }
+    item2.append(lines);
+  }
+  if (file.missing !== void 0) {
+    trustMarks(item2, file.missing, true);
+  }
+  return item2;
+};
+var checkSummary = (row2, check2, grow) => {
+  const summary = el("div", "av-tsum");
+  if (check2.state === "running") {
+    summary.append(el("span", "av-trunbar"));
+    return [summary];
+  }
+  const pips = el("span", "av-tpips");
+  pips.setAttribute("aria-hidden", "true");
+  for (const pip of check2.pips) {
+    const mark = el("i", pip === "pass" ? void 0 : pip);
+    pips.append(mark);
+    if (grow) {
+      mark.animate(PIP_FRAMES, { duration: PIP_MS, easing: EASE4, fill: "backwards" });
+    }
+  }
+  summary.append(pips);
+  if (check2.label !== "") {
+    summary.append(el("span", "av-tlab", check2.label));
+  }
+  if (check2.lines.length === 0 || row2.state !== "fail") {
+    return [summary];
+  }
+  const failing = el("div", "av-tfail");
+  for (const line of check2.lines) {
+    failing.append(el("div", void 0, line));
+  }
+  return [summary, failing];
+};
+var termRow = (row2, born, grow, parts) => {
+  const item2 = el("div", "av-tr");
+  if (born) {
+    markBorn(item2);
+  }
+  item2.setAttribute("role", "listitem");
+  item2.dataset.st = row2.state;
+  setVars(item2, { "--kc": row2.color });
+  const dot = el("span", "av-tdot");
+  dot.setAttribute("aria-hidden", "true");
+  if (row2.state === "ok") {
+    dot.append(glyphIcon("check"));
+  } else if (row2.state === "fail") {
+    dot.append(glyphIcon("x"));
+  } else if (row2.state === "denied") {
+    dot.append(strokeIcon("ban", "av-ic"));
+  }
+  const main = el("div", "av-tmain");
+  const line = el("div", "av-tline");
+  const command = el("code", "av-tcmd", row2.command);
+  command.title = row2.title;
+  line.append(el("span", "av-tkind", row2.chip), command);
+  main.append(line);
+  if (row2.check !== void 0) {
+    main.append(...checkSummary(row2, row2.check, grow));
+  } else if (row2.state === "run") {
+    const summary = el("div", "av-tsum");
+    summary.append(el("span", "av-trunbar"));
+    main.append(summary);
+  } else if (row2.size !== void 0) {
+    main.append(el("div", "av-tsum muted", row2.size));
+  }
+  const side = el("div", "av-tside");
+  const track = el("span", "av-tdur");
+  track.setAttribute("aria-hidden", "true");
+  const bar = el("i");
+  track.append(bar);
+  const result = el("span", "av-tres");
+  side.append(track, result);
+  item2.append(dot, main, side);
+  parts.set(item2, { result, bar });
+  return item2;
+};
+var browserRow = (row2, born) => {
+  const item2 = el("div", "av-br");
+  if (born) {
+    markBorn(item2);
+  }
+  item2.setAttribute("role", "listitem");
+  item2.dataset.st = row2.running ? "run" : "ok";
+  const action = el("span", "av-ba", row2.action);
+  action.title = row2.action;
+  const target = el("span", "av-bt", row2.target);
+  target.title = row2.target;
+  item2.append(action, target, el("span", "av-ct", row2.time));
+  return item2;
+};
+var taskRow = (task, born, pop) => {
+  const item2 = el("div", "av-pl-i");
+  if (born) {
+    markBorn(item2);
+  }
+  item2.setAttribute("role", "listitem");
+  item2.dataset.st = task.completed ? "done" : "todo";
+  const { icon: icon2, check: check2 } = markIcon2(task.completed ? "edited" : "todo");
+  const text2 = el("span", "av-pl-text");
+  text2.append(el("span", "visually-hidden", task.completed ? "completed: " : "to do: "), task.text);
+  item2.append(icon2, text2);
+  if (pop) {
+    popCheck(icon2, check2);
+  }
+  return item2;
+};
+var serial = 0;
+var createWorkspace = (reduced) => {
+  serial += 1;
+  const id = `av-ws-${serial}`;
+  const element = el("section", "av-workspace");
+  element.setAttribute("aria-label", "Workspace");
+  const bar = el("div", "av-wbar");
+  const tablist = el("div", "av-wtabs");
+  tablist.setAttribute("role", "tablist");
+  tablist.setAttribute("aria-label", "Workspace");
+  const follow = el("button", "av-follow on");
+  follow.type = "button";
+  follow.title = "Show the tab of the call the agent is in";
+  const followText = el("span", "av-follow-text", "Following agent");
+  follow.append(strokeIcon("locate", "av-ic"), followText);
+  bar.append(tablist, follow);
+  const empty = el("p", "av-ws-empty", "No files, commands or task list yet.");
+  element.append(bar, empty);
+  const tabs = {};
+  for (const tab of WORKSPACE_TABS) {
+    const button = el("button", "av-wtab");
+    button.type = "button";
+    button.id = `${id}-tab-${tab}`;
+    button.dataset.tab = tab;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", `${id}-${tab}`);
+    button.setAttribute("aria-selected", "false");
+    button.tabIndex = -1;
+    button.hidden = true;
+    const dot = el("i", "av-ld");
+    dot.setAttribute("aria-hidden", "true");
+    const count2 = el("span", "av-cnt");
+    button.append(dot, TAB_WORDS[tab], count2);
+    tablist.append(button);
+    const panel = el("div", "av-panel");
+    panel.id = `${id}-${tab}`;
+    panel.dataset.tab = tab;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", button.id);
+    panel.hidden = true;
+    const scroller = el("div", `av-pb av-${tab}`);
+    scroller.tabIndex = 0;
+    const list = el("div", "av-rows");
+    list.setAttribute("role", "list");
+    const note = el("p", "av-pnote", EMPTY_WORDS[tab]);
+    note.hidden = true;
+    scroller.append(list, note);
+    panel.append(scroller);
+    element.append(panel);
+    tabs[tab] = { button, count: count2, panel, scroller, list, note };
+  }
+  const drawn = { files: /* @__PURE__ */ new Map(), terminal: /* @__PURE__ */ new Map(), browser: /* @__PURE__ */ new Map(), plan: /* @__PURE__ */ new Map() };
+  const termParts = /* @__PURE__ */ new WeakMap();
+  const scrollTops = { files: 0, terminal: 0, browser: 0, plan: 0 };
+  let planKind = "";
+  let taskMarks = /* @__PURE__ */ new Map();
+  let fixMarks = /* @__PURE__ */ new Map();
+  let checkStates = /* @__PURE__ */ new Map();
+  let following = true;
+  let selected;
+  let shownTabs = /* @__PURE__ */ new Set();
+  let last;
+  let primed = false;
+  let held = false;
+  let stick = true;
+  const beyond = (scroller) => {
+    const above = scroller.scrollTop;
+    return { above, below: scroller.scrollHeight - above - scroller.clientHeight };
+  };
+  const fade = () => {
+    for (const tab of WORKSPACE_TABS) {
+      const { scroller, panel } = tabs[tab];
+      const shown3 = !panel.hidden;
+      const { above, below } = beyond(scroller);
+      scroller.classList.toggle("more", shown3 && below > FADE_PX);
+      scroller.classList.toggle("more-above", shown3 && above > FADE_PX);
+    }
+    tablist.classList.toggle("more-right", tablist.scrollWidth - tablist.scrollLeft - tablist.clientWidth > FADE_PX);
+    tablist.classList.toggle("more-left", tablist.scrollLeft > FADE_PX);
+  };
+  const toEnd = () => {
+    const scroller = tabs.terminal.scroller;
+    if (stick && !tabs.terminal.panel.hidden) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  };
+  for (const tab of WORKSPACE_TABS) {
+    const scroller = tabs[tab].scroller;
+    scroller.addEventListener("scroll", () => {
+      scrollTops[tab] = scroller.scrollTop;
+      if (tab === "terminal") {
+        stick = beyond(scroller).below < AT_END_PX;
+      }
+      fade();
+    }, { passive: true });
+  }
+  tablist.addEventListener("scroll", fade, { passive: true });
+  const reveal = (button) => {
+    const behavior = reduced() ? "instant" : "smooth";
+    const shownTabs2 = [...tablist.children].filter((tab) => !tab.hidden);
+    const index = shownTabs2.indexOf(button);
+    const end = tablist.scrollWidth - tablist.clientWidth;
+    if (index === 0 || index === shownTabs2.length - 1) {
+      const to = index === 0 ? 0 : end;
+      if (Math.abs(tablist.scrollLeft - to) > FADE_PX) {
+        tablist.scrollTo?.({ left: to, behavior });
+      }
+      return;
+    }
+    const box = tablist.getBoundingClientRect();
+    const own = button.getBoundingClientRect();
+    const left = own.left - box.left - TAB_FADE_PX;
+    const right = own.left + own.width - (box.left + box.width) + TAB_FADE_PX;
+    const delta = left < 0 ? left : Math.max(0, right);
+    if (delta !== 0) {
+      tablist.scrollBy?.({ left: delta, behavior });
+    }
+  };
+  const select = (tab) => {
+    if (tab === selected) {
+      return;
+    }
+    if (selected !== void 0) {
+      scrollTops[selected] = tabs[selected].scroller.scrollTop;
+    }
+    selected = tab;
+    for (const key of WORKSPACE_TABS) {
+      const on = key === tab;
+      const { button, panel } = tabs[key];
+      button.setAttribute("aria-selected", String(on));
+      button.tabIndex = on ? 0 : -1;
+      button.classList.toggle("on", on);
+      panel.hidden = !on;
+    }
+    if (tab === void 0) {
+      return;
+    }
+    tabs[tab].scroller.scrollTop = scrollTops[tab];
+    reveal(tabs[tab].button);
+  };
+  const setFollow = (on) => {
+    following = on;
+    followText.textContent = on ? "Following agent" : "Follow agent";
+    follow.classList.toggle("on", on);
+    if (on && last?.follow !== void 0) {
+      select(last.follow);
+    }
+    toEnd();
+    fade();
+  };
+  const choose = (tab) => {
+    setFollow(false);
+    select(tab);
+    toEnd();
+    fade();
+  };
+  for (const tab of WORKSPACE_TABS) {
+    tabs[tab].button.addEventListener("click", () => choose(tab));
+  }
+  follow.addEventListener("click", () => setFollow(!following));
+  tablist.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+    const shown3 = WORKSPACE_TABS.filter((tab) => !tabs[tab].button.hidden);
+    const at = shown3.findIndex((tab) => tabs[tab].button === document.activeElement);
+    if (at < 0) {
+      return;
+    }
+    const moves = { ArrowRight: (at + 1) % shown3.length, ArrowLeft: (at - 1 + shown3.length) % shown3.length, Home: 0, End: shown3.length - 1 };
+    const to = Object.hasOwn(moves, event.key) ? moves[event.key] : void 0;
+    if (to === void 0) {
+      return;
+    }
+    event.preventDefault();
+    tabs[shown3[to]].button.focus();
+    choose(shown3[to]);
+  });
+  const drawFiles = (rows) => {
+    const items = rows.map((row2) => ({ key: row2.key, sig: JSON.stringify(row2), make: (born) => fileRow(row2, born && !reduced()) }));
+    reconcile(tabs.files.list, items, drawn.files, primed);
+  };
+  const termItem = (row2) => {
+    const state = row2.check?.state;
+    const grow = primed && !reduced() && state !== void 0 && state !== "running" && checkStates.get(row2.id) !== state;
+    const sig = JSON.stringify({ ...row2, result: "", share: 0 });
+    return { key: row2.id, sig, make: (born) => termRow(row2, born && !reduced(), grow, termParts) };
+  };
+  const drawTerminal = (rows) => {
+    reconcile(tabs.terminal.list, rows.map(termItem), drawn.terminal, primed);
+    rows.forEach((row2, index) => {
+      const parts = termParts.get(tabs.terminal.list.children[index]);
+      if (parts !== void 0) {
+        setText(parts.result, row2.result);
+        parts.bar.style.width = `${(row2.share * 100).toFixed(1)}%`;
+      }
+    });
+    checkStates = new Map(rows.map((row2) => [row2.id, row2.check?.state ?? ""]));
+  };
+  const drawBrowser = (rows) => {
+    const items = rows.map((row2) => ({ key: row2.id, sig: JSON.stringify(row2), make: (born) => browserRow(row2, born && !reduced()) }));
+    reconcile(tabs.browser.list, items, drawn.browser, primed);
+  };
+  const fixItems = (rows) => {
+    const sections = [];
+    for (const type of KINDS2) {
+      const ofType = rows.filter((row2) => row2.kind === type);
+      if (ofType.length === 0) {
+        continue;
+      }
+      const make = () => {
+        const { section: section2, list } = followupSection(type, ofType.length);
+        for (const row2 of ofType) {
+          const before = fixMarks.get(row2.index);
+          const pop = primed && before !== void 0 && before !== "edited" && row2.mark === "edited" && !reduced();
+          list.append(fixRowElement(row2, pop));
+        }
+        return section2;
+      };
+      sections.push({ key: type, sig: JSON.stringify(ofType), make });
+    }
+    return sections;
+  };
+  const drawPlan = (plan) => {
+    const kind = plan?.kind ?? "";
+    if (kind !== planKind) {
+      planKind = kind;
+      drawn.plan.clear();
+      tabs.plan.list.replaceChildren();
+      tabs.plan.list.className = kind === "fix" ? "av-rows av-plan-fix" : "av-rows av-plan";
+      if (kind === "fix") {
+        tabs.plan.list.removeAttribute("role");
+      } else {
+        tabs.plan.list.setAttribute("role", "list");
+      }
+    }
+    if (plan?.kind === "tasks") {
+      const items = plan.tasks.map((task) => {
+        const pop = primed && taskMarks.get(task.id) === false && task.completed && !reduced();
+        return { key: task.id, sig: JSON.stringify(task), make: (born) => taskRow(task, born && !reduced(), pop) };
+      });
+      reconcile(tabs.plan.list, items, drawn.plan, primed);
+      taskMarks = new Map(plan.tasks.map((task) => [task.id, task.completed]));
+    } else if (plan?.kind === "fix") {
+      reconcile(tabs.plan.list, fixItems(plan.rows), drawn.plan, primed);
+      fixMarks = new Map(plan.rows.map((row2) => [row2.index, row2.mark]));
+    }
+  };
+  const draw2 = (model) => {
+    last = model;
+    const fresh = /* @__PURE__ */ new Set();
+    for (const tab of WORKSPACE_TABS) {
+      const { button, count: count2 } = tabs[tab];
+      const on = model.tabs.includes(tab);
+      button.hidden = !on;
+      setText(count2, model.counts[tab]);
+      button.classList.toggle("live", model.live.includes(tab));
+      if (on && primed && !shownTabs.has(tab) && !reduced()) {
+        fresh.add(tab);
+        markBorn(button);
+      }
+    }
+    shownTabs = new Set(model.tabs);
+    bar.hidden = model.tabs.length === 0;
+    empty.hidden = model.tabs.length > 0;
+    drawFiles(model.files);
+    drawTerminal(model.terminal);
+    drawBrowser(model.browser);
+    drawPlan(model.plan);
+    tabs.files.note.hidden = model.files.length > 0;
+    tabs.terminal.note.hidden = model.terminal.length > 0;
+    tabs.browser.note.hidden = model.browser.length > 0;
+    tabs.plan.note.hidden = model.plan !== void 0;
+    let next = selected;
+    if (following && model.follow !== void 0) {
+      next = model.follow;
+    }
+    if (next === void 0 || !model.tabs.includes(next)) {
+      next = model.tabs[0];
+    }
+    const changed = next !== selected;
+    select(next);
+    if (changed && next !== void 0 && fresh.has(next)) {
+      tabs[next].panel.animate(PANEL_FRAMES, { duration: PANEL_MS, easing: EASE4 });
+    }
+    toEnd();
+    fade();
+    primed = !held;
+  };
+  const reset = () => {
+    primed = false;
+    held = false;
+    stick = true;
+    selected = void 0;
+    shownTabs = /* @__PURE__ */ new Set();
+    taskMarks = /* @__PURE__ */ new Map();
+    fixMarks = /* @__PURE__ */ new Map();
+    checkStates = /* @__PURE__ */ new Map();
+    planKind = "";
+    last = void 0;
+    for (const tab of WORKSPACE_TABS) {
+      drawn[tab].clear();
+      scrollTops[tab] = 0;
+      tabs[tab].list.replaceChildren();
+      tabs[tab].button.classList.remove("born");
+      tabs[tab].panel.hidden = true;
+    }
+    setFollow(true);
+  };
+  const hold = () => {
+    held = true;
+    primed = false;
+  };
+  const release = () => {
+    held = false;
+    primed = last !== void 0;
+  };
+  return { element, draw: draw2, reset, hold, release };
+};
+var createPrFacts = () => {
+  const element = el("div", "av-prf");
+  element.hidden = true;
+  let key = "";
+  return {
+    element,
+    draw(facts) {
+      const sig = JSON.stringify(facts ?? null);
+      if (sig === key) {
+        return;
+      }
+      key = sig;
+      element.hidden = facts === void 0;
+      const parts = [];
+      if (facts?.pr !== void 0) {
+        parts.push(prElement(facts.pr));
+      } else if (facts?.stale !== void 0) {
+        parts.push(staleElement(facts.stale));
+      }
+      if (facts?.link !== void 0) {
+        const { link, text: text2 } = githubLink("nc-link");
+        link.href = facts.link.url;
+        setText(text2, `#${facts.link.number} on GitHub`);
+        parts.push(link);
+      }
+      element.replaceChildren(...parts);
+    }
+  };
+};
+
+// src/ui/agent-view/zoom.ts
+var ZOOM_IN_MS = 800;
+var ZOOM_OUT_MS = 650;
+var ZOOM_EASE = "cubic-bezier(.65, 0, .35, 1)";
+var CROSSFADE_MS = 160;
+var FADE_BACK_MS = 320;
+var BOARD_FADE = 0.6;
+var CORE_FROM = 0.15;
+var CORE_FADE = 0.3;
+var DETAIL_FROM = 0.4;
+var DETAIL_SCALE = 0.7;
+var DETAIL_BLUR_PX = 6;
+var DETAIL_MS = 260;
+var DETAIL_STAGGER_MS = 90;
+var TOOL_SWEEP_MS = 120;
+var RISE_FROM = BOARD_FADE;
+var RISE_PX = 10;
+var SINK_SHARE = 0.3;
+var DETAIL_BACK_MS = 220;
+var DETAIL_BACK_STAGGER_MS = 90;
+var TOOL_BACK_SWEEP_MS = 60;
+var f13 = (value2) => value2.toFixed(1);
+var f4 = (value2) => value2.toFixed(4);
+var centre = (box) => ({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+var clamp014 = (value2) => Math.max(0, Math.min(1, value2));
+var camera = (node, core, page, svg) => {
+  if (node.width <= 0 || core.width <= 0) {
+    return void 0;
+  }
+  const scale = core.width / node.width;
+  const from = centre(node);
+  const to = centre(core);
+  return {
+    boardOrigin: `${f13(from.x - page.left)}px ${f13(from.y - page.top)}px`,
+    board: `translate(${f13(to.x - from.x)}px, ${f13(to.y - from.y)}px) scale(${f4(scale)})`,
+    coreOrigin: `${f13(to.x - svg.left)}px ${f13(to.y - svg.top)}px`,
+    core: `translate(${f13(from.x - to.x)}px, ${f13(from.y - to.y)}px) scale(${f4(1 / scale)})`,
+    scale
+  };
+};
+var inWindow = (box, window2) => {
+  if (box === void 0 || box.width <= 0 || box.height <= 0) {
+    return false;
+  }
+  const at = centre(box);
+  return at.x >= 0 && at.y >= window2.top && at.x <= window2.width && at.y <= window2.height;
+};
+var detailDelay = (distance, reach) => {
+  const share2 = reach > 0 ? distance / reach : 0;
+  return ZOOM_IN_MS * DETAIL_FROM + share2 * DETAIL_STAGGER_MS;
+};
+var toolDelay = (angle, from, to) => {
+  const share2 = to > from ? clamp014((angle - from) / (to - from)) : 0;
+  return detailDelay(1, 1) + share2 * TOOL_SWEEP_MS;
+};
+var detailBackDelay = (distance, reach) => reach > 0 ? (1 - distance / reach) * DETAIL_BACK_STAGGER_MS : 0;
+var toolBackDelay = (angle, from, to) => {
+  const share2 = to > from ? clamp014((angle - from) / (to - from)) : 0;
+  return (1 - share2) * TOOL_BACK_SWEEP_MS;
+};
+var SHARP_MS = ZOOM_IN_MS * DETAIL_FROM + DETAIL_STAGGER_MS + TOOL_SWEEP_MS + DETAIL_MS;
+var inStep = (timing) => {
+  const end = Number(timing.delay ?? 0) + Number(timing.duration ?? 0);
+  return { ...timing, endDelay: ZOOM_IN_MS - end };
+};
+var DETAIL_FRAMES = [
+  { opacity: 0, scale: String(DETAIL_SCALE), filter: `blur(${DETAIL_BLUR_PX}px)` },
+  { opacity: 1, scale: "1", filter: "blur(0px)" }
+];
+var RISE_FRAMES = [{ opacity: 0, transform: `translateY(${RISE_PX}px)` }, { opacity: 1, transform: "none" }];
+
+// src/ui/agent-view/view.ts
+var TICK_MS = 250;
+var SLIDE_MS3 = 240;
+var SLIDE_PX = 32;
+var shown;
+var ZOOM_OPENING = { pop: false, delay: SHARP_MS };
+var FADE_IN2 = [{ opacity: 0 }, { opacity: 1 }];
+var FADE_OUT = [{ opacity: 1 }, { opacity: 0 }];
+var cancel = (parts) => {
+  for (const part of parts) {
+    for (const animation of part?.getAnimations() ?? []) {
+      animation.cancel();
+    }
+  }
+};
+var willChange = (parts, on) => {
+  for (const part of parts) {
+    part?.style.setProperty("will-change", on ? "transform, opacity" : "");
+  }
+};
+var after = (animation, then) => {
+  const finished = animation?.finished;
+  if (finished === void 0) {
+    then();
+    return;
+  }
+  finished.then(then, () => void 0);
+};
+var slideFrames = (half, side, still) => {
+  const fade = [{ opacity: 1 }, { opacity: 0 }];
+  if (still) {
+    return half === "out" ? fade : [...fade].reverse();
+  }
+  if (half === "out") {
+    return [{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translateX(${-side * SLIDE_PX}px)` }];
+  }
+  return [{ opacity: 0, transform: `translateX(${side * SLIDE_PX}px)` }, { opacity: 1, transform: "none" }];
+};
+var stepButton = (label, side) => {
+  const button = el("button", `icon-button av-step ${side}`);
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.append(chevronIcon());
+  return button;
+};
+var OTHER_LAYERS = '.legend-disclosure, .warnings-list, .update-popover, [role="dialog"]';
+var CONTEXT_PARTS = ["system", "task", "files", "tools", "reasoning"];
+var createLive = () => {
+  const root = el("div", "av-live");
+  const icon2 = el("span", "av-live-ic");
+  icon2.setAttribute("aria-hidden", "true");
+  const body = el("div", "av-live-body");
+  const line = el("div", "av-live-text");
+  const main = el("span", "av-live-main");
+  const tool = el("b", "av-live-tool");
+  const text2 = el("span");
+  const more = el("span", "av-more");
+  main.append(tool, text2, more);
+  const dots = el("span", "av-dots");
+  dots.append(el("i"), el("i"), el("i"));
+  dots.setAttribute("aria-hidden", "true");
+  line.append(main, dots);
+  const sub = el("div", "av-live-sub");
+  const chips = el("div", "av-fu");
+  body.append(line, sub, chips);
+  root.append(icon2, body);
+  return { root, body, icon: icon2, tool, text: text2, more, dots, sub, chips };
+};
+var liveIcon = (line) => {
+  if (line.tone === "run") {
+    return el("i", "av-lm");
+  }
+  if (line.tone === "wait") {
+    return el("b", void 0, "?");
+  }
+  return glyphIcon(line.tone === "stale" ? "clock" : CORE_STATES[line.tone].glyph);
+};
+var drawLive = (parts, line, iconKey) => {
+  parts.root.dataset.tone = line.tone;
+  if (iconKey.value !== line.tone) {
+    iconKey.value = line.tone;
+    parts.icon.replaceChildren(liveIcon(line));
+  }
+  setText(parts.tool, line.tool);
+  parts.tool.hidden = line.tool === "";
+  setText(parts.text, line.text);
+  parts.text.title = line.title;
+  parts.text.className = line.code ? "av-code" : line.muted ? "av-muted" : "";
+  setText(parts.more, line.more > 0 ? `+${line.more} more` : "");
+  parts.more.hidden = line.more === 0;
+  parts.dots.classList.toggle("off", !line.dots);
+  setText(parts.sub, line.sub);
+  parts.sub.hidden = line.sub === "";
+  const chipsKey = JSON.stringify([line.chips, line.note]);
+  if (parts.chips.dataset.key !== chipsKey) {
+    parts.chips.dataset.key = chipsKey;
+    const chips = line.chips.map((chip) => {
+      const element = el("span", "av-fu-chip");
+      setVars(element, { "--c": followupColor(chip.type) });
+      element.append(el("b", void 0, String(chip.count)), el("span", void 0, ` ${chip.text}`));
+      return element;
+    });
+    const note = line.note === "" ? [] : [el("span", "av-muted", line.note)];
+    parts.chips.replaceChildren(...chips, ...note);
+  }
+  parts.chips.hidden = line.chips.length === 0 && line.note === "";
+};
+var openUnwaited = (call) => call.endedAt === void 0 && call.outcome === void 0 && call.permission !== "waiting" && call.tool !== "AskUserQuestion";
+var overlayCalls = (fetched, live) => {
+  const byId = new Map(live.map((call) => [call.toolUseId, call]));
+  const known = new Set(fetched.map((call) => call.toolUseId));
+  const newest2 = live.reduce((latest, call) => latest === void 0 || call.startedAt > latest.startedAt ? call : latest, void 0);
+  const kept = fetched.map((call) => {
+    const twin = byId.get(call.toolUseId);
+    if (twin !== void 0) {
+      return twin;
+    }
+    const passed = newest2 !== void 0 && openUnwaited(call) && call.startedAt < newest2.startedAt;
+    return passed ? { ...call, endedAt: newest2.startedAt } : call;
+  });
+  return [...kept, ...live.filter((call) => !known.has(call.toolUseId))];
+};
+var merged = (live, full) => {
+  if (!live.trimmed || full === void 0) {
+    return live;
+  }
+  const agent = { ...live, recent: overlayCalls(full.recent, agentCalls(live)) };
+  const report = full.report ?? live.report;
+  if (report !== void 0) {
+    agent.report = report;
+  }
+  const tasks = full.tasks ?? live.tasks;
+  if (tasks !== void 0) {
+    agent.tasks = tasks;
+  }
+  const fileLines2 = full.fileLines ?? live.fileLines;
+  if (fileLines2 !== void 0) {
+    agent.fileLines = fileLines2;
+  }
+  return agent;
+};
+var createAgentView = (context, options) => {
+  const element = el("section", "agent-view");
+  element.hidden = true;
+  element.setAttribute("aria-label", "Agent view");
+  element.tabIndex = -1;
+  const head = el("header", "av-head");
+  const back = el("button", "av-back");
+  back.type = "button";
+  back.title = "Back to the board";
+  back.setAttribute("aria-label", "Back to the board");
+  back.append(arrowIcon(), el("span", void 0, "Board"));
+  const id = el("div", "av-id");
+  const title = el("h4", "av-title");
+  id.append(title);
+  const nav = el("div", "av-nav");
+  const prev = stepButton("Previous agent", "prev");
+  const next = stepButton("Next agent", "next");
+  nav.append(prev, next);
+  head.append(back, id, nav);
+  const viz = el("div", "av-viz");
+  const core = createCore();
+  const tools = createTools(core);
+  viz.append(core.svg);
+  const lower = el("div", "av-lower");
+  const live = createLive();
+  const trace = el("div", "av-trace");
+  const traceLabel = el("span", "av-rl", "Calls");
+  const tape = el("div", "av-tape");
+  const older = el("span", "av-older");
+  const segs = el("div", "av-segs");
+  segs.setAttribute("role", "toolbar");
+  segs.setAttribute("aria-label", "Recent tool calls");
+  tape.append(older, segs);
+  const meta = el("span", "av-trace-meta");
+  const count2 = el("span", "av-count");
+  const contextText = el("span", "av-ctx");
+  const contextBar = el("span", "av-ctx-bar");
+  contextBar.setAttribute("aria-hidden", "true");
+  const contextParts = CONTEXT_PARTS.map((key) => {
+    const part = el("i");
+    part.dataset.part = key;
+    return part;
+  });
+  contextBar.append(...contextParts);
+  const contextUsed = el("b");
+  const contextRest = el("span");
+  contextText.append(contextBar, contextUsed, contextRest);
+  meta.append(count2, contextText);
+  trace.append(traceLabel, tape, meta);
+  const caption = el("div", "av-cap");
+  caption.setAttribute("aria-live", "polite");
+  const prFactsView = createPrFacts();
+  live.body.append(prFactsView.element);
+  const workspace = createWorkspace(() => context.reducedMotion());
+  lower.append(live.root, trace, caption, workspace.element);
+  element.append(head, viz, lower);
+  let current;
+  let target;
+  let load2 = DETAIL_IDLE;
+  let loadKey = "";
+  let controller;
+  let phase = PHASE_IDLE;
+  let tracker = newTracker();
+  let history = true;
+  let firstLoad = false;
+  let roundFailed = false;
+  let dirty = true;
+  let dueAt = Number.NEGATIVE_INFINITY;
+  let shownState;
+  let lastTick = Number.NEGATIVE_INFINITY;
+  let lastDraw = Number.NEGATIVE_INFINITY;
+  let settled = false;
+  let listening = false;
+  let zoomToken = 0;
+  const iconKey = { value: "" };
+  let segmentIds = "";
+  let shownSegments = [];
+  let pinned;
+  let hovered;
+  let chosen;
+  let slideTo;
+  let slideStep = 0;
+  let destroyed = false;
+  const reduced = () => context.reducedMotion();
+  const streamLost = () => {
+    const board = document.querySelector?.(".board[data-connection]");
+    const state = board?.dataset.connection;
+    return state === "reconnecting" || state === "disconnected";
+  };
+  const agentOf2 = () => current === void 0 || target === void 0 ? void 0 : current.agents[target.agentId];
+  const shownAgent = () => {
+    const agent = agentOf2();
+    return agent === void 0 ? void 0 : merged(agent, load2.full);
+  };
+  const abort = () => {
+    controller?.abort();
+    controller = void 0;
+  };
+  const step = (event) => {
+    if (destroyed) {
+      return;
+    }
+    const result = detailStep(load2, event);
+    load2 = result.state;
+    if (result.abort) {
+      abort();
+    }
+    if (result.load && current !== void 0 && target !== void 0) {
+      fetchAgent(current.id, target.agentId);
+    }
+  };
+  const fetchAgent = (sessionId, agentId) => {
+    abort();
+    const own = new AbortController();
+    controller = own;
+    void readAgent(context.source, context.repositoryId, sessionId, agentId, own.signal).then((agent) => {
+      if (destroyed || controller !== own) {
+        return;
+      }
+      controller = void 0;
+      step(agent ? { type: "loaded", agent } : { type: "failed" });
+      if (firstLoad && agent !== void 0) {
+        firstLoad = false;
+        noteHistory(performance.now());
+      }
+      dirty = true;
+      settled = false;
+      draw2(context.now());
+      workspace.release();
+    });
+  };
+  const showCaption = (callId) => {
+    const segment = shownSegments.find((entry) => entry.id === callId);
+    setText(caption, segment?.caption ?? "");
+    caption.classList.toggle("on", segment !== void 0);
+    for (const child of [...segs.children]) {
+      child.classList.toggle("pick", child.dataset.call === callId && callId !== void 0);
+      const pressed = String(pinned !== void 0 && child.dataset.call === pinned);
+      if (child.getAttribute("aria-pressed") !== pressed) {
+        child.setAttribute("aria-pressed", pressed);
+      }
+    }
+    core.svg.dataset.family = segment?.family ?? "";
+    tools.highlight(segment?.family);
+  };
+  const segmentItem = (callId) => {
+    const item2 = el("i");
+    item2.dataset.call = callId;
+    item2.setAttribute("role", "button");
+    item2.tabIndex = -1;
+    item2.addEventListener("pointerenter", () => {
+      hovered = callId;
+      showCaption(callId);
+    });
+    item2.addEventListener("click", () => {
+      pinned = pinned === callId ? void 0 : callId;
+      chosen = callId;
+      rove();
+      showCaption(pinned ?? hovered);
+    });
+    return item2;
+  };
+  const holder = () => {
+    const items = [...segs.children];
+    return items.find((item2) => item2.dataset.call === chosen) ?? items.at(-1);
+  };
+  const rove = () => {
+    const stop = holder();
+    for (const item2 of [...segs.children]) {
+      item2.tabIndex = item2 === stop ? 0 : -1;
+    }
+  };
+  const focusSegment = (to) => {
+    if (to === void 0) {
+      return;
+    }
+    chosen = to.dataset.call;
+    rove();
+    to.focus({ preventScroll: true });
+    hovered = chosen;
+    showCaption(pinned ?? hovered);
+  };
+  segs.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+    const items = [...segs.children];
+    const stop = holder();
+    const index = stop === void 0 ? -1 : items.indexOf(stop);
+    const moves = { ArrowLeft: Math.max(0, index - 1), ArrowRight: Math.min(items.length - 1, index + 1), Home: 0, End: items.length - 1 };
+    const call = stop?.dataset.call;
+    if (Object.hasOwn(moves, event.key)) {
+      event.preventDefault();
+      focusSegment(items[moves[event.key]]);
+    } else if ((event.key === "Enter" || event.key === " ") && call !== void 0) {
+      event.preventDefault();
+      chosen = call;
+      pinned = pinned === call ? void 0 : call;
+      showCaption(pinned ?? hovered);
+    } else if (event.key === "Escape" && pinned !== void 0) {
+      event.preventDefault();
+      pinned = void 0;
+      showCaption(hovered);
+    }
+  });
+  segs.addEventListener("focusin", (event) => {
+    const call = event.target?.dataset?.call;
+    if (call !== void 0) {
+      chosen = call;
+      rove();
+      hovered = call;
+      showCaption(pinned ?? hovered);
+    }
+  });
+  segs.addEventListener("focusout", (event) => {
+    if (!segs.contains(event.relatedTarget)) {
+      hovered = void 0;
+      showCaption(pinned);
+    }
+  });
+  const drawSegments = (segments2) => {
+    shownSegments = segments2;
+    const ids = segments2.map((segment) => segment.id).join(" ");
+    if (ids !== segmentIds) {
+      segmentIds = ids;
+      const wanted = new Set(segments2.map((segment) => segment.id));
+      const kept = /* @__PURE__ */ new Map();
+      for (const item2 of [...segs.children]) {
+        if (wanted.has(item2.dataset.call ?? "")) {
+          kept.set(item2.dataset.call ?? "", item2);
+        } else {
+          item2.remove();
+        }
+      }
+      segments2.forEach((segment, index) => {
+        const item2 = kept.get(segment.id) ?? segmentItem(segment.id);
+        const at = segs.children[index] ?? null;
+        if (at !== item2) {
+          segs.insertBefore(item2, at);
+        }
+      });
+    }
+    const items = [...segs.children];
+    segments2.forEach((segment, index) => {
+      const item2 = items[index];
+      item2.classList.remove("run", "wait", "fail", "denied", "ok");
+      item2.classList.add(segment.mark);
+      if (item2.getAttribute("aria-label") !== segment.caption) {
+        item2.setAttribute("aria-label", segment.caption);
+      }
+      setVars(item2, { "--kc": segment.color, "flex-grow": String(segment.grow) });
+    });
+    rove();
+    showCaption(pinned ?? hovered);
+  };
+  segs.addEventListener("pointerleave", () => {
+    hovered = void 0;
+    showCaption(pinned);
+  });
+  const draw2 = (clock) => {
+    const agent = shownAgent();
+    if (current === void 0 || target === void 0 || agent === void 0) {
+      return;
+    }
+    const headModel = viewHead(agent);
+    setText(title, headModel.title);
+    drawLive(live, liveLine(current, agent, clock), iconKey);
+    prFactsView.draw(prFacts(current, agent.id, target.ref));
+    workspace.draw(workspaceModel(current, agent, target, clock));
+    const row2 = callsRow(agent, clock);
+    drawSegments(row2.segments);
+    setText(older, `+${row2.older}`);
+    older.hidden = row2.older === 0;
+    older.title = row2.olderTitle;
+    setText(count2, row2.count);
+    setText(contextUsed, row2.context.used);
+    setText(contextRest, row2.context.rest);
+    contextText.title = row2.context.title;
+    contextText.classList.toggle("warn", row2.context.warn);
+    for (const part of row2.context.parts) {
+      contextParts[CONTEXT_PARTS.indexOf(part.key)].style.width = `${(part.share * 100).toFixed(2)}%`;
+    }
+    core.setFill(coreFill(agent, context.typical));
+    core.setMark(modelMark(agent.model, context.config.modelLetters));
+    lastDraw = clock;
+  };
+  const showState = (state) => {
+    core.setState(state);
+    if (state !== shownState) {
+      shownState = state;
+      element.style.setProperty("--av-state", CORE_STATES[state].color);
+    }
+  };
+  const noteHistory = (time2) => {
+    const agent = shownAgent();
+    if (agent === void 0) {
+      return;
+    }
+    const calls = agentCalls(agent);
+    trackCalls(tracker, calls, time2, true);
+    for (const call of calls) {
+      if (checkStateOf(call) === "fail") {
+        failing.add(call.toolUseId);
+      }
+    }
+    const past = phaseHistory(calls);
+    roundFailed = past.failed;
+    core.settle({ done: past.done, failed: past.failed, current: phase.phase });
+  };
+  const openPhases = (calls, openIds) => {
+    const open3 = [];
+    for (const call of calls) {
+      const phaseOf = openIds.has(call.toolUseId) && call.tool !== "AskUserQuestion" ? callPhase(call) : void 0;
+      if (phaseOf !== void 0) {
+        open3.push(phaseOf);
+      }
+    }
+    return open3;
+  };
+  const nextDue = (time2) => {
+    const head2 = tracker.late[0];
+    const lateEnd = head2?.from === void 0 ? Number.NaN : head2.from + MIN_PHASE_MS;
+    const ahead = [phase.since + MIN_PHASE_MS, phase.lastOpenAt + THINK_DELAY_MS, lateEnd].filter((at) => at > time2);
+    return ahead.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...ahead);
+  };
+  const advance = (time2) => {
+    const agent = shownAgent();
+    if (agent === void 0) {
+      return;
+    }
+    dirty = false;
+    const calls = agentCalls(agent);
+    const running = isRunning(agent);
+    const opening = history;
+    const openIds = trackCalls(tracker, calls, time2, history);
+    if (history) {
+      phase = phaseStep(PHASE_IDLE, { open: openPhases(calls, openIds), running, time: time2 }).state;
+      history = false;
+      noteHistory(time2);
+    } else {
+      for (const call of calls) {
+        if (checkStateOf(call) === "fail" && !failing.has(call.toolUseId)) {
+          failing.add(call.toolUseId);
+          roundFailed = true;
+          core.shake();
+        }
+      }
+      const result = phaseStep(phase, { open: openPhases(calls, openIds), running, time: time2 });
+      phase = result.state;
+      if (result.left !== void 0 || result.entered !== void 0 || result.reload) {
+        core.phase(result.left, result.entered, result.reload, roundFailed);
+        if (result.reload) {
+          roundFailed = false;
+        }
+      }
+    }
+    showState(coreState(agent, phase.phase));
+    const provisional = agentOf2()?.trimmed === true && load2.full === void 0;
+    tools.sync(agent, openIds, time2, opening, provisional);
+    dueAt = nextDue(time2);
+  };
+  const failing = /* @__PURE__ */ new Set();
+  const onKey = (event) => {
+    if (event.key !== "Escape" || target === void 0 || event.defaultPrevented) {
+      return;
+    }
+    const focused = document.activeElement;
+    if (focused?.closest?.(OTHER_LAYERS)) {
+      return;
+    }
+    close(true);
+  };
+  const listen = (on) => {
+    if (on === listening) {
+      return;
+    }
+    listening = on;
+    if (on) {
+      document.addEventListener("keydown", onKey);
+    } else {
+      document.removeEventListener("keydown", onKey);
+    }
+  };
+  const nodeOf2 = (key) => options.graph()?.node?.(key);
+  const nodeBox = (key) => {
+    const drawn = nodeOf2(key);
+    const outline = drawn?.querySelector?.(".node-outline") ?? drawn;
+    const rect = outline?.getBoundingClientRect();
+    return rect === void 0 || rect.width === 0 ? void 0 : rect;
+  };
+  let sizing;
+  const resize = (from, timing) => {
+    sizing?.cancel();
+    const to = options.stage.card.offsetHeight;
+    sizing = from > 0 && to > 0 && from !== to ? options.stage.card.animate([{ height: `${from}px` }, { height: `${to}px` }], timing) : void 0;
+    return sizing;
+  };
+  let diving = [];
+  let ghost;
+  const dropGhost = () => {
+    ghost?.remove();
+    ghost = void 0;
+  };
+  const toolNodes = () => {
+    const shown3 = tools.nodes();
+    for (const { group } of shown3) {
+      group.style.transformOrigin = `${CX}px ${CY}px`;
+    }
+    return shown3;
+  };
+  const parts = () => {
+    const detail = core.detail.flatMap((band) => band.parts);
+    const nodes = tools.nodes().map((node) => node.group);
+    return [element, core.svg, head, id, viz, lower, ghost, ...detail, ...nodes];
+  };
+  const reach = Math.max(...core.detail.map((band) => band.distance));
+  const cameraTo = (node, page) => {
+    if (node === void 0 || page === void 0) {
+      return void 0;
+    }
+    return camera(node, core.core.getBoundingClientRect(), page.getBoundingClientRect(), core.svg.getBoundingClientRect());
+  };
+  const copyNode = (key, node, shot, own) => {
+    const drawn = nodeOf2(key);
+    const box = drawn?.getBBox?.();
+    if (drawn === void 0 || box === void 0 || box.width <= 0) {
+      return void 0;
+    }
+    const copy = drawn.cloneNode(true);
+    for (const name of ["transform", "tabindex", "role", "aria-describedby", "id"]) {
+      copy.removeAttribute(name);
+    }
+    copy.style.setProperty("--c", getComputedStyle(drawn).getPropertyValue("--c"));
+    const svg = svgEl("svg", { class: "graph av-ghost", viewBox: `${box.x} ${box.y} ${box.width} ${box.height}`, "aria-hidden": "true" });
+    const group = drawn.getBoundingClientRect();
+    const rest = core.core.getBoundingClientRect();
+    const frame = own.card.getBoundingClientRect();
+    const restX = rest.left + rest.width / 2;
+    const restY = rest.top + rest.height / 2;
+    const offsetX = (group.left - (node.left + node.width / 2)) * shot.scale;
+    const offsetY = (group.top - (node.top + node.height / 2)) * shot.scale;
+    const left = restX + offsetX - frame.left - own.card.clientLeft;
+    const top = restY + offsetY - frame.top - own.card.clientTop;
+    const size = { width: `${group.width * shot.scale}px`, height: `${group.height * shot.scale}px` };
+    setVars(svg, { left: `${left}px`, top: `${top}px`, ...size, "transform-origin": `${-offsetX}px ${-offsetY}px` });
+    svg.append(copy);
+    own.card.append(svg);
+    return svg;
+  };
+  const zoomIn = (key, node) => {
+    const own = options.stage;
+    const token = zoomToken;
+    const page = own.content;
+    cancel([...parts(), page]);
+    dropGhost();
+    const from = own.card.offsetHeight;
+    element.hidden = false;
+    own.enter(element);
+    const settle = () => {
+      if (token !== zoomToken) {
+        return;
+      }
+      own.hideContent();
+      dropGhost();
+      cancel([page]);
+      willChange([page, core.svg], false);
+    };
+    const shot = cameraTo(node, page);
+    if (reduced() || node === void 0 || shot === void 0) {
+      resize(from, { duration: CROSSFADE_MS, easing: "ease" });
+      element.animate(FADE_IN2, { duration: CROSSFADE_MS, easing: "ease" });
+      after(page.animate(FADE_OUT, { duration: CROSSFADE_MS, easing: "ease", fill: "forwards" }), settle);
+      return;
+    }
+    ghost = copyNode(key, node, shot, own);
+    willChange([page, core.svg, ghost], true);
+    page.style.transformOrigin = shot.boardOrigin;
+    const move2 = { duration: ZOOM_IN_MS, easing: ZOOM_EASE };
+    const dive = page.animate([{ transform: "none" }, { transform: shot.board }], { ...move2, fill: "forwards" });
+    diving = [dive, page.animate(FADE_OUT, inStep({ duration: ZOOM_IN_MS * BOARD_FADE, easing: "ease-in", fill: "forwards" }))];
+    const grow = resize(from, move2);
+    if (grow !== void 0) {
+      diving.push(grow);
+    }
+    core.svg.style.transformOrigin = shot.coreOrigin;
+    diving.push(core.svg.animate([{ transform: shot.core }, { transform: "none" }], move2));
+    const handOver = { duration: ZOOM_IN_MS * CORE_FADE, delay: ZOOM_IN_MS * CORE_FROM, easing: "ease-in-out" };
+    diving.push(core.svg.animate(FADE_IN2, inStep({ ...handOver, fill: "backwards" })));
+    if (ghost !== void 0) {
+      diving.push(ghost.animate([{ transform: shot.core }, { transform: "none" }], move2));
+      diving.push(ghost.animate(FADE_OUT, inStep({ ...handOver, fill: "forwards" })));
+    }
+    for (const band of core.detail) {
+      const timing = inStep({ duration: DETAIL_MS, delay: detailDelay(band.distance, reach), easing: "ease-out", fill: "backwards" });
+      for (const part of band.parts) {
+        diving.push(part.animate(DETAIL_FRAMES, timing));
+      }
+    }
+    for (const { group, angle } of toolNodes()) {
+      const timing = inStep({ duration: DETAIL_MS, delay: toolDelay(angle, RING_MIN, RING_MAX), easing: "ease-out", fill: "backwards" });
+      diving.push(group.animate(DETAIL_FRAMES, timing));
+    }
+    const rise = inStep({ duration: ZOOM_IN_MS * (1 - RISE_FROM), delay: ZOOM_IN_MS * RISE_FROM, easing: "ease-out", fill: "backwards" });
+    diving.push(head.animate(RISE_FRAMES, rise), lower.animate(RISE_FRAMES, rise));
+    after(dive, () => {
+      diving = [];
+      settle();
+    });
+  };
+  const zoomOut = (key, returnFocus, fadeBack, collapsing) => {
+    const own = options.stage;
+    const token = zoomToken;
+    const page = own.content;
+    const [dive] = diving;
+    const rewind = !fadeBack && dive?.playState === "running" ? diving : [];
+    diving = [];
+    if (rewind.length === 0 || collapsing) {
+      sizing?.cancel();
+      sizing = void 0;
+    }
+    if (rewind.length === 0) {
+      cancel([...parts(), page]);
+      dropGhost();
+    }
+    const from = collapsing ? 0 : own.card.offsetHeight;
+    const active = document.activeElement;
+    const focusHere = active === null || active === document.body || element.contains(active);
+    own.restore();
+    const node = nodeBox(key);
+    if (returnFocus && focusHere) {
+      nodeOf2(key)?.focus?.({ preventScroll: true });
+    }
+    const done = () => {
+      if (token !== zoomToken) {
+        return;
+      }
+      dropGhost();
+      cancel([...parts(), page]);
+      willChange([page, core.svg], false);
+      element.hidden = true;
+      own.leave(element);
+    };
+    if (rewind.length > 0) {
+      for (const animation of rewind) {
+        animation.reverse();
+      }
+      after(dive, done);
+      return;
+    }
+    const shot = fadeBack || !inWindow(node, own.viewport()) ? void 0 : cameraTo(node, page);
+    if (reduced() || node === void 0 || shot === void 0) {
+      willChange([page, core.svg], false);
+      if (reduced()) {
+        resize(from, { duration: CROSSFADE_MS, easing: "ease" });
+        page.animate(FADE_IN2, { duration: CROSSFADE_MS, easing: "ease" });
+        after(element.animate(FADE_OUT, { duration: CROSSFADE_MS, easing: "ease", fill: "forwards" }), done);
+        return;
+      }
+      const share2 = FADE_BACK_MS * BOARD_FADE;
+      resize(from, { duration: FADE_BACK_MS, easing: "ease" });
+      element.animate(FADE_OUT, { duration: share2, easing: "ease", fill: "forwards" });
+      after(page.animate(FADE_IN2, { duration: share2, delay: FADE_BACK_MS - share2, easing: "ease", fill: "backwards" }), done);
+      return;
+    }
+    ghost = copyNode(key, node, shot, own);
+    willChange([page, core.svg, ghost], true);
+    page.style.transformOrigin = shot.boardOrigin;
+    const move2 = { duration: ZOOM_OUT_MS, easing: ZOOM_EASE };
+    resize(from, move2);
+    page.animate([{ transform: shot.board }, { transform: "none" }], move2);
+    page.animate(FADE_IN2, { duration: ZOOM_OUT_MS * BOARD_FADE, delay: ZOOM_OUT_MS * (1 - BOARD_FADE), easing: "ease-out", fill: "backwards" });
+    core.svg.style.transformOrigin = shot.coreOrigin;
+    const shrink = core.svg.animate([{ transform: "none" }, { transform: shot.core }], { ...move2, fill: "forwards" });
+    const handBack = { duration: ZOOM_OUT_MS * CORE_FADE, delay: ZOOM_OUT_MS * (1 - CORE_FROM - CORE_FADE), easing: "ease-in-out" };
+    core.svg.animate(FADE_OUT, { ...handBack, fill: "forwards" });
+    ghost?.animate([{ transform: "none" }, { transform: shot.core }], { ...move2, fill: "forwards" });
+    ghost?.animate(FADE_IN2, { ...handBack, fill: "both" });
+    const back2 = [...DETAIL_FRAMES].reverse();
+    for (const { group, angle } of toolNodes()) {
+      group.animate(back2, { duration: DETAIL_BACK_MS, delay: toolBackDelay(angle, RING_MIN, RING_MAX), easing: "ease-in", fill: "both" });
+    }
+    for (const band of core.detail) {
+      const timing = { duration: DETAIL_BACK_MS, delay: detailBackDelay(band.distance, reach), easing: "ease-in", fill: "both" };
+      for (const part of band.parts) {
+        part.animate(back2, timing);
+      }
+    }
+    const sink = { duration: ZOOM_OUT_MS * SINK_SHARE, easing: "ease-in", fill: "forwards" };
+    head.animate([...RISE_FRAMES].reverse(), sink);
+    lower.animate([...RISE_FRAMES].reverse(), sink);
+    after(shrink, done);
+  };
+  const cardNodes = () => options.graph()?.cardNodes?.() ?? [];
+  const neighbour = (step2) => {
+    const from = slideTo ?? target;
+    const order = cardNodes();
+    const index = from === void 0 ? -1 : order.findIndex((card) => card.key === from.key);
+    return index < 0 ? void 0 : order[index + step2];
+  };
+  const updateNav = () => {
+    prev.disabled = neighbour(-1) === void 0;
+    next.disabled = neighbour(1) === void 0;
+    nav.hidden = cardNodes().length < 2;
+  };
+  const ownsArrows = (from) => {
+    let node = from;
+    while (node !== null && node !== void 0 && node !== element) {
+      if (node === segs || node.getAttribute?.("role") === "tablist" || node.tagName === "INPUT" || node.tagName === "TEXTAREA") {
+        return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  };
+  const keepFocus = () => {
+    const active = document.activeElement;
+    if (active === prev || active === next) {
+      const other = active === prev ? next : prev;
+      if (active.disabled === true && !other.disabled) {
+        other.focus({ preventScroll: true });
+        return;
+      }
+    }
+    if (active === null || !element.contains(active) || active.disabled === true) {
+      element.focus({ preventScroll: true });
+    }
+  };
+  const move = (by) => {
+    const card = target === void 0 ? void 0 : neighbour(by);
+    if (card === void 0) {
+      return;
+    }
+    const focused = element.contains(document.activeElement);
+    const midway = slideTo !== void 0;
+    slideTo = { ...card, keyboard: false };
+    slideStep = by;
+    updateNav();
+    if (focused) {
+      keepFocus();
+    }
+    if (midway) {
+      return;
+    }
+    const token = zoomToken;
+    const sliding = [id, viz, lower];
+    const still = reduced();
+    const half = (still ? CROSSFADE_MS : SLIDE_MS3) / 2;
+    const outFrames = slideFrames("out", by, still);
+    let out;
+    for (const part of sliding) {
+      for (const animation of part.getAnimations()) {
+        animation.cancel();
+      }
+      out = part.animate(outFrames, { duration: half, easing: "ease-in", fill: "forwards" });
+    }
+    after(out, () => {
+      const landing = slideTo;
+      if (token !== zoomToken || landing === void 0) {
+        return;
+      }
+      slideTo = void 0;
+      const side = slideStep;
+      swap(landing);
+      const inFrames = slideFrames("in", side, still);
+      for (const part of sliding) {
+        for (const animation of part.getAnimations()) {
+          animation.cancel();
+        }
+        part.animate(inFrames, { duration: half, easing: "ease-out" });
+      }
+      if (focused) {
+        keepFocus();
+      }
+    });
+  };
+  prev.addEventListener("click", () => move(-1));
+  next.addEventListener("click", () => move(1));
+  element.addEventListener("keydown", (event) => {
+    delete element.dataset.quiet;
+    const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
+    const modified = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
+    if (!arrow || modified || target === void 0 || event.defaultPrevented || ownsArrows(event.target)) {
+      return;
+    }
+    event.preventDefault();
+    move(event.key === "ArrowLeft" ? -1 : 1);
+  });
+  const show = (detail, agent, opening) => {
+    const sameAgent = target?.agentId === detail.agentId;
+    target = detail;
+    if (!sameAgent) {
+      abort();
+      load2 = DETAIL_IDLE;
+    }
+    load2 = detailStep(load2, { type: "close" }).state;
+    loadKey = detailKey(agent);
+    phase = PHASE_IDLE;
+    tracker = newTracker();
+    history = true;
+    dirty = true;
+    roundFailed = false;
+    failing.clear();
+    settled = false;
+    shownState = void 0;
+    pinned = void 0;
+    hovered = void 0;
+    chosen = void 0;
+    segmentIds = "";
+    segs.replaceChildren();
+    core.reset(EXPECTED_PHASES[agent.stage], reduced());
+    tools.reset(reduced(), opening);
+    workspace.reset();
+    draw2(context.now());
+    advance(performance.now());
+    firstLoad = agent.trimmed === true && load2.full === void 0;
+    if (firstLoad) {
+      workspace.hold();
+    }
+    if (agent.trimmed) {
+      step({ type: "open", at: performance.now() });
+    }
+    options.markCurrent(detail.agentId);
+    updateNav();
+  };
+  const open2 = (detail) => {
+    const agent = current?.agents[detail.agentId];
+    if (current === void 0 || agent === void 0) {
+      return;
+    }
+    cancel([...parts(), options.stage.content]);
+    sizing?.cancel();
+    dropGhost();
+    const node = nodeBox(detail.key);
+    if (shown !== void 0 && shown !== view) {
+      shown.close(false);
+    }
+    if (target !== void 0) {
+      options.markCurrent(void 0);
+    }
+    shown = view;
+    zoomToken += 1;
+    slideTo = void 0;
+    show(detail, agent, ZOOM_OPENING);
+    listen(true);
+    zoomIn(detail.key, node);
+    if (detail.keyboard) {
+      back.focus({ preventScroll: true });
+    } else {
+      element.dataset.quiet = "";
+      element.focus({ preventScroll: true });
+    }
+  };
+  const swap = (detail) => {
+    const agent = current?.agents[detail.agentId];
+    if (agent === void 0) {
+      updateNav();
+      return;
+    }
+    show(detail, agent, SLIDE_OPENING);
+  };
+  const shut = (returnFocus, fadeBack, collapsing = false) => {
+    if (target === void 0) {
+      return;
+    }
+    const key = target.key;
+    target = void 0;
+    slideTo = void 0;
+    zoomToken += 1;
+    if (shown === view) {
+      shown = void 0;
+    }
+    step({ type: "close" });
+    listen(false);
+    options.markCurrent(void 0);
+    tools.clear();
+    zoomOut(key, returnFocus, fadeBack, collapsing);
+  };
+  const close = (returnFocus, collapsing = false) => shut(returnFocus, false, collapsing);
+  back.addEventListener("click", () => close(true));
+  const view = {
+    element,
+    open: open2,
+    close,
+    agentId: () => target?.agentId,
+    update(session) {
+      current = session;
+      if (target === void 0) {
+        return;
+      }
+      const agent = session.agents[target.agentId];
+      if (agent === void 0) {
+        close(true);
+        return;
+      }
+      settled = false;
+      dirty = true;
+      updateNav();
+      const key = detailKey(agent);
+      if (agent.trimmed && key !== loadKey) {
+        loadKey = key;
+        step({ type: "change", at: performance.now(), held: false });
+      }
+      draw2(context.now());
+    },
+    frame(clock, time2) {
+      if (target === void 0) {
+        return;
+      }
+      if (time2 - lastTick >= TICK_MS) {
+        lastTick = time2;
+        if (load2.due) {
+          step({ type: "tick", at: time2, held: false });
+        }
+      }
+      if (settled) {
+        return;
+      }
+      const agent = agentOf2();
+      if (agent !== void 0 && isRunning(agent) && Math.floor(clock / TICK_MS) !== Math.floor(lastDraw / TICK_MS)) {
+        draw2(clock);
+      }
+      if (dirty || time2 >= dueAt) {
+        advance(time2);
+      }
+      const lost = streamLost();
+      core.setPaused(lost);
+      tools.setPaused(lost);
+      core.frame(time2);
+      tools.frame(time2);
+      if (agent !== void 0 && !isRunning(agent) && !core.busy() && !tools.busy() && tracker.late.length === 0 && phase.phase === void 0) {
+        settled = true;
+      }
+    },
+    destroy() {
+      shut(true, true);
+      destroyed = true;
+      abort();
+      listen(false);
+      current = void 0;
+      if (element.parentElement !== options.stage.card) {
+        element.remove();
+      }
+    }
+  };
+  return view;
+};
+
+// src/ui/fixture-link.ts
+var FIXTURE_LINK_TEXT = "fixture";
+var FIXTURE_LINK_TITLE = "Save this session's spool lines as a replay fixture";
+var FIXTURE_LINK_TEXTS = { idle: FIXTURE_LINK_TEXT, saving: "saving\u2026", busy: "busy", failed: "failed" };
+var FIXTURE_ANNOUNCEMENTS = {
+  idle: "",
+  saving: "Saving the session fixture",
+  busy: "Another fixture is being saved; try again in a moment",
+  failed: "The session fixture could not be saved"
+};
+var FIXTURE_NOTE_MS = 2e3;
+var dispositionName = (header, fallback) => /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
+var plainClick2 = (event) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey;
+var saveBlob = (blob, name) => {
+  const url = URL.createObjectURL(blob);
+  const anchor = el("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+var browserDeps = () => ({ save: saveBlob });
+var createFixtureLink = (context, deps = browserDeps()) => {
+  const download = context.config.sessionFixtures ? context.source.fixture : void 0;
+  if (!download) {
+    return void 0;
+  }
+  const element = el("a", "session-fixture", FIXTURE_LINK_TEXT);
+  element.hidden = true;
+  element.title = FIXTURE_LINK_TITLE;
+  element.setAttribute("aria-label", FIXTURE_LINK_TITLE);
+  element.setAttribute("download", "");
+  const status = el("span", "visually-hidden");
+  status.setAttribute("role", "status");
+  let id = "";
+  let state = "idle";
+  let timer;
+  let destroyed = false;
+  const show = (next) => {
+    state = next;
+    clearTimeout(timer);
+    timer = void 0;
+    setText(element, FIXTURE_LINK_TEXTS[next]);
+    setText(status, FIXTURE_ANNOUNCEMENTS[next]);
+    if (next === "busy" || next === "failed") {
+      timer = setTimeout(() => show("idle"), FIXTURE_NOTE_MS);
+    }
+  };
+  const request = async (sessionId) => {
+    try {
+      const response = await download.read(context.repositoryId, sessionId);
+      if (!response.ok) {
+        return response.status === 429 ? "busy" : "failed";
+      }
+      const name = dispositionName(response.headers.get("content-disposition"), `${sessionId.slice(0, 8)}.ndjson`);
+      deps.save(await response.blob(), name);
+      return "idle";
+    } catch {
+      return "failed";
+    }
+  };
+  const save = async () => {
+    if (state === "saving" || id === "") {
+      return;
+    }
+    show("saving");
+    const next = await request(id);
+    if (!destroyed) {
+      show(next);
+    }
+  };
+  element.addEventListener("click", (event) => {
+    if (plainClick2(event)) {
+      event.preventDefault();
+      void save();
+    }
+  });
+  return {
+    element,
+    status,
+    set(next) {
+      if (next === id) {
+        return;
+      }
+      id = next;
+      element.hidden = id === "";
+      element.setAttribute("href", download.url(context.repositoryId, id));
+    },
+    save,
+    destroy() {
+      destroyed = true;
+      clearTimeout(timer);
+    }
+  };
+};
+
+// src/ui/graph/fit.ts
+var SCALE_MAX = 1.06;
+var SCALE_FLOOR = 0.7;
+var UNWRAP_AT = 0.74;
+var fitGraph = (session, options, hostWidth, wrapped) => {
+  if (!(hostWidth > 0)) {
+    const layout = sessionLayout(session, { ...options, wrap: wrapped });
+    return { layout, scale: SCALE_MAX, wrap: layout.lines === 2 };
+  }
+  const single = sessionLayout(session, { ...options, wrap: false });
+  const ratio = hostWidth / single.width;
+  const floor = wrapped ? UNWRAP_AT : SCALE_FLOOR;
+  if (ratio >= floor) {
+    return { layout: single, scale: Math.min(SCALE_MAX, ratio), wrap: false };
+  }
+  const double = sessionLayout(session, { ...options, wrap: true });
+  if (double.lines === 1 || double.width >= single.width) {
+    return { layout: single, scale: Math.min(SCALE_MAX, ratio), wrap: false };
+  }
+  return { layout: double, scale: Math.min(SCALE_MAX, hostWidth / double.width), wrap: true };
+};
+
+// src/ui/graph/session-effects.ts
+var MESSAGE_POP_MS = 80;
+var QUESTION_POP_MS = 80;
+var NONE = { pops: [], dots: [], sweep: false, folds: [], sheens: [], rolls: [], badges: [], fills: [] };
+var isEnded4 = (state) => !isActive2(state) && state !== "pending" && state !== "skipped";
+var stateOf = (item2) => item2?.kind === "node" ? item2.state : void 0;
+var SHEEN_STATES = ["done", "approved", "changes"];
+var sheensOf = (previous, current, pops) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const sheens = [];
+  for (const item2 of current.items) {
+    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
+      continue;
+    }
+    const old = before.get(item2.key);
+    if (old?.kind === "node" && old.state === "running" && old.stale !== true) {
+      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+      sheens.push({ key: item2.key, delay: pop + POP_MS2 });
+    }
+  }
+  return sheens;
+};
+var filledKeys = (previous, current) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const keys2 = [];
+  for (const item2 of current.items) {
+    if (item2.kind !== "node" || item2.agentId === void 0 || item2.agentId === "main" || !SHEEN_STATES.includes(item2.state)) {
+      continue;
+    }
+    const old = before.get(item2.key);
+    if (old?.kind === "node" && old.state === "running" && old.stale !== true && old.progress !== void 0) {
+      keys2.push(item2.key);
+    }
+  }
+  return keys2;
+};
+var rollsOf = (previous, current, pops) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const rolls = [];
+  for (const item2 of current.items) {
+    const old = before.get(item2.key);
+    if (item2.kind !== "node" || item2.state !== "changes" || item2.count === void 0 || old?.kind !== "node") {
+      continue;
+    }
+    if (old.state === "running") {
+      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+      rolls.push({ key: item2.key, delay: pop + POP_MS2 + SHEEN_MS });
+    } else if (old.state === "changes" && old.count === void 0) {
+      rolls.push({ key: item2.key, delay: 0 });
+    }
+  }
+  return rolls;
+};
+var VERDICTS2 = ["approved", "changes"];
+var badgesOf = (previous, current, pops) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const badges = [];
+  for (const item2 of current.items) {
+    const old = before.get(item2.key);
+    if (item2.kind !== "node" || item2.improvements === void 0 || old?.kind !== "node") {
+      continue;
+    }
+    if (old.state === "running") {
+      const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+      badges.push({ key: item2.key, delay: pop + POP_MS2 + SHEEN_MS });
+    } else if (VERDICTS2.includes(old.state) && old.improvements === void 0) {
+      badges.push({ key: item2.key, delay: 0 });
+    }
+  }
+  return [...badges, ...staleBadgesOf(before, current, pops)];
+};
+var staleBadgesOf = (before, current, pops) => {
+  const badges = [];
+  for (const item2 of current.items) {
+    const old = before.get(item2.key);
+    if (item2.kind !== "node" || item2.staleApproval === void 0 || old?.kind !== "node" || old.staleApproval !== void 0) {
+      continue;
+    }
+    const stopped = old.state === "running" && SHEEN_STATES.includes(item2.state);
+    const pop = pops.find((candidate) => candidate.key === item2.key)?.delay ?? 0;
+    badges.push({ key: item2.key, delay: stopped ? pop + POP_MS2 + SHEEN_MS : 0 });
+  }
+  return badges;
+};
+var foldsOf = (previous, current) => {
+  const before = foldedPipelines(previous.session, previous.expanded);
+  const after2 = foldedPipelines(current.session, current.expanded);
+  const opened = [...before].filter((index) => !after2.has(index)).map((pipeline) => ({ pipeline, open: true }));
+  const closed = [...after2].filter((index) => !before.has(index)).map((pipeline) => ({ pipeline, open: false }));
+  return [...opened, ...closed].sort((a, b) => a.pipeline - b.pipeline);
+};
+var edgeLength = (edge, positions) => {
+  const end = (ref) => {
+    if ("key" in ref) {
+      const at = positions.get(ref.key);
+      return at ? [at[0] + (ref.dx ?? 0), at[1] + (ref.dy ?? 0)] : void 0;
+    }
+    const x = positions.get(ref.xKey);
+    const y = positions.get(ref.yKey);
+    return x && y ? [x[0] + (ref.dx ?? 0), y[1]] : void 0;
+  };
+  const a = end(edge.a);
+  const b = end(edge.b);
+  return a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
+};
+var targetKey = (edge) => "key" in edge.b ? edge.b.key : edge.b.xKey;
+var chain = (queue, current) => {
+  if (!queue.some((dot) => dot.to?.startsWith(sessionKeys.pill("")))) {
+    return queue;
+  }
+  const edges = new Map(current.items.filter((item2) => item2.kind === "edge").map((item2) => [item2.key, item2]));
+  const positions = enterStarts(current.items.filter((item2) => item2.kind !== "edge"), () => void 0, false);
+  const startsAt = (dot, key) => {
+    const first = edges.get(dot.edges[0] ?? "");
+    return first !== void 0 && "key" in first.a && first.a.key === key;
+  };
+  const chained = [...queue];
+  for (const worktree of queue) {
+    const pill = worktree.to;
+    if (pill === void 0 || !pill.startsWith(sessionKeys.pill(""))) {
+      continue;
+    }
+    const next = chained.find((dot) => dot !== worktree && startsAt(dot, pill));
+    if (!next) {
+      continue;
+    }
+    const lengthOf = (keys2) => keys2.reduce((sum, key) => sum + edgeLength(edges.get(key), positions), 0);
+    const first = lengthOf(worktree.edges);
+    const total = first + lengthOf(next.edges);
+    const merged2 = { edges: [...worktree.edges, ...next.edges], color: worktree.color, to: next.to, stops: [{ key: pill, share: total > 0 ? first / total : 0.5 }] };
+    chained.splice(chained.indexOf(worktree), 1, merged2);
+    chained.splice(chained.indexOf(next), 1);
+  }
+  return chained;
+};
+var leaves = (dot, edges) => {
+  const edge = edges.get((dot.reverse ? dot.edges[dot.edges.length - 1] : dot.edges[0]) ?? "");
+  const end = dot.reverse ? edge?.b : edge?.a;
+  if (end === void 0) {
+    return void 0;
+  }
+  return "key" in end ? end.key : end.xKey;
+};
+var dotsOf = (previous, current, unfolded, filled) => {
+  const before = new Map(previous.items.map((item2) => [item2.key, item2]));
+  const edgeItems = new Map(current.items.filter((item2) => item2.kind === "edge").map((item2) => [item2.key, item2]));
+  const queue = [];
+  const fans = /* @__PURE__ */ new Map();
+  const dotted = current.items.filter((item2) => (item2.kind === "node" || item2.kind === "pill" || item2.kind === "bar") && item2.dot !== void 0);
+  for (const item2 of dotted) {
+    const dot = item2.dot;
+    const old = before.get(item2.key);
+    if (!old && item2.pipeline !== void 0 && unfolded.has(item2.pipeline)) {
+      continue;
+    }
+    const oldState = stateOf(old);
+    const state = stateOf(item2);
+    const planned = { edges: dot.edges, color: dot.color, to: item2.key };
+    if (dot.when === "start" && state !== void 0) {
+      if (isActive2(state) && !isActive2(oldState)) {
+        if (dot.fan === void 0) {
+          queue.push(planned);
+        } else {
+          fans.set(dot.fan, [...fans.get(dot.fan) ?? [], item2]);
+        }
+      }
+      const handsBack = isActive2(oldState) && isEnded4(state);
+      if (handsBack && dot.back) {
+        queue.push({ edges: dot.edges, color: dot.color, reverse: true });
+      }
+      const out = (dot.out ?? []).filter((key) => edgeItems.has(key) && before.has(targetKey(edgeItems.get(key))));
+      if (handsBack && out.length > 0 && out.length === (dot.out ?? []).length) {
+        queue.push({ edges: out, color: dot.color });
+      }
+    } else if (dot.when === "appear" && !old) {
+      queue.push(planned);
+    } else if (dot.when === "done" && state === "done" && oldState !== "done") {
+      queue.push(planned);
+    }
+  }
+  const drawn = (dot) => dot.edges.every((key) => edgeItems.has(key));
+  const waits = (dot) => filled.has(leaves(dot, edgeItems) ?? "") ? FILL_MS : 0;
+  const dots = chain(queue.filter(drawn), current).map((dot, index) => ({ ...dot, delay: index * DOT_STAGGER + waits(dot) }));
+  let slot = dots.length;
+  for (const [branch, reviewers] of fans) {
+    if (reviewers.length === 1) {
+      const [only] = reviewers;
+      const dot = only.dot;
+      dots.push({ edges: dot.edges, color: dot.color, to: only.key, delay: slot * DOT_STAGGER });
+      slot += 1;
+      continue;
+    }
+    const bar = current.items.find((item2) => item2.kind === "bar" && item2.branch === branch);
+    const feed = bar ? dots.find((dot) => dot.to === bar.key) : void 0;
+    let start = feed?.delay;
+    if (start === void 0) {
+      start = slot * DOT_STAGGER;
+      slot += 1;
+      if (bar?.dot) {
+        dots.push({ edges: bar.dot.edges, color: bar.dot.color, delay: start });
+      }
+    }
+    reviewers.forEach((reviewer, index) => {
+      const dot = reviewer.dot;
+      dots.push({ edges: dot.edges, color: dot.color, to: reviewer.key, delay: start + FAN_DELAY + index * FAN_STAGGER });
+    });
+  }
+  return dots.filter(drawn);
+};
+var newestMessage = (session) => session.messages.filter((message) => message.progress !== true).at(-1)?.id;
+var sessionEffects = (previous, current) => {
+  if (!previous) {
+    return NONE;
+  }
+  const folds = foldsOf(previous, current);
+  const unfolded = new Set(folds.filter((fold) => fold.open).map((fold) => fold.pipeline));
+  const filled = filledKeys(previous.layout, current.layout);
+  const planned = dotsOf(previous.layout, current.layout, unfolded, new Set(filled));
+  const popKeys = popsOf(previous.layout, current.layout);
+  for (const key of planned.flatMap((dot) => [...dot.to === void 0 ? [] : [dot.to], ...(dot.stops ?? []).map((stop) => stop.key)])) {
+    if (!popKeys.includes(key)) {
+      popKeys.push(key);
+    }
+  }
+  const arrivals = popsAtArrival(popKeys, planned).map((pop) => pop.key.startsWith("bubble:") ? { ...pop, delay: QUESTION_POP_MS } : pop);
+  const fills = filled.map((key) => ({ key, delay: arrivals.find((pop) => pop.key === key)?.delay ?? 0 }));
+  const pops = arrivals.map((pop) => filled.includes(pop.key) ? { ...pop, delay: pop.delay + FILL_MS } : pop);
+  const plan = current.layout.items.find((item2) => item2.key === "node:plan");
+  const message = newestMessage(current.session);
+  if (plan && message !== void 0 && message !== newestMessage(previous.session) && !pops.some((pop) => pop.key === plan.key)) {
+    pops.push({ key: plan.key, delay: MESSAGE_POP_MS });
+  }
+  const sweep = previous.session.chip.tone !== "done" && current.session.chip.tone === "done";
+  const dots = planned.map(({ edges, color, delay, reverse }) => reverse ? { edges, color, delay, reverse } : { edges, color, delay });
+  const sheens = sheensOf(previous.layout, current.layout, pops);
+  const rolls = rollsOf(previous.layout, current.layout, pops);
+  const badges = badgesOf(previous.layout, current.layout, pops);
+  return { pops, dots, sweep, folds, sheens, rolls, badges, fills };
+};
+
+// src/ui/graph/session-view.ts
+var FROM_TEXT = sessionKeys.from("");
+var CONTINUED_TEXT = sessionKeys.continued("");
+var prefixOf = (key) => key(0).slice(0, -1);
+var HEADER_TEXT2 = prefixOf(sessionKeys.header);
+var TOGGLES = [HEADER_TEXT2, prefixOf(sessionKeys.headerHit), prefixOf(sessionKeys.pipelineDot)];
+var createSessionGraphView = (host, context) => {
+  const wrapper = el("div", "session-graph");
+  host.replaceChildren(wrapper);
+  const scene = createScene(wrapper, context);
+  const expandedBySession = /* @__PURE__ */ new Map();
+  const ringForms = /* @__PURE__ */ new Map();
+  let last;
+  let hostWidth = 0;
+  let wrapped = false;
+  let relayoutAt;
+  let refit = false;
+  const expandedOf = (session) => {
+    let expanded = expandedBySession.get(session.id);
+    if (!expanded) {
+      expanded = /* @__PURE__ */ new Set();
+      expandedBySession.set(session.id, expanded);
+    }
+    return expanded;
+  };
+  const labelOf = (session) => `Stage map of ${session.key ?? session.title ?? "the session"}`;
+  const markTargets = (session, layout) => {
+    for (const element of wrapper.querySelectorAll(`[data-key^="${FROM_TEXT}"], [data-key^="${CONTINUED_TEXT}"]`)) {
+      element.classList.toggle("link", linkOf(session, element.dataset.key ?? "") !== void 0);
+    }
+    for (const element of wrapper.querySelectorAll(`[data-key^="${HEADER_TEXT2}"]`)) {
+      element.classList.toggle("toggle", foldablePipeline(session, Number((element.dataset.key ?? "").slice(HEADER_TEXT2.length))));
+    }
+    for (const element of wrapper.querySelectorAll(".node[data-key], .gate[data-key]")) {
+      element.classList.toggle("clickable", clickTarget(layout, element.dataset.key ?? "") !== void 0);
+    }
+  };
+  const draw2 = (session, mode) => {
+    const expanded = new Set(expandedOf(session));
+    const now = context.now();
+    if (!(hostWidth > 0)) {
+      hostWidth = Math.floor(wrapper.clientWidth);
+    }
+    const options = { modelLetters: context.config.modelLetters, expanded, now, typical: context.typical, ringForms };
+    const fit = fitGraph(session, options, hostWidth, wrapped);
+    wrapped = fit.wrap;
+    const current = { session, layout: fit.layout, expanded };
+    scene.set(fit.layout, labelOf(session), fit.scale);
+    if (mode === "play") {
+      scene.play(sessionEffects(last, current));
+    } else if (mode === "snap") {
+      scene.snap();
+    }
+    last = current;
+    relayoutAt = handledCheckEnds(session, now);
+    markTargets(session, fit.layout);
+  };
+  const resize = new ResizeObserver((entries) => {
+    const box = entries[entries.length - 1]?.contentRect;
+    const width = box ? Math.floor(box.width) : hostWidth;
+    if (width !== hostWidth) {
+      hostWidth = width;
+      refit = true;
+    }
+  });
+  resize.observe(wrapper);
+  const toggleFold = (pipeline) => {
+    if (!last || !foldablePipeline(last.session, pipeline)) {
+      return;
+    }
+    const expanded = expandedOf(last.session);
+    if (expanded.has(pipeline)) {
+      expanded.delete(pipeline);
+    } else {
+      expanded.add(pipeline);
+    }
+    scene.clearFocus();
+    draw2(last.session, "play");
+    const detail = { pipeline, open: expanded.has(pipeline) };
+    wrapper.dispatchEvent(new CustomEvent(SESSION_FOLD, { bubbles: true, detail }));
+  };
+  const onClick = (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[data-key]") : null;
+    const key = target?.getAttribute("data-key") ?? "";
+    if (!last || key === "") {
+      return;
+    }
+    const sessionId = linkOf(last.session, key);
+    if (sessionId !== void 0) {
+      const detail = { sessionId };
+      target?.dispatchEvent(new CustomEvent(SESSION_LINK, { bubbles: true, detail }));
+      return;
+    }
+    const pipeline = last.layout.items.find((entry) => entry.key === key)?.pipeline;
+    const toggles = TOGGLES.some((prefix) => key.startsWith(prefix));
+    if (pipeline !== void 0 && (toggles || foldedPipelines(last.session, last.expanded).has(pipeline))) {
+      toggleFold(pipeline);
+      return;
+    }
+    const card = cardTarget(last.layout, key);
+    if (card !== void 0) {
+      const detail = { ...card, keyboard: false };
+      target?.dispatchEvent(new CustomEvent(SESSION_CARD, { bubbles: true, detail }));
+      return;
+    }
+    const click = clickTarget(last.layout, key);
+    if (click?.kind === "agent") {
+      const detail = { agentId: click.agentId };
+      target?.dispatchEvent(new CustomEvent(SESSION_AGENT, { bubbles: true, detail }));
+    } else if (click?.kind === "main") {
+      target?.dispatchEvent(new CustomEvent(SESSION_MAIN, { bubbles: true }));
+    }
+  };
+  wrapper.addEventListener("click", onClick);
+  const cardNodeOf = (event) => {
+    const element = event.target instanceof Element ? event.target.closest("[data-key]") : null;
+    const detail = last && element ? cardTarget(last.layout, element.getAttribute("data-key") ?? "") : void 0;
+    return element && detail ? { element, detail } : void 0;
+  };
+  const onKey = (event) => {
+    const node = event.key === "Enter" || event.key === " " ? cardNodeOf(event) : void 0;
+    if (!node) {
+      return;
+    }
+    event.preventDefault();
+    if (event.repeat) {
+      return;
+    }
+    const detail = { ...node.detail, keyboard: true };
+    node.element.dispatchEvent(new CustomEvent(SESSION_CARD, { bubbles: true, detail }));
+  };
+  const onDown = (event) => {
+    if (cardNodeOf(event)) {
+      event.preventDefault();
+    }
+  };
+  wrapper.addEventListener("keydown", onKey);
+  wrapper.addEventListener("mousedown", onDown);
+  return {
+    update(session) {
+      draw2(session, "play");
+    },
+    frame(clock, time2) {
+      if (refit && last) {
+        refit = false;
+        draw2(last.session, "snap");
+      }
+      scene.frame(time2);
+      if (relayoutAt !== void 0 && clock >= relayoutAt && last) {
+        draw2(last.session, "ease");
+      }
+    },
+    highlightQuestions(questionIds2) {
+      scene.highlight(questionIds2);
+    },
+    toggleFold,
+    folded() {
+      return last ? foldedPipelines(last.session, last.expanded) : /* @__PURE__ */ new Set();
+    },
+    focus(target) {
+      scene.focus(target);
+    },
+    node(key) {
+      return scene.node(key);
+    },
+    markCard(key) {
+      scene.markCard(key);
+    },
+    cardNodes() {
+      return last ? cardOrder(last.layout, last.session) : [];
+    },
+    agentNode(agentId) {
+      const item2 = last?.layout.items.find((entry) => entry.kind === "node" && entry.agentId === agentId);
+      return item2 === void 0 ? void 0 : wrapper.querySelector(`[data-key="${CSS.escape(item2.key)}"]`) ?? void 0;
+    },
+    destroy() {
+      resize.disconnect();
+      wrapper.removeEventListener("click", onClick);
+      wrapper.removeEventListener("keydown", onKey);
+      wrapper.removeEventListener("mousedown", onDown);
+      scene.destroy();
+      last = void 0;
     }
   };
 };
@@ -15932,410 +20072,19 @@ var createSessionLogView = (host, context) => {
   };
 };
 
-// src/ui/node-card-model.ts
-var VERDICTS2 = {
-  changes: { text: "changes requested", color: "var(--warm)", solid: false },
-  approved: { text: "approved", color: "var(--rev)", solid: false }
-};
-var STATE_COLORS = {
-  approved: "var(--rev)",
-  changes: "var(--warm)",
-  handed: "var(--amber)",
-  failed: "var(--red)",
-  waiting: "var(--you)",
-  stale: "var(--fg-3)",
-  idle: "var(--fg-3)",
-  pending: "var(--fg-3)",
-  skipped: "var(--fg-3)"
-};
-var PLAN_WORK = { implement: "implementing", review: "reviewing", pr: "shepherding", other: "exploring" };
-var LEG_COLOR = "var(--fg-2)";
-var KINDS2 = ["fix", "improve"];
-var legStarts = (session, agentId) => {
-  const starts = /* @__PURE__ */ new Set();
-  const add = (startedAt) => {
-    const start = parseTime(startedAt);
-    if (start !== void 0) {
-      starts.add(start);
-    }
-  };
-  for (const row2 of session.rows) {
-    for (const run of row2.streams.flatMap((stream) => stream.runs)) {
-      if (run.agentId === agentId) {
-        add(run.startedAt);
-      }
-    }
-    for (const fix of row2.fixes) {
-      if (fix.agentId === agentId) {
-        add(fix.startedAt);
-      }
-    }
-  }
-  return [...starts].sort((a, b) => a - b);
-};
-var legOf = (session, target) => {
-  const starts = legStarts(session, target.agentId);
-  const start = parseTime(target.startedAt);
-  const index = start === void 0 ? -1 : starts.indexOf(start);
-  return starts.length > 1 && index >= 0 ? { n: index + 1, m: starts.length } : void 0;
-};
-var legChip = (leg) => ({ text: `Leg ${leg.n} of ${leg.m}`, color: LEG_COLOR, solid: false });
-var timesText = (start, end) => {
-  const from = timeOfDay(parseTime(start));
-  const to = timeOfDay(parseTime(end));
-  if (from === "") {
-    return to;
-  }
-  return to === "" ? from : `${from} to ${to}`;
-};
-var joinMeta = (parts) => parts.filter((part) => part !== void 0 && part !== "").join(" \xB7 ");
-var countText4 = (meter) => meter.limit > 0 ? `${meter.used}/${meter.limit}` : String(meter.used);
-var ratioOf3 = (meter) => meter.limit > 0 ? Math.min(1, meter.used / meter.limit) : void 0;
-var countMetric = (label, meter, pips) => {
-  const metric = { label, value: String(meter.used), level: meter.level };
-  if (meter.limit > 0) {
-    metric.limit = String(meter.limit);
-  }
-  if (pips !== void 0) {
-    metric.pips = pips;
-  } else if (meter.limit > 0) {
-    metric.ratio = ratioOf3(meter);
-  }
-  return metric;
-};
-var totalMs = (parts) => {
-  const { agent, clock } = parts;
-  const startedAt = parseTime(agent.startedAt) ?? clock;
-  const endedAt = parts.running ? clock : parseTime(agent.endedAt) ?? clock;
-  return { endedAt, ms: endedAt - startedAt };
-};
-var legMetric = (total, totalText, own) => {
-  if (own === void 0) {
-    return { ...total, sub: "in all" };
-  }
-  return { label: total.label, value: own, level: "ok", sub: `${totalText} in all` };
-};
-var isNewest = (leg) => leg === void 0 || leg.n === leg.m;
-var isRunning = (state) => state === "running" || state === "waiting";
-var metricsOf = (parts, only) => {
-  const { agent, leg } = parts;
-  const budget = agent.budget;
-  const { endedAt, ms } = totalMs(parts);
-  const totalTime = elapsed(ms);
-  const calls = countMetric("Calls", budget.toolCalls);
-  const verify = countMetric("Verify", budget.verifyRounds, verifyCell(budget.verifyRounds, parts.running).pips);
-  const context = budget.context;
-  const ctx = { label: "Ctx", value: contextSize(context.used), level: context.level };
-  if (context.limit > 0) {
-    ctx.limit = contextSize(context.limit);
-    ctx.ratio = ratioOf3(context);
-  }
-  const costMetric = { label: "Cost", value: cost(budget.costUsd), level: "ok" };
-  const time2 = { label: "Time", value: totalTime, level: "ok" };
-  const showVerify = budget.verifyRounds.limit > 0 || budget.verifyRounds.used > 0;
-  const all = [calls, ...showVerify ? [verify] : [], ctx, costMetric, time2];
-  const wanted = only === void 0 ? all : all.filter((metric) => only.includes(metric.label));
-  if (leg === void 0) {
-    return wanted;
-  }
-  const atFirstStop = budget.toolCallsAtFirstStop;
-  let ownCalls;
-  if (leg.n === 1 && atFirstStop !== void 0) {
-    ownCalls = String(atFirstStop);
-  } else if (leg.n === 2 && leg.m === 2 && atFirstStop !== void 0) {
-    ownCalls = String(Math.max(0, budget.toolCalls.used - atFirstStop));
-  }
-  const resumedAt = parseTime(agent.resumedAt);
-  const ownTime = leg.n === leg.m && resumedAt !== void 0 ? elapsed(endedAt - resumedAt) : void 0;
-  return wanted.map((metric) => {
-    if (metric.label === "Calls") {
-      return legMetric(metric, countText4(budget.toolCalls), ownCalls);
-    }
-    if (metric.label === "Time") {
-      return legMetric(metric, totalTime, ownTime);
-    }
-    return { ...metric, sub: "in all" };
-  });
-};
-var nowBlock = (parts) => {
-  const { session, agent, leg } = parts;
-  const row2 = sessionAgentRow(session, agent, parts.config);
-  if (parts.running && isNewest(leg)) {
-    const now = row2.now;
-    return { kind: "now", label: "Now", tool: now.tool, text: now.text, failed: now.failed };
-  }
-  const at = timeOfDay(parseTime(parts.end));
-  const text2 = at === "" ? STATE_TEXT[parts.state] : `${STATE_TEXT[parts.state]} at ${at}`;
-  const block = { kind: "now", label: "Ended", tool: "", text: text2, failed: false };
-  if (isNewest(leg) && row2.now.kind === "report") {
-    block.report = row2.now.text;
-  }
-  return block;
-};
-var missingOf = (mark) => {
-  const missing = [];
-  if (!mark.reviewed) {
-    missing.push("review");
-  }
-  if (!mark.checked) {
-    missing.push("check");
-  }
-  return missing;
-};
-var groupOf3 = (file) => file.missing === void 0 ? 3 : 2 - file.missing.length;
-var markedFiles = (paths, trust) => {
-  const files = paths.map((path) => {
-    const mark = trust === void 0 ? void 0 : ownValue(trust.files, path);
-    return mark === void 0 ? { path } : { path, missing: missingOf(mark) };
-  });
-  return files.sort((a, b) => groupOf3(a) - groupOf3(b));
-};
-var filesBlock = (parts, row2, kind) => {
-  const trust = row2?.trust;
-  const runFiles = kind === "pr" && trust !== void 0 ? Object.keys(trust.files) : [];
-  const paths = runFiles.length > 0 ? runFiles : parts.agent.filesChanged;
-  if (paths.length === 0) {
-    return { kind: "note", text: "No files changed." };
-  }
-  const marked = kind === "pr" || !parts.agentRunning;
-  return { kind: "files", files: markedFiles(paths, marked ? trust : void 0) };
-};
-var staleLine = (trust) => {
-  const stale = trust?.stale;
-  if (stale === void 0 || stale.files <= 0) {
-    return void 0;
-  }
-  return { text: staleApprovalText(stale.files), at: timeOfDay(parseTime(stale.approvedAt)) };
-};
-var stateChip = (state, nodeColor) => ({ text: STATE_TEXT[state], color: STATE_COLORS[state] ?? nodeColor, solid: false });
-var nodeState = (session, target) => {
-  const ref = target.ref;
-  if (ref.kind === "fix") {
-    return fixOf(session, ref.branch, ref.fixId)?.state;
-  }
-  if (ref.kind === "pr") {
-    return session.rows.find((row2) => row2.branch === ref.branch)?.pr?.state;
-  }
-  if (ref.kind === "docs") {
-    return session.docs?.state;
-  }
-  const start = parseTime(target.startedAt);
-  const drawn = session.rows.flatMap((row2) => [...row2.streams.flatMap((stream) => stream.runs), ...row2.reviewers]);
-  const nodes = drawn.filter((node) => node.agentId === target.agentId);
-  return (nodes.find((node) => parseTime(node.startedAt) === start) ?? nodes[0])?.state;
-};
-var fixOf = (session, branch, fixId) => {
-  return session.rows.find((row2) => row2.branch === branch)?.fixes.find((fix) => fix.id === fixId);
-};
-var baseName = (path) => path.split("/").filter((part) => part !== "").at(-1) ?? path;
-var roleOf = (session, agentId) => ownValue(session.agents, agentId)?.role ?? agentId;
-var reviewersOf = (session, fix) => {
-  const ids = (fix.items ?? []).map((item2) => item2.reviewerAgentId);
-  if (ids.length === 0 && fix.reviewerAgentId !== void 0) {
-    ids.push(fix.reviewerAgentId);
-  }
-  return [...new Set(ids)].map((id) => roleOf(session, id));
-};
-var markOf2 = (item2, index, working) => {
-  if (item2.edited) {
-    return "edited";
-  }
-  return index === working ? "working" : "todo";
-};
-var countsText = (items) => {
-  const words = { fix: "fixes", improve: "improvements" };
-  return KINDS2.map((kind) => {
-    const ofKind = items.filter((item2) => item2.kind === kind);
-    const edited = ofKind.filter((item2) => item2.edited).length;
-    return ofKind.length === 0 ? "" : `${words[kind]} ${edited}/${ofKind.length}`;
-  }).filter((text2) => text2 !== "").join(" \xB7 ");
-};
-var phaseText = (agent) => {
-  const phase = agent.progress?.kind === "fixes" ? agent.progress.phase : void 0;
-  const name = phase === void 0 ? void 0 : PHASE_NAMES.implement[phase];
-  return phase === void 0 || name === void 0 ? "" : `Phase ${phase + 1} of ${PHASE_NAMES.implement.length}: ${name}`;
-};
-var fixCard = (parts, fix, row2) => {
-  const { session, agent, leg } = parts;
-  const files = agent.filesChanged.length > 0 ? [filesBlock(parts, row2, "fix")] : [];
-  const chips = [{ text: "Fix", color: "var(--st-fix)", solid: true }, ...leg ? [legChip(leg)] : []];
-  const reviewers = reviewersOf(session, fix);
-  const from = reviewers.length > 0 ? `from ${reviewers.join(", ")}` : "";
-  const phase = parts.running ? phaseText(agent) : "";
-  const meta = joinMeta([modelName(fix.model ?? agent.model ?? ""), phase === "" ? timesText(parts.start, parts.end) : phase, from]);
-  const metrics = { kind: "metrics", metrics: metricsOf(parts, ["Calls", "Verify", "Time"]) };
-  const items = fix.items ?? [];
-  if (items.length === 0) {
-    const note = fix.reviewerAgentId === void 0 ? NO_ITEMS_CONTINUED : NO_ITEMS;
-    return { kind: "fix", role: agent.role, chips, meta, blocks: [metrics, { kind: "note", text: note }, ...files] };
-  }
-  const working = parts.running && fix.state === "running" ? fix.working : void 0;
-  const rows = items.map((item2, index) => ({
-    index,
-    kind: item2.kind,
-    mark: markOf2(item2, index, working),
-    text: item2.text,
-    file: baseName(item2.file),
-    path: item2.file,
-    reviewer: roleOf(session, item2.reviewerAgentId)
-  }));
-  const edited = items.filter((item2) => item2.edited).length;
-  const segments = rows.map((entry) => ({ kind: entry.kind, mark: entry.mark }));
-  const progress = { kind: "progress", edited, total: items.length, counts: countsText(items), segments };
-  const blocks = [progress, metrics];
-  for (const type of KINDS2) {
-    const ofType = rows.filter((entry) => entry.kind === type);
-    if (ofType.length > 0) {
-      blocks.push({ kind: "items", type, rows: ofType });
-    }
-  }
-  blocks.push(...files);
-  return { kind: "fix", role: agent.role, chips, meta, blocks };
-};
-var NO_ITEMS = "No items: the review named no file.";
-var NO_ITEMS_CONTINUED = "No items.";
-var reviewerCard = (parts) => {
-  const { session, agent, leg } = parts;
-  const verdict = VERDICTS2[parts.state] ?? stateChip(parts.state, "var(--rev)");
-  const chips = [verdict, ...leg ? [legChip(leg)] : []];
-  const reportedAt = agent.report === void 0 ? "" : timeOfDay(parseTime(agent.report.at ?? agent.endedAt));
-  const time2 = elapsed(totalMs(parts).ms);
-  const meta = joinMeta([modelName(agent.model ?? ""), time2, reportedAt === "" ? "" : `reported ${reportedAt}`, cost(agent.budget.costUsd)]);
-  const own = agentFollowups(session, agent.id);
-  const blocks = [];
-  if (parts.running) {
-    blocks.push(nowBlock(parts));
-  }
-  for (const type of KINDS2) {
-    const ofType = own.filter((followup) => followup.type === type);
-    const items = ofType.map((followup) => ({ id: followup.id, text: followup.text, file: followup.file, category: followup.category }));
-    if (items.length > 0) {
-      blocks.push({ kind: "followups", type, items });
-    }
-  }
-  const issues = own.filter((followup) => followup.type === "issue").length;
-  if (own.length === 0 && !parts.running) {
-    blocks.push({ kind: "note", text: "No follow-ups." });
-  }
-  if (issues > 0) {
-    blocks.push({ kind: "issues", count: issues });
-  }
-  return { kind: "reviewer", role: agent.role, chips, meta, blocks };
-};
-var CHECKS = {
-  pending: { text: "checks running" },
-  passed: { text: "checks passing", tone: "ok" },
-  failed: { text: "checks failing", tone: "bad" }
-};
-var REVIEWS = {
-  approved: { text: "approved", tone: "ok" },
-  "changes-requested": { text: "changes requested", tone: "bad" },
-  required: { text: "review required" }
-};
-var prBlock = (pr, trust) => {
-  const facts = [{ text: pr.state }];
-  if (pr.checks !== void 0) {
-    facts.push(CHECKS[pr.checks]);
-  }
-  if (pr.review !== void 0) {
-    facts.push(REVIEWS[pr.review]);
-  }
-  if (pr.additions !== void 0) {
-    facts.push({ text: `+${pr.additions}`, tone: "add" });
-  }
-  if (pr.deletions !== void 0) {
-    facts.push({ text: `-${pr.deletions}`, tone: "del" });
-  }
-  const block = { kind: "pr", number: pr.number, title: pr.title, facts };
-  const stale = staleLine(trust);
-  if (stale !== void 0) {
-    block.stale = stale;
-  }
-  return block;
-};
-var agentCard = (parts, kind, pr, prRow) => {
-  const { session, agent, leg } = parts;
-  const row2 = prRow ?? (agent.branch === void 0 ? void 0 : session.rows.find((entry) => entry.branch === agent.branch));
-  let nodeColor = "var(--st-plan)";
-  let place2 = `Plan \xB7 ${PLAN_WORK[agent.stage]}`;
-  if (kind === "docs") {
-    nodeColor = "var(--st-docs)";
-    place2 = "Docs";
-  } else if (agent.branch !== void 0) {
-    nodeColor = kind === "pr" ? "var(--st-pr)" : colorValue2(branchCell(session, agent).color);
-    place2 = agent.branch;
-  }
-  const chips = [stateChip(parts.state, nodeColor), ...leg ? [legChip(leg)] : []];
-  const meta = joinMeta([modelName(agent.model ?? ""), place2, timesText(parts.start, parts.end)]);
-  const blocks = [];
-  const stale = kind === "pr" ? staleLine(row2?.trust) : void 0;
-  if (pr !== void 0) {
-    blocks.push(prBlock(pr, row2?.trust));
-  } else if (stale !== void 0) {
-    blocks.push({ kind: "stale", ...stale });
-  }
-  if (agent.description !== void 0 && agent.description.trim() !== "") {
-    blocks.push({ kind: "task", text: agent.description.trim() });
-  }
-  blocks.push(nowBlock(parts), { kind: "metrics", metrics: metricsOf(parts) }, filesBlock(parts, row2, kind));
-  const model = { kind, role: agent.role, chips, meta, blocks };
-  if (pr !== void 0) {
-    model.pr = { number: pr.number, url: pr.url };
-  }
-  return model;
-};
-var nodeCardModel = (session, target, config, clock) => {
-  const agent = ownValue(session.agents, target.agentId);
-  if (agent === void 0 || agent.id === MAIN_AGENT) {
-    return void 0;
-  }
-  const leg = legOf(session, target);
-  const newest2 = isNewest(leg);
-  const rowState = sessionAgentRow(session, agent, config).state;
-  const state = newest2 ? rowState : nodeState(session, target) ?? rowState;
-  const running = newest2 && isRunning(rowState);
-  const start = leg === void 0 ? agent.startedAt : target.startedAt ?? agent.startedAt;
-  const end = newest2 && !running ? agent.endedAt : void 0;
-  const parts = { session, agent, leg, state, running, start, end, clock, config, agentRunning: isRunning(rowState) };
-  const ref = target.ref;
-  let card;
-  if (ref.kind === "fix") {
-    const fix = fixOf(session, ref.branch, ref.fixId);
-    card = fix === void 0 ? void 0 : fixCard(parts, fix, session.rows.find((row2) => row2.branch === ref.branch));
-  } else if (ref.kind === "pr") {
-    const prRow = session.rows.find((row2) => row2.branch === ref.branch);
-    const pr = prRow?.pr;
-    card = pr === void 0 ? void 0 : agentCard(parts, "pr", pr.pr, prRow);
-  } else if (ref.kind === "docs") {
-    card = agentCard(parts, "docs", void 0);
-  } else if (ref.kind === "agent") {
-    card = isReviewer(session, agent) ? reviewerCard(parts) : agentCard(parts, "agent", void 0);
-  }
-  if (card === void 0) {
-    return void 0;
-  }
-  const label = [card.role, ...card.chips.map((chip) => chip.text)].join(", ");
-  return { ...card, agentId: agent.id, label };
-};
-
 // src/ui/node-card.ts
+var PREVIEW_DELAY_MS = 300;
 var OPEN_MS2 = 160;
 var CLOSE_MS2 = 120;
+var GRACE_MS = 150;
 var OPEN_FRAMES = [{ opacity: 0, transform: "translateY(4px) scale(.98)" }, { opacity: 1, transform: "none" }];
 var CLOSE_FRAMES = [{ opacity: 1 }, { opacity: 0 }];
-var CHECK_MS = 300;
-var CHECK_EASE = "cubic-bezier(.3, 1.45, .5, 1)";
-var CHECK_FRAMES = [{ transform: "scale(.4)" }, { transform: "none" }];
-var CHECK_STROKE = [{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }];
 var SIDE_GAP = 16;
 var RAISE = 12;
 var BELOW_GAP = 14;
 var EDGE = 8;
-var MAX_HEIGHT = 440;
-var MAX_SHARE = 0.6;
-var BORDERS = 2;
-var TRUST_LEVELS = ["ok", "one", "both"];
-var shown;
+var shown2;
+var made = 0;
 var isCardDetail = (detail) => {
   if (typeof detail !== "object" || detail === null) {
     return false;
@@ -16344,322 +20093,138 @@ var isCardDetail = (detail) => {
   const ref = value2.ref;
   return typeof value2.key === "string" && typeof value2.agentId === "string" && typeof ref?.kind === "string" && typeof value2.keyboard === "boolean";
 };
-var reconcile = (container, parts, drawn, lists) => {
-  const before = drawn.get(container) ?? /* @__PURE__ */ new Map();
-  const after = /* @__PURE__ */ new Map();
-  for (const part of parts) {
-    const old = before.get(part.key);
-    after.set(part.key, old !== void 0 && old.sig === part.sig ? old : { element: part.make(), sig: part.sig });
-  }
-  for (const [key, entry] of before) {
-    if (after.get(key) !== entry) {
-      entry.element.remove();
+var elementOf = (from) => {
+  let node = from;
+  while (node !== null && node !== void 0) {
+    const key = node.getAttribute?.("data-key");
+    if (typeof key === "string" && key !== "") {
+      return node;
     }
+    node = node.parentElement;
   }
-  parts.forEach((part, index) => {
-    const entry = after.get(part.key);
-    const at = container.children[index];
-    if (at !== entry.element) {
-      container.insertBefore(entry.element, at ?? null);
-    }
-    const list = lists.get(entry.element);
-    if (part.items !== void 0 && list !== void 0) {
-      reconcile(list, part.items, drawn, lists);
-    }
-  });
-  drawn.set(container, after);
+  return void 0;
 };
-var LIST_PATH = "M2 3h8M2 6h8M2 9h5";
-var OUT_PATH = "M5 2.5H2.5v7h7V7M7 2.5h2.5V5M9.3 2.7 5.5 6.5";
-var lineIcon = (d) => {
-  const icon2 = svgEl("svg", { viewBox: "0 0 12 12", "aria-hidden": "true" });
-  icon2.append(svgEl("path", { d, fill: "none", stroke: "currentColor", "stroke-width": 1.4, "stroke-linecap": "round", "stroke-linejoin": "round" }));
-  return icon2;
-};
-var markIcon2 = (mark) => {
-  const icon2 = svgEl("svg", { class: "nc-mark", viewBox: "0 0 14 14", "aria-hidden": "true" });
-  if (mark === "edited") {
-    const check2 = svgEl("path", { class: "nc-mark-check", d: "M4.3 7.2l1.8 1.8 3.6-3.8", pathLength: 1 });
-    icon2.append(svgEl("circle", { class: "nc-mark-disc", cx: 7, cy: 7, r: 6 }), check2);
-    return { icon: icon2, check: check2 };
-  }
-  if (mark === "working") {
-    icon2.append(svgEl("circle", { class: "nc-mark-track", cx: 7, cy: 7, r: 5.4 }), svgEl("path", { class: "nc-mark-spin", d: "M7 1.6A5.4 5.4 0 0 1 12.4 7" }));
-  } else {
-    icon2.append(svgEl("circle", { class: "nc-mark-todo", cx: 7, cy: 7, r: 5.4 }));
-  }
-  return { icon: icon2 };
-};
-var WEB_URL = /^https?:\/\//i;
-var CARD_NODE = '.session-graph [aria-haspopup="dialog"]';
-var MARK_WORDS = { edited: "edited", working: "working on", todo: "to do" };
-var sectionOf = (type, count, lists) => {
-  const { section: section2, list } = followupSection(type, count);
-  lists.set(section2, list);
-  return section2;
-};
+var keyOf = (from) => elementOf(from)?.getAttribute?.("data-key") ?? void 0;
 var chipOf = (chip) => {
   const element = el("span", chip.solid ? "nc-chip solid" : "nc-chip", chip.text);
   setVars(element, { "--c": chip.color });
   return element;
 };
-var metricOf = (metric) => {
-  const element = el("div", "nc-metric");
-  element.dataset.level = metric.level;
-  const value2 = el("b", void 0, metric.value);
-  if (metric.limit !== void 0) {
-    value2.append(el("i", void 0, `/${metric.limit}`));
+var pathText = (text2) => {
+  return text2.split("/").flatMap((part, index, parts) => index < parts.length - 1 ? [`${part}/`, el("wbr")] : [part]);
+};
+var lineOf3 = (line) => {
+  if (line === void 0) {
+    return [];
   }
-  element.append(el("span", "nc-metric-label", metric.label), value2);
-  if (metric.pips !== void 0 && metric.pips.length > 0) {
-    const pips = el("span", "verify-pips");
-    for (const pip of metric.pips) {
-      const mark = el("i", pip.over ? "over" : void 0);
-      mark.dataset.state = pip.state;
-      pips.append(mark);
+  const box = el("div", "nc-now");
+  const text2 = el("span", "nc-now-text");
+  if (line.kind === "now") {
+    text2.classList.toggle("failed", line.failed);
+    if (line.tool !== "") {
+      text2.append(el("b", void 0, line.tool), " ");
     }
-    element.append(pips);
-  } else if (metric.ratio !== void 0) {
-    const bar = el("span", "nc-bar");
-    const fill = el("i");
-    fill.style.width = `${Math.round(metric.ratio * 100)}%`;
-    bar.append(fill);
-    element.append(bar);
+    text2.append(...pathText(line.text));
+    box.append(el("span", "nc-now-label", "Now"), text2);
+    if (line.time !== "") {
+      box.append(el("span", "nc-time", line.time));
+    }
+    return line.quiet === void 0 ? [box] : [box, el("p", "nc-quiet", line.quiet)];
   }
-  if (metric.sub !== void 0) {
-    element.append(el("small", void 0, metric.sub));
+  const parts = [];
+  if (line.text !== "") {
+    text2.classList.add("ended");
+    text2.append(line.text);
+    box.append(el("span", "nc-now-label", "Ended"), text2);
+    parts.push(box);
   }
-  return element;
+  if (line.report !== void 0) {
+    parts.push(el("p", "nc-report", line.report));
+  }
+  if (line.note !== void 0) {
+    parts.push(el("p", "nc-quiet", line.note));
+  }
+  if (line.chips.length > 0) {
+    const chips = el("div", "av-fu nc-fu");
+    for (const chip of line.chips) {
+      const element = el("span", "av-fu-chip");
+      setVars(element, { "--c": followupColor(chip.type) });
+      element.append(el("b", void 0, String(chip.count)), el("span", void 0, ` ${chip.text}`));
+      chips.append(element);
+    }
+    parts.push(chips);
+  }
+  return parts;
 };
 var createNodeCard = (context, options) => {
+  made += 1;
+  const id = `node-preview-${made}`;
   const element = el("div", "node-card");
-  element.setAttribute("role", "dialog");
-  element.tabIndex = -1;
+  element.id = id;
+  element.setAttribute("role", "tooltip");
   element.hidden = true;
-  const head = el("div", "nc-head");
-  const title = el("div", "nc-title");
+  const head = el("div", "nc-title");
   const role = el("b", "nc-role");
+  const badge = el("span", "model-letter");
   const chips = el("span", "nc-chips");
-  title.append(role, chips);
-  const meta = el("p", "nc-meta");
-  head.append(title, meta);
+  head.append(role, badge, chips);
   const body = el("div", "nc-body");
-  const foot = el("div", "nc-foot");
-  const agentList = el("button", "nc-link");
-  agentList.type = "button";
-  agentList.append(lineIcon(LIST_PATH), "Agent list");
-  const github = el("a", "nc-link");
-  github.target = "_blank";
-  github.rel = "noopener noreferrer";
-  const githubText = el("span");
-  github.append(githubText, lineIcon(OUT_PATH));
-  github.hidden = true;
-  foot.append(agentList, github);
-  element.append(head, body, foot);
-  const drawn = /* @__PURE__ */ new WeakMap();
-  const lists = /* @__PURE__ */ new WeakMap();
+  element.append(head, body);
+  const { host } = options;
   let current;
   let target;
-  let marks = /* @__PURE__ */ new Map();
-  let lastSecond = Number.NaN;
-  let placed = { left: Number.NaN, top: Number.NaN, cap: "" };
-  const inlineLinks = /* @__PURE__ */ new Set();
+  let hoverKey;
+  let focusKey;
+  let dismissed;
   let listening = false;
+  let timer;
+  let graceTimer;
+  let overPreview = false;
+  let drawn = "";
+  let lastSecond = Number.NaN;
+  let placed = { left: Number.NaN, top: Number.NaN };
+  let destroyed = false;
   const reduced = () => context.reducedMotion();
-  const modelOf = (session, detail, clock) => {
-    return nodeCardModel(session, detail, context.config, clock);
+  const cardOf2 = (key) => {
+    return key === void 0 ? void 0 : options.graph()?.cardNodes?.().find((card) => card.key === key);
   };
-  const rowOf2 = (row2, fresh) => {
-    const item2 = el("li", "nc-row");
-    item2.dataset.mark = row2.mark;
-    const { icon: mark, check: check2 } = markIcon2(row2.mark);
-    const file = el("p", "nc-file");
-    const name = el("code", void 0, row2.file);
-    name.title = row2.path;
-    file.append(name, el("span", void 0, row2.reviewer));
-    if (row2.mark === "working") {
-      const tag = el("span", "nc-tag", "working on");
-      tag.setAttribute("aria-hidden", "true");
-      file.append(tag);
-    }
-    const text2 = el("p", "nc-text");
-    text2.append(el("span", "visually-hidden", `${MARK_WORDS[row2.mark]}: `), row2.text);
-    item2.append(mark, text2, file);
-    if (fresh && !reduced()) {
-      mark.animate(CHECK_FRAMES, { duration: CHECK_MS, easing: CHECK_EASE });
-      check2?.animate(CHECK_STROKE, { duration: CHECK_MS, easing: EASE4 });
-    }
-    return item2;
+  const modelOf = (card, clock) => {
+    return current === void 0 ? void 0 : nodePreview(current, card, context.config, clock, context.typical);
   };
-  const fileOf = (file) => {
-    const missing = file.missing;
-    if (missing === void 0) {
-      return el("li", void 0, file.path);
-    }
-    const item2 = el("li");
-    item2.dataset.trust = TRUST_LEVELS[missing.length] ?? "both";
-    item2.append(el("span", "nc-trust-name", file.path));
-    if (missing.length === 0) {
-      item2.append(el("span", "visually-hidden", ", reviewed and checked"));
-      return item2;
-    }
-    item2.append(el("span", "visually-hidden", `, missing ${missing.join(" and ")}`));
-    const tags = el("span", "nc-trust-tags");
-    tags.setAttribute("aria-hidden", "true");
-    for (const tag of missing) {
-      tags.append(el("span", "nc-trust-tag", tag));
-    }
-    item2.append(tags);
-    return item2;
-  };
-  const staleOf2 = (line) => {
-    const stale = el("p", "nc-stale", line.text);
-    if (line.at !== "") {
-      stale.append(" ", el("span", void 0, `at ${line.at}`));
-    }
-    return stale;
-  };
-  const issuesOf = (count) => {
-    const note = el("p", "nc-note");
-    const link = el("button", "nc-inline", "Follow-ups");
-    link.type = "button";
-    inlineLinks.add(link);
-    link.addEventListener("click", () => {
-      close(false);
-      options.revealFollowups("issue");
-    });
-    note.append(`${plural(count, "open issue")} \xB7 in `, link);
-    return note;
-  };
-  const blockMake = (block) => {
-    switch (block.kind) {
-      case "task":
-        return () => el("p", "nc-task", block.text);
-      case "note":
-        return () => el("p", "nc-note", block.text);
-      case "issues":
-        return () => issuesOf(block.count);
-      case "pr":
-        return () => {
-          const box = el("div", "nc-pr");
-          const line = el("p", "nc-pr-title");
-          line.append(el("b", void 0, `#${block.number}`), block.title);
-          const facts = el("p", "nc-pr-facts");
-          for (const fact of block.facts) {
-            const item2 = el("span", void 0, fact.text);
-            if (fact.tone !== void 0) {
-              item2.dataset.tone = fact.tone;
-            }
-            facts.append(item2);
-          }
-          box.append(line, facts);
-          if (block.stale !== void 0) {
-            box.append(staleOf2(block.stale));
-          }
-          return box;
-        };
-      case "stale":
-        return () => staleOf2(block);
-      case "now":
-        return () => {
-          const box = el("div", "nc-now");
-          const text2 = el("span", "nc-now-text");
-          text2.classList.toggle("failed", block.failed);
-          text2.classList.toggle("ended", block.label === "Ended");
-          if (block.tool !== "") {
-            text2.append(el("b", void 0, block.tool), " ");
-          }
-          text2.append(block.text);
-          box.append(el("span", "nc-now-label", block.label), text2);
-          if (block.report === void 0) {
-            return box;
-          }
-          const wrap = el("div", "nc-ended");
-          wrap.append(box, el("p", "nc-report", block.report));
-          return wrap;
-        };
-      case "files":
-        return () => {
-          const section2 = el("div", "nc-section");
-          const heading2 = el("h4");
-          heading2.append(el("span", "nc-section-title", "Changed files"), el("span", "nc-count", String(block.files.length)));
-          const list = el("ul", "nc-files");
-          for (const file of block.files) {
-            list.append(fileOf(file));
-          }
-          section2.append(heading2, list);
-          return section2;
-        };
-      case "progress":
-        return () => {
-          const box = el("div", "nc-progress");
-          const line = el("p");
-          line.append(`${block.edited} of ${block.total} edited`, el("span", void 0, block.counts));
-          const segments = el("div", "nc-segs");
-          for (const segment of block.segments) {
-            const part = el("i");
-            part.dataset.mark = segment.mark;
-            setVars(part, { "--c": flyColor(segment.kind) });
-            segments.append(part);
-          }
-          box.append(line, segments);
-          return box;
-        };
-      case "metrics":
-        return () => {
-          const box = el("div", "nc-metrics");
-          lists.set(box, box);
-          return box;
-        };
-      case "followups":
-        return () => sectionOf(block.type, block.items.length, lists);
-      case "items":
-        return () => sectionOf(block.type, block.rows.length, lists);
+  const cancel2 = () => {
+    if (timer !== void 0) {
+      window.clearTimeout(timer);
+      timer = void 0;
     }
   };
-  const blockPart = (block, fresh) => {
-    const make = blockMake(block);
-    if (block.kind === "metrics") {
-      const items = block.metrics.map((metric) => ({ key: metric.label, sig: JSON.stringify(metric), make: () => metricOf(metric) }));
-      return { key: "metrics", sig: "", make, items };
+  const render = (model) => {
+    const sig = JSON.stringify(model);
+    if (sig === drawn) {
+      return;
     }
-    if (block.kind === "followups") {
-      const items = block.items.map((item2) => ({ key: item2.id, sig: JSON.stringify(item2), make: () => followupItem(item2) }));
-      return { key: `followups:${block.type}`, sig: String(block.items.length), make, items };
+    drawn = sig;
+    role.textContent = model.role;
+    setBadgeMark(badge, model.mark, model.model);
+    chips.replaceChildren(...model.chips.map(chipOf));
+    const parts = [];
+    if (model.task !== void 0) {
+      const task = el("p", "nc-task", model.task);
+      task.title = model.task;
+      parts.push(task);
     }
-    if (block.kind === "items") {
-      const items = block.rows.map((row2) => ({ key: `row:${row2.index}`, sig: JSON.stringify(row2), make: () => rowOf2(row2, fresh.has(row2.index)) }));
-      return { key: `items:${block.type}`, sig: String(block.rows.length), make, items };
+    if (model.pr !== void 0) {
+      parts.push(el("p", "nc-pr-line", model.pr));
     }
-    return { key: block.kind, sig: JSON.stringify(block), make };
+    parts.push(...lineOf3(model.line));
+    if (model.progress !== void 0) {
+      parts.push(el("p", "nc-progress", model.progress));
+    }
+    body.replaceChildren(...parts);
   };
-  const fade = () => {
-    const top = body.scrollTop;
-    body.classList.toggle("more-above", top > 2);
-    body.classList.toggle("more-below", top + body.clientHeight < body.scrollHeight - 2);
-  };
-  body.addEventListener("scroll", fade, { passive: true });
-  const render = (model, opening) => {
-    element.dataset.kind = model.kind;
-    element.setAttribute("aria-label", model.label);
-    setText(role, model.role);
-    setText(meta, model.meta);
-    reconcile(chips, model.chips.map((chip, index) => ({ key: String(index), sig: JSON.stringify(chip), make: () => chipOf(chip) })), drawn, lists);
-    const rows = model.blocks.flatMap((block) => block.kind === "items" ? block.rows : []);
-    const turned = rows.filter((row2) => row2.mark === "edited" && marks.has(row2.index) && marks.get(row2.index) !== "edited");
-    const fresh = new Set(opening ? [] : turned.map((row2) => row2.index));
-    marks = new Map(rows.map((row2) => [row2.index, row2.mark]));
-    reconcile(body, model.blocks.map((block) => blockPart(block, fresh)), drawn, lists);
-    if (opening) {
-      body.scrollTop = 0;
+  const describe = (node) => {
+    if (node !== void 0 && node.getAttribute("aria-describedby") !== id) {
+      node.setAttribute("aria-describedby", id);
     }
-    const pr = model.pr !== void 0 && WEB_URL.test(model.pr.url) ? model.pr : void 0;
-    github.hidden = pr === void 0;
-    if (pr !== void 0) {
-      github.href = pr.url;
-      setText(githubText, `#${pr.number} on GitHub`);
-    }
-    fade();
   };
   const place2 = (node) => {
     const anchor = node.querySelector?.(".node-outline") ?? node;
@@ -16667,12 +20232,10 @@ var createNodeCard = (context, options) => {
     const right = rect.left + rect.width;
     const bottom = rect.top + rect.height;
     const width = element.offsetWidth;
+    const height = element.offsetHeight;
     const { innerWidth, innerHeight } = window;
-    const content = head.offsetHeight + body.scrollHeight + foot.offsetHeight + BORDERS;
-    const height = Math.min(MAX_HEIGHT, innerHeight * MAX_SHARE, content);
     let left = right + SIDE_GAP;
     let top = rect.top - RAISE;
-    let cap;
     if (left + width > innerWidth - EDGE) {
       left = rect.left - SIDE_GAP - width;
     }
@@ -16681,93 +20244,37 @@ var createNodeCard = (context, options) => {
       const below = bottom + BELOW_GAP;
       const roomBelow = innerHeight - EDGE - below;
       const roomAbove = rect.top - BELOW_GAP - EDGE;
-      top = below;
-      if (height > roomBelow && height <= roomAbove) {
-        top = rect.top - BELOW_GAP - height;
-      } else if (height > roomBelow && roomAbove > roomBelow) {
-        top = EDGE;
-        cap = roomAbove;
-      } else if (height > roomBelow) {
-        cap = roomBelow;
-      }
+      const upward = height > roomBelow && (height <= roomAbove || roomAbove > roomBelow);
+      top = upward ? Math.max(EDGE, rect.top - BELOW_GAP - height) : below;
     } else {
       top = Math.max(Math.min(top, innerHeight - EDGE - height), bottom + RAISE - height);
     }
-    const next = { left: Math.round(left), top: Math.round(top), cap: cap === void 0 ? "" : `${Math.max(0, Math.floor(cap))}px` };
+    const next = { left: Math.round(left), top: Math.round(top) };
     if (next.left !== placed.left || next.top !== placed.top) {
       element.style.left = `${next.left}px`;
       element.style.top = `${next.top}px`;
-    }
-    const capChanged = next.cap !== placed.cap;
-    if (capChanged) {
-      element.style.maxHeight = next.cap;
-    }
-    placed = next;
-    if (capChanged) {
-      fade();
+      placed = next;
     }
   };
-  const focusables = () => {
-    for (const link of inlineLinks) {
-      if (!element.contains(link)) {
-        inlineLinks.delete(link);
-      }
-    }
-    return [...inlineLinks, agentList, ...github.hidden ? [] : [github]];
-  };
-  element.addEventListener("keydown", (event) => {
-    if (event.key !== "Tab" || target === void 0) {
+  const show = (card) => {
+    cancel2();
+    if (destroyed || options.blocked()) {
       return;
     }
-    const order = focusables();
-    const at = document.activeElement;
-    const leaving2 = event.shiftKey ? at === element || at === body || at === order[0] : at === order.at(-1);
-    const node = leaving2 ? options.graph()?.node?.(target.key) : void 0;
-    if (node?.focus !== void 0) {
-      event.preventDefault();
-      node.focus({ preventScroll: true });
-    }
-  });
-  const onKey = (event) => {
-    if (event.key === "Escape" && target !== void 0) {
-      close(true);
-    }
-  };
-  const onPointer = (event) => {
-    const at = event.target;
-    if (target === void 0 || element.contains(at)) {
-      return;
-    }
-    const cardNode = at?.closest?.(CARD_NODE);
-    const node = options.graph()?.node?.(target.key);
-    if (node?.contains(at) !== true && (cardNode === null || cardNode === void 0)) {
-      close(false);
-    }
-  };
-  const listen = (on) => {
-    if (on === listening) {
-      return;
-    }
-    listening = on;
-    if (on) {
-      document.addEventListener("keydown", onKey);
-      document.addEventListener("pointerdown", onPointer);
-    } else {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onPointer);
-    }
-  };
-  const open2 = (detail) => {
-    const model = current === void 0 ? void 0 : modelOf(current, detail, context.now());
+    const model = modelOf(card, context.now());
     if (model === void 0) {
       return;
     }
-    if (shown !== void 0 && shown !== card) {
-      shown.close(false);
+    if (shown2 !== void 0 && shown2 !== preview) {
+      shown2.hide();
     }
-    shown = card;
-    target = detail;
-    marks = /* @__PURE__ */ new Map();
+    shown2 = preview;
+    const graph = options.graph();
+    if (target !== void 0 && target.key !== card.key) {
+      graph?.node?.(target.key)?.removeAttribute("aria-describedby");
+    }
+    const showing = target !== void 0 && !element.classList.contains("closing");
+    target = card;
     lastSecond = Math.floor(context.now() / 1e3);
     for (const animation of element.getAnimations()) {
       animation.cancel();
@@ -16777,37 +20284,35 @@ var createNodeCard = (context, options) => {
       options.layer().append(element);
     }
     element.hidden = false;
-    render(model, true);
     listen(true);
-    const graph = options.graph();
-    graph?.markCard?.(detail.key);
-    const node = graph?.node?.(detail.key);
-    placed = { ...placed, left: Number.NaN, top: Number.NaN };
+    render(model);
+    graph?.markCard?.(card.key);
+    const node = graph?.node?.(card.key);
+    describe(node);
+    placed = { left: Number.NaN, top: Number.NaN };
     if (node !== void 0) {
       place2(node);
     }
-    if (!reduced()) {
+    if (!showing && !reduced()) {
       element.animate(OPEN_FRAMES, { duration: OPEN_MS2, easing: EASE4 });
     }
-    if (detail.keyboard) {
-      element.focus({ preventScroll: true });
-    }
   };
-  const close = (returnFocus) => {
+  const hide = () => {
+    cancel2();
+    cancelGrace();
+    overPreview = false;
     if (target === void 0) {
       return;
     }
     const key = target.key;
     target = void 0;
-    if (shown === card) {
-      shown = void 0;
-    }
     listen(false);
+    if (shown2 === preview) {
+      shown2 = void 0;
+    }
     const graph = options.graph();
     graph?.markCard?.(void 0);
-    if (returnFocus) {
-      graph?.node?.(key)?.focus?.({ preventScroll: true });
-    }
+    graph?.node?.(key)?.removeAttribute("aria-describedby");
     if (reduced()) {
       element.hidden = true;
       return;
@@ -16822,64 +20327,178 @@ var createNodeCard = (context, options) => {
     const fadeOut = element.animate(CLOSE_FRAMES, { duration: CLOSE_MS2, easing: "ease-in", fill: "forwards" });
     fadeOut.finished.then(done, () => void 0);
   };
-  agentList.addEventListener("click", () => {
-    const agentId = target?.agentId;
-    if (agentId === void 0) {
-      return;
-    }
-    close(false);
-    const detail = { agentId };
-    agentList.dispatchEvent(new CustomEvent(SESSION_AGENT, { bubbles: true, detail }));
-  });
-  const card = {
-    element,
-    toggle(detail) {
-      if (target !== void 0 && target.key === detail.key) {
-        close(false);
+  const arm = (key) => {
+    timer = window.setTimeout(() => {
+      timer = void 0;
+      if (hoverKey !== key) {
         return;
       }
-      open2(detail);
-    },
+      if (options.blocked()) {
+        arm(key);
+        return;
+      }
+      const card = cardOf2(key);
+      if (card !== void 0) {
+        show(card);
+      }
+    }, PREVIEW_DELAY_MS);
+  };
+  const cancelGrace = () => {
+    if (graceTimer !== void 0) {
+      window.clearTimeout(graceTimer);
+      graceTimer = void 0;
+    }
+  };
+  const leaveSoon = () => {
+    cancelGrace();
+    graceTimer = window.setTimeout(() => {
+      graceTimer = void 0;
+      const key = target?.key;
+      if (key !== void 0 && !overPreview && hoverKey !== key && focusKey !== key) {
+        hide();
+      }
+    }, GRACE_MS);
+  };
+  const onOver = (event) => {
+    const card = cardOf2(keyOf(event.target));
+    if (card === void 0 || card.key === hoverKey) {
+      return;
+    }
+    hoverKey = card.key;
+    cancel2();
+    cancelGrace();
+    if (target?.key === card.key || dismissed === card.key) {
+      return;
+    }
+    if (target !== void 0 && !element.classList.contains("closing")) {
+      show(card);
+    } else {
+      arm(card.key);
+    }
+  };
+  const onOut = (event) => {
+    const key = keyOf(event.target);
+    if (key === void 0 || key !== hoverKey || keyOf(event.relatedTarget) === key) {
+      return;
+    }
+    hoverKey = void 0;
+    cancel2();
+    if (dismissed === key) {
+      dismissed = void 0;
+    }
+    if (target?.key === key && focusKey !== key) {
+      leaveSoon();
+    }
+  };
+  element.addEventListener("pointerenter", () => {
+    overPreview = true;
+    cancelGrace();
+  });
+  element.addEventListener("pointerleave", () => {
+    overPreview = false;
+    leaveSoon();
+  });
+  const onFocus = (event) => {
+    const element2 = elementOf(event.target);
+    const card = cardOf2(keyOf(element2));
+    if (card === void 0 || element2?.matches?.(":focus-visible") === false) {
+      return;
+    }
+    focusKey = card.key;
+    if (dismissed !== card.key) {
+      show(card);
+    }
+  };
+  const onBlur = (event) => {
+    const key = keyOf(event.target);
+    if (key === void 0 || key !== focusKey) {
+      return;
+    }
+    focusKey = void 0;
+    if (dismissed === key) {
+      dismissed = void 0;
+    }
+    const onward = cardOf2(keyOf(event.relatedTarget));
+    if (target?.key === key && hoverKey !== key && !overPreview && onward === void 0) {
+      hide();
+    }
+  };
+  const onDown = () => {
+    hoverKey = void 0;
+    hide();
+  };
+  const onKey = (event) => {
+    if (event.key !== "Escape" || target === void 0 || event.defaultPrevented) {
+      return;
+    }
+    event.preventDefault();
+    dismissed = target.key;
+    hide();
+  };
+  const listen = (on) => {
+    if (on === listening) {
+      return;
+    }
+    listening = on;
+    if (on) {
+      document.addEventListener("keydown", onKey, true);
+    } else {
+      document.removeEventListener("keydown", onKey, true);
+    }
+  };
+  host.addEventListener("pointerover", onOver);
+  host.addEventListener("pointerout", onOut);
+  host.addEventListener("focusin", onFocus);
+  host.addEventListener("focusout", onBlur);
+  host.addEventListener("pointerdown", onDown);
+  const preview = {
+    element,
     update(session) {
       current = session;
       if (target === void 0) {
         return;
       }
-      const model = modelOf(session, target, context.now());
+      const model = modelOf(target, context.now());
       if (model === void 0) {
-        close(false);
+        hide();
         return;
       }
-      render(model, false);
+      render(model);
     },
     frame(clock) {
       if (target === void 0) {
         return;
       }
       const node = options.graph()?.node?.(target.key);
-      if (node === void 0) {
-        close(false);
+      if (node === void 0 || options.blocked()) {
+        hide();
         return;
       }
       place2(node);
+      describe(node);
       const second = Math.floor(clock / 1e3);
-      if (second !== lastSecond && current !== void 0) {
+      if (second !== lastSecond) {
         lastSecond = second;
-        const model = modelOf(current, target, clock);
+        const model = modelOf(target, clock);
         if (model !== void 0) {
-          render(model, false);
+          render(model);
         }
       }
     },
-    close,
+    hide,
     destroy() {
-      close(false);
-      listen(false);
+      hide();
+      destroyed = true;
+      host.removeEventListener("pointerover", onOver);
+      host.removeEventListener("pointerout", onOut);
+      host.removeEventListener("focusin", onFocus);
+      host.removeEventListener("focusout", onBlur);
+      host.removeEventListener("pointerdown", onDown);
       element.remove();
       current = void 0;
     }
   };
-  return card;
+  return preview;
 };
 
 // src/ui/session-id.ts
@@ -16982,8 +20601,8 @@ var createStripCore = (host, context, open2) => {
   line.append(text2, typing);
   const kind = el("span", "main-strip-kind");
   const time2 = el("time", "main-strip-time");
-  const count = el("span", "main-strip-count");
-  strip.append(mainTag(), line, kind, time2, count, chevronIcon());
+  const count2 = el("span", "main-strip-count");
+  strip.append(mainTag(), line, kind, time2, count2, chevronIcon());
   host.append(strip);
   strip.addEventListener("click", () => open2(strip));
   let first = true;
@@ -17013,7 +20632,7 @@ var createStripCore = (host, context, open2) => {
       strip.dataset.waiting = String(model.waiting);
       setText(kind, model.label);
       kind.hidden = model.label === "";
-      setText(count, model.count);
+      setText(count2, model.count);
       const writing = worksAt(context.now());
       setTyping(typing, writing, !first && fades2() && (writing || model.id === key));
       if (model.id !== key) {
@@ -17303,7 +20922,7 @@ var barSection = (parent, emptyText, modifier = "") => {
 var ENTER_MS4 = 500;
 var OPEN_MS3 = 450;
 var summaryCount = 0;
-var createSessionSummaryView = (host, context, metricsOf2, options) => {
+var createSessionSummaryView = (host, context, metricsOf, options) => {
   summaryCount += 1;
   const panelId = `session-summary-${summaryCount}`;
   const button = el("button", "button summary-button", "Summary");
@@ -17444,7 +21063,7 @@ var createSessionSummaryView = (host, context, metricsOf2, options) => {
   let continued = { head: NO_RESUMES, rows: [], hidden: 0 };
   let resumesOpen = false;
   const draw2 = (session) => {
-    const metrics = metricsOf2(session);
+    const metrics = metricsOf(session);
     const markOf3 = (model) => modelMark(model, context.config.modelLetters);
     tbody.replaceChildren(...agentRows(metrics, markOf3).map((row2) => agentRowElement(row2)));
     tfoot.replaceChildren(agentRowElement(totalRow(metrics)));
@@ -17482,7 +21101,7 @@ var createSessionSummaryView = (host, context, metricsOf2, options) => {
   const onResumesMore = () => setResumesOpen(!resumesOpen);
   resumesMore.addEventListener("click", onResumesMore);
   let current;
-  let shown2 = false;
+  let shown3 = false;
   let open2 = false;
   let first = true;
   let destroyed = false;
@@ -17539,8 +21158,8 @@ var createSessionSummaryView = (host, context, metricsOf2, options) => {
     update(session) {
       current = session;
       panel.setAttribute("aria-label", `Summary of ${sessionHeading(session)}`);
-      if (!shown2 && summaryShown(session)) {
-        shown2 = true;
+      if (!shown3 && summaryShown(session)) {
+        shown3 = true;
         button.hidden = false;
         if (!first && !context.reducedMotion()) {
           button.animate(ENTER_FRAMES, { duration: ENTER_MS4, easing: EASE4 });
@@ -17603,7 +21222,7 @@ var cumulativeSeries = (points, startMs2, packages) => {
     }
   }
   const upper = [];
-  own.forEach((column, position) => upper.push(column.map((count, knot) => count + (position > 0 ? upper[position - 1][knot] : 0))));
+  own.forEach((column, position) => upper.push(column.map((count2, knot) => count2 + (position > 0 ? upper[position - 1][knot] : 0))));
   return { times, keys: keys2, upper };
 };
 var chartSpan = (endMs) => Math.max(MIN_SPAN_MS2, endMs);
@@ -17629,7 +21248,7 @@ var bucketSeries = (series, endMs, columns) => {
   return { times, keys: series.keys, upper };
 };
 var plotX = (plot, ms) => PAD_X + ms / plot.spanMs * (plot.width - 2 * PAD_X);
-var plotY2 = (plot, count) => plot.height - FLOOR - count / plot.top * (plot.height - FLOOR - CEIL);
+var plotY2 = (plot, count2) => plot.height - FLOOR - count2 / plot.top * (plot.height - FLOOR - CEIL);
 var topTarget = (total) => Math.max(MIN_TOP, total * TOP_FACTOR);
 var easeTop = (top, target, instant) => {
   if (top === void 0 || instant) {
@@ -17642,7 +21261,7 @@ var fixed3 = (value2) => Math.round(value2 * 10) / 10;
 var linePath = (xs, ys) => xs.map((x, i) => `${i === 0 ? "M" : "L"}${fixed3(x)} ${fixed3(ys[i])}`).join(" ");
 var stackPaths = (plot, times, upper, lower) => {
   const xs = times.map((time2) => plotX(plot, time2));
-  const line = linePath(xs, upper.map((count) => plotY2(plot, count)));
+  const line = linePath(xs, upper.map((count2) => plotY2(plot, count2)));
   const floor = lower ?? upper.map(() => 0);
   const back = xs.map((x, i) => `L${fixed3(x)} ${fixed3(plotY2(plot, floor[i]))}`).reverse();
   return { area: `${line} ${back.join(" ")} Z`, line };
@@ -17680,8 +21299,8 @@ var totalRows = (byStage, packages) => {
   };
   return GROUPS2.map((group, i) => {
     const filled = order.filter((stage) => group.includes(stage) && counts(stage) > 0);
-    const segments = filled.map(segmentOf);
-    return { label: group.label, total: sums[i], value: tokens(sums[i]), segments };
+    const segments2 = filled.map(segmentOf);
+    return { label: group.label, total: sums[i], value: tokens(sums[i]), segments: segments2 };
   });
 };
 var startOf2 = (session) => parseTime(session.startedAt) ?? parseTime(session.tokens.points[0]?.at) ?? 0;
@@ -17760,9 +21379,9 @@ var createSessionTokensView = (host, context) => {
       const view = rowViews[i];
       setText(view.value, model.value);
       view.row.classList.toggle("off", model.total === 0);
-      const shown2 = new Set(model.segments.map((segment) => segment.stage));
+      const shown3 = new Set(model.segments.map((segment) => segment.stage));
       for (const [stage, item2] of view.segments) {
-        if (!shown2.has(stage)) {
+        if (!shown3.has(stage)) {
           item2.style.width = "0%";
         }
       }
@@ -17976,7 +21595,9 @@ var createSessionCard = (context, onToggle, onHover) => {
   const tokensBody = createCollapsingRegion(`${bodyId}-tokens`, hosts.tokens);
   tokensBody.inner.append(hosts.summary);
   const regions = [followupsBody, body, logBody, tokensBody];
-  element.append(header, errorNote, hosts.chips, hosts.graph, hosts.questions, followupsBody.element, body.element, hosts.strip, logBody.element, tokensBody.element);
+  const content = el("div", "card-content");
+  content.append(header, errorNote, hosts.chips, hosts.graph, hosts.questions, followupsBody.element, body.element, hosts.strip, logBody.element, tokensBody.element);
+  element.append(content);
   const bubbleOf = (questionId) => hosts.graph.querySelector(`[data-question-ids~="${CSS.escape(questionId)}"]`) ?? hosts.graph;
   const questions = createSessionQuestionsView(hosts.questions, context, { layer: element, flySource: bubbleOf });
   const listed = SESSION_VIEWS.map(({ host, make }) => ({ host: hosts[host], view: make(hosts[host], context) }));
@@ -18015,7 +21636,8 @@ var createSessionCard = (context, onToggle, onHover) => {
     }
     collapsed = next;
     if (next) {
-      nodeCard.close(false);
+      nodeCard.hide();
+      agentView.close(false, true);
     }
     element.classList.toggle("collapsed", next);
     toggle.set(next);
@@ -18044,7 +21666,7 @@ var createSessionCard = (context, onToggle, onHover) => {
     return ids === "" ? [] : ids.split(" ");
   };
   element.addEventListener(SESSION_MAIN, (event) => {
-    nodeCard.close(false);
+    nodeCard.hide();
     const from = event.target;
     if (!current || !(from instanceof HTMLElement || from instanceof SVGElement)) {
       return;
@@ -18083,19 +21705,24 @@ var createSessionCard = (context, onToggle, onHover) => {
   };
   const nodeCard = createNodeCard(context, {
     layer: () => document.body,
+    host: hosts.graph,
     graph: () => cardView,
-    revealFollowups(type) {
-      expandThen(() => {
-        for (const view of views) {
-          view.revealFollowups?.(type);
-        }
-      });
+    blocked: () => !agentView.element.hidden
+  });
+  const agentView = createAgentView(context, {
+    stage: createCardStage(element, content),
+    graph: () => cardView,
+    markCurrent(agentId) {
+      for (const view of views) {
+        view.markCurrent?.(agentId);
+      }
     }
   });
   element.addEventListener(SESSION_CARD, (event) => {
     const detail = event.detail;
     if (isCardDetail(detail)) {
-      nodeCard.toggle(detail);
+      nodeCard.hide();
+      agentView.open(detail);
     }
   });
   const onAgent = (event) => {
@@ -18110,7 +21737,6 @@ var createSessionCard = (context, onToggle, onHover) => {
     });
   };
   element.addEventListener(SESSION_AGENT, onAgent);
-  nodeCard.element.addEventListener(SESSION_AGENT, onAgent);
   element.addEventListener("animationend", (event) => {
     if (event.target === element && event.animationName === "card-flash") {
       element.classList.remove("flash");
@@ -18148,6 +21774,7 @@ var createSessionCard = (context, onToggle, onHover) => {
         view.update(session, previous);
       }
       nodeCard.update(session);
+      agentView.update(session);
       chips.update(session, folded());
       if (!previous && linkFocus !== void 0) {
         focusLink(linkFocus);
@@ -18162,6 +21789,7 @@ var createSessionCard = (context, onToggle, onHover) => {
         view.frame(clock, time2);
       }
       nodeCard.frame(clock);
+      agentView.frame(clock, time2);
     },
     flash() {
       window.clearTimeout(flashTimer);
@@ -18200,6 +21828,7 @@ var createSessionCard = (context, onToggle, onHover) => {
       fixtureLink?.destroy();
       current = void 0;
       nodeCard.destroy();
+      agentView.destroy();
       chips.destroy();
       for (const view of views) {
         view.destroy();
@@ -18292,7 +21921,7 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   });
   panel.element.hidden = repositoryId === "";
   host.replaceChildren(empty, stackList, conversations.element, panel.element, footnote);
-  const cardOf = (sessionId) => {
+  const cardOf2 = (sessionId) => {
     const card = stack.cards.get(sessionId) ?? panel.card(sessionId);
     const session = (latest ? sessionOf(latest.sessions, sessionId) : void 0) ?? panel.session(sessionId);
     return card && session ? { card, session } : void 0;
@@ -18307,11 +21936,11 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
   };
   const updateFootnote = () => {
     const ids = [...stack.ids(), ...panel.visibleCards()];
-    const shown2 = ids.map((id) => cardOf(id)?.session).filter((session) => session !== void 0);
-    footnote.hidden = !shown2.some((session) => showsSubagentCost(session, isSessionCollapsed(collapses.get(session.id))));
+    const shown3 = ids.map((id) => cardOf2(id)?.session).filter((session) => session !== void 0);
+    footnote.hidden = !shown3.some((session) => showsSubagentCost(session, isSessionCollapsed(collapses.get(session.id))));
   };
   const toggle = (sessionId, collapsed) => {
-    const found = cardOf(sessionId);
+    const found = cardOf2(sessionId);
     if (!found) {
       return;
     }
@@ -18369,10 +21998,10 @@ var createSessionCardStack = (host, context, repositoryId, options) => {
     }
     glide(before, measure(), morphing);
     const folded = change.folded.reduce((sum, card) => sum + card.element.offsetHeight + flowGap(card.element), 0);
-    const count = panel.count.getBoundingClientRect();
-    const top = countTopAfter(count.top, folded);
+    const count2 = panel.count.getBoundingClientRect();
+    const top = countTopAfter(count2.top, folded);
     for (const flight of flights) {
-      const animation = fly(flight.from, { left: count.left, top }, flight.text, flight.land);
+      const animation = fly(flight.from, { left: count2.left, top }, flight.text, flight.land);
       inFlight.add(animation);
       const done = () => inFlight.delete(animation);
       animation.finished.then(done, done);
@@ -18561,9 +22190,9 @@ var DOT_MS2 = 520;
 var DOT_DELAY_MS = 220;
 var OPEN_MS4 = 220;
 var CLOSE_MS3 = 140;
-var LEAVE_MS = 220;
+var LEAVE_MS2 = 220;
 var GLIDE_ENTER = { duration: ENTER_MS5, easing: EASE4 };
-var GLIDE_LEAVE = { duration: LEAVE_MS, easing: "ease-in" };
+var GLIDE_LEAVE = { duration: LEAVE_MS2, easing: "ease-in" };
 var ENTER_FRAMES2 = [{ opacity: 0, transform: "translateX(12px) scale(.96)" }, { opacity: 1, transform: "none" }];
 var DOT_FRAMES = [{ transform: "scale(0)" }, { transform: "scale(1.5)", offset: 0.6 }, { transform: "none" }];
 var OPEN_FRAMES2 = [{ opacity: 0, transform: "translateY(-6px) scale(.97)" }, { opacity: 1, transform: "none" }];
@@ -18636,7 +22265,7 @@ var createUpdateButton = (options) => {
   let notice = null;
   let noticeKey = "";
   let deferred = false;
-  let shown2 = false;
+  let shown3 = false;
   let open2 = false;
   let leaving2;
   let glides = [];
@@ -18716,7 +22345,7 @@ var createUpdateButton = (options) => {
     }
   };
   const enter = () => {
-    shown2 = true;
+    shown3 = true;
     leaving2?.cancel();
     leaving2 = void 0;
     if (element.hidden) {
@@ -18729,13 +22358,13 @@ var createUpdateButton = (options) => {
     dot.animate(DOT_FRAMES, { duration: DOT_MS2, delay: DOT_DELAY_MS, easing: EASE4, fill: "backwards" });
   };
   const leave = () => {
-    shown2 = false;
+    shown3 = false;
     if (popover.contains(document.activeElement)) {
       button.focus({ preventScroll: true });
     }
     setOpen2(false);
     const gone = () => {
-      if (shown2) {
+      if (shown3) {
         return;
       }
       place2(true, GLIDE_LEAVE);
@@ -18747,20 +22376,20 @@ var createUpdateButton = (options) => {
       gone();
       return;
     }
-    leaving2 = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS, easing: "ease-in", fill: "forwards" });
+    leaving2 = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS2, easing: "ease-in", fill: "forwards" });
     leaving2.finished.then(gone, gone);
   };
   const sync = () => {
     const wanted = notice !== null && !deferred && readValue(SKIP_KEY, true) !== notice.latest;
-    if (wanted && !shown2) {
+    if (wanted && !shown3) {
       enter();
-    } else if (!wanted && shown2) {
+    } else if (!wanted && shown3) {
       leave();
     }
     options.shownChanged?.();
   };
   button.addEventListener("click", () => {
-    if (shown2) {
+    if (shown3) {
       setOpen2(!open2);
     }
   });
@@ -18804,6 +22433,7 @@ var createUpdateButton = (options) => {
     if (!open2 || event.key !== "Escape") {
       return;
     }
+    event.preventDefault();
     const focused = document.activeElement;
     const inside = focused === button || focused !== null && popover.contains(focused);
     setOpen2(false);
@@ -18830,7 +22460,7 @@ var createUpdateButton = (options) => {
       }
       sync();
     },
-    shownNotice: () => shown2 && notice ? notice : void 0,
+    shownNotice: () => shown3 && notice ? notice : void 0,
     setChangelog(ready) {
       fullChangelog.hidden = !ready;
     }
@@ -18943,9 +22573,9 @@ var tabCount = (kind) => {
   }
   return element;
 };
-var setCount = (count, value2) => {
-  setText(count.lastElementChild ?? count, String(value2));
-  count.hidden = value2 === 0;
+var setCount = (count2, value2) => {
+  setText(count2.lastElementChild ?? count2, String(value2));
+  count2.hidden = value2 === 0;
 };
 var px3 = (span) => ({ left: `${span.left}px`, width: `${span.width}px` });
 var createTopBar = (host, options) => {
@@ -19001,7 +22631,7 @@ var createTopBar = (host, options) => {
       host.dataset.stuck = String(!entry.isIntersecting && entry.boundingClientRect.top < 0);
     }
   }).observe(sentinel);
-  let shown2 = [];
+  let shown3 = [];
   let shownKey = "";
   const times = [];
   const tabs = /* @__PURE__ */ new Map();
@@ -19209,7 +22839,7 @@ var createTopBar = (host, options) => {
       strip.scrollTo({ left, behavior });
     }
   };
-  const centre = (element, instant) => {
+  const centre2 = (element, instant) => {
     if (!element) {
       return;
     }
@@ -19333,7 +22963,7 @@ var createTopBar = (host, options) => {
   };
   const renderList = (clock) => {
     times.length = 0;
-    const items = shown2.map((line) => {
+    const items = shown3.map((line) => {
       const item2 = el("li");
       const at = parseTime(line.at);
       const time2 = el("time", "warning-time", at === void 0 ? "" : ago(clock - at));
@@ -19355,6 +22985,7 @@ var createTopBar = (host, options) => {
     if (event.key !== "Escape" || list.hidden) {
       return;
     }
+    event.preventDefault();
     const focused = document.activeElement;
     const inside = focused === button || focused !== null && list.contains(focused);
     setOpen2(false);
@@ -19383,16 +23014,16 @@ var createTopBar = (host, options) => {
       setText(github, gh.text);
       github.dataset.tone = gh.tone;
       github.title = gh.text;
-      const count = board.warnings.length;
-      setText(button, plural(count, "warning"));
-      button.disabled = count === 0;
-      button.dataset.tone = count === 0 ? "none" : "some";
+      const count2 = board.warnings.length;
+      setText(button, plural(count2, "warning"));
+      button.disabled = count2 === 0;
+      button.dataset.tone = count2 === 0 ? "none" : "some";
       const newest2 = board.warnings.slice(-WARNINGS_SHOWN).reverse();
       const key = newest2.map((line) => `${line.at} ${line.text}`).join("\n");
       const changed = key !== shownKey;
-      shown2 = newest2;
+      shown3 = newest2;
       shownKey = key;
-      if (count === 0) {
+      if (count2 === 0) {
         setOpen2(false);
       } else if (changed && !list.hidden) {
         renderList(options.now());
@@ -19418,7 +23049,7 @@ var createTopBar = (host, options) => {
       }
       const element = selectedTab();
       if (moved) {
-        centre(element, firstTabs);
+        centre2(element, firstTabs);
       }
       const appears = placed === void 0;
       placeIndicator(element, moved && !firstTabs ? "inchworm" : "glide");
@@ -19529,7 +23160,7 @@ var startBoard = async (source, options = {}) => {
   const reducedMotion = () => motion.matches;
   let repositories = Array.isArray(firstList) ? firstList : [];
   let selected;
-  let shown2;
+  let shown3;
   let drawn;
   let drewStack = false;
   let travel = 1;
@@ -19669,7 +23300,7 @@ var startBoard = async (source, options = {}) => {
   };
   const connect = (own) => {
     retry = void 0;
-    const stream = source.openStream(shown2?.id, {
+    const stream = source.openStream(shown3?.id, {
       open() {
         if (failed) {
           failed = false;
@@ -19824,7 +23455,7 @@ var startBoard = async (source, options = {}) => {
     }
     const context = createContext({ ...FALLBACK_CONFIG, ...config }, now, source);
     context.repositoryId = next?.id ?? "";
-    shown2 = { id: next?.id, context };
+    shown3 = { id: next?.id, context };
     connect(own);
   };
   const makeStack = (current, host, link) => {
@@ -19964,16 +23595,16 @@ var startBoard = async (source, options = {}) => {
   const tick = (time2) => {
     requestAnimationFrame(tick);
     let drew = false;
-    if (pending && latest && shown2 && handOff === void 0) {
+    if (pending && latest && shown3 && handOff === void 0) {
       pending = false;
       drew = true;
       const board = latest;
-      takeSnapshot(shown2.context, board);
+      takeSnapshot(shown3.context, board);
       topBar.update(board);
-      drawStack(shown2, board);
-      shown2.board = board;
-      if (shown2.linkSource) {
-        relink(shown2);
+      drawStack(shown3, board);
+      shown3.board = board;
+      if (shown3.linkSource) {
+        relink(shown3);
       }
       waitFrom ??= Date.now();
       settleSessionLink();
@@ -20002,7 +23633,7 @@ var startBoard = async (source, options = {}) => {
       retire(drawn);
       drawn = void 0;
     }
-    shown2 = void 0;
+    shown3 = void 0;
     repositories = [];
     selected = void 0;
     drawTabs();

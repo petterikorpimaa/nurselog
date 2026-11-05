@@ -9,11 +9,11 @@ import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DEFAULT_ROLES, escapeRegExp, isTaskId, LEGACY_ROLE_STAGE, stripControl, TASK_ID_CHARS } from './browser-safe.mjs';
+import { BROWSER_TARGET_CHARS, BROWSER_TARGET_FIELDS, browserInput, browserUrl, DEFAULT_ROLES, escapeRegExp, isBrowserTool, isTaskId, LEGACY_ROLE_STAGE, PATCH_TOOLS, patchLines, stripControl, TASK_ID_CHARS } from './browser-safe.mjs';
 import { FAILURE_ERROR_CHARS, keptStdout, SAFE_ASSIGNMENT_NAMES } from './verification.mjs';
 
-// The default roles and the text helpers live in `browser-safe.mjs`, which the browser-safe core of `src/` imports.
-export { DEFAULT_ROLES, escapeRegExp, isTaskId, LEGACY_ROLE_STAGE, stripControl, TASK_ID_CHARS };
+// The default roles, the text helpers and the rules the mapping shares live in `browser-safe.mjs`, which the browser-safe core of `src/` imports.
+export { BROWSER_TARGET_CHARS, BROWSER_TARGET_FIELDS, browserInput, browserUrl, DEFAULT_ROLES, escapeRegExp, isBrowserTool, isTaskId, LEGACY_ROLE_STAGE, PATCH_TOOLS, patchLines, stripControl, TASK_ID_CHARS };
 
 export const HOOK_DEFAULTS = { spool: { dir: '~/.local/share/nurselog', maxLineBytes: 65536, keepDays: 14 } };
 
@@ -1014,7 +1014,29 @@ const withoutBodies = (input) => {
   return slim;
 };
 
-const slimInput = (input, sensitive) => {
+/** The name prefix of Nurselog's own tools (`MARKER_TOOL_PREFIX` of `src/model/hook-payload.ts`), whose inputs the marker mapping and `health` read whole. */
+const NURSELOG_TOOL_PREFIX = 'mcp__plugin_nurselog_nurselog__';
+/** The input fields of another MCP tool the mapping reads (design section 2.2). */
+const MCP_INPUT_FIELDS = ['pageId', 'issueIdOrKey'];
+/** The characters an MCP tool's `pageId` or `issueIdOrKey` keeps (decision 251). */
+const MCP_INPUT_CHARS = 200;
+
+/** An MCP tool other than Nurselog's own: its input keeps only the fields the board reads, and its texts only their lengths (decision 251). */
+const isOtherMcpTool = (tool) => typeof tool === 'string' && tool.startsWith('mcp__') && !tool.startsWith(NURSELOG_TOOL_PREFIX);
+
+/**
+ * The tool input the hook keeps: of an MCP tool other than Nurselog's own only the string fields the mapping reads
+ * (`MCP_INPUT_FIELDS`, redacted, then cut to `MCP_INPUT_CHARS`) and, for a browser call, its target (`browserInput`,
+ * its element targets redacted, then cut), so typed text is dropped also for a browser tool the server rule misses
+ * (decision 251); a sensitive call's paths, command and Read range; else the input without its bodies.
+ */
+const slimInput = (input, sensitive, tool) => {
+  if (isOtherMcpTool(tool)) {
+    const fields = MCP_INPUT_FIELDS.filter((field) => typeof input[field] === 'string');
+    const read = Object.fromEntries(fields.map((field) => [field, redactString(input[field]).slice(0, MCP_INPUT_CHARS)]));
+    const kept = { ...read, ...(isBrowserTool(tool) ? browserInput(input, redactString) : {}) };
+    return sensitive ? { ...kept, sensitive: true } : kept;
+  }
   if (!sensitive) {
     return withoutBodies(input);
   }
@@ -1107,7 +1129,7 @@ const keptAnswers = (input, response) => {
 
 /**
  * Keeps `responseChars`, the scalars the mapping reads, a background Bash command's task id (`backgroundTaskId`, a
- * plain word, `isTaskId`), the first error line, what `keptStdout` (`hooks/verification.mjs`)
+ * plain word, `isTaskId`), an edit's `linesAdded`, `linesRemoved` and `created` (`patchLines`), the first error line, what `keptStdout` (`hooks/verification.mjs`)
  * keeps of a Bash stdout after redaction (a verification tail or a PR URL), the short text of a marker tool (a
  * string, a content list or an object with `content`) and the answers of an AskUserQuestion call (`keptAnswers`).
  */
@@ -1123,7 +1145,9 @@ const slimResponse = (response, tool, input, sensitive) => {
   if (!isObject(response)) {
     return slim;
   }
-  for (const field of RESPONSE_SCALARS) {
+  // An MCP tool other than Nurselog's keeps no text of its response (decision 251): no `status`, no error line; `responseChars` stays its length.
+  const withheld = isOtherMcpTool(tool);
+  for (const field of RESPONSE_SCALARS.filter((name) => !(withheld && name === 'status'))) {
     const value = response[field];
     if (typeof value === 'boolean' || typeof value === 'number' || (typeof value === 'string' && value.length <= 200)) {
       slim[field] = value;
@@ -1133,11 +1157,13 @@ const slimResponse = (response, tool, input, sensitive) => {
   if (tool === 'Bash' && isTaskId(response.backgroundTaskId)) {
     slim.backgroundTaskId = response.backgroundTaskId;
   }
+  // An edit's lines added and removed and a Write's `created`, counts only (decision 250): a sensitive edit keeps them too, as it keeps `responseChars`.
+  Object.assign(slim, patchLines(tool, response));
   if (sensitive) {
     slim.sensitive = true;
     return slim;
   }
-  const failed = response.is_error === true || (typeof response.error === 'string' && response.error !== '');
+  const failed = !withheld && (response.is_error === true || (typeof response.error === 'string' && response.error !== ''));
   const error = failed ? firstLine(response.error || response.stderr || response.content) : undefined;
   if (error) {
     slim.error = error;
@@ -1155,21 +1181,22 @@ const slimResponse = (response, tool, input, sensitive) => {
   return slim;
 };
 
-/** The top-level `error` of a failed call: its first `FAILURE_ERROR_CHARS` characters, cut after redaction; none for a sensitive call or a non-string. */
-const slimFailureError = (error, sensitive) => {
-  if (sensitive || typeof error !== 'string') {
+/** The top-level `error` of a failed call: its first `FAILURE_ERROR_CHARS` characters, cut after redaction; none for a sensitive call, an MCP tool other than Nurselog's (decision 251) or a non-string. */
+const slimFailureError = (error, withheld) => {
+  if (withheld || typeof error !== 'string') {
     return undefined;
   }
   return redactString(error).slice(0, FAILURE_ERROR_CHARS);
 };
 
 /**
- * What the hook keeps of a payload (design section 2.2): tool inputs without file bodies (lengths instead),
- * tool responses reduced to `slimResponse`, a failure's `error` cut to its start (none for a sensitive call) with
- * `errorChars`, the length of the whole error text (kept for a sensitive call too, never the text; a stray one beside
+ * What the hook keeps of a payload (design section 2.2): tool inputs without file bodies (lengths instead), an MCP
+ * tool's input as the fields the board reads and a browser call's target (`slimInput`, decision 251),
+ * tool responses reduced to `slimResponse`, a failure's `error` cut to its start (none for a sensitive call or an MCP
+ * tool other than Nurselog's) with `errorChars`, the length of the whole error text (kept for a sensitive call too, never the text; a stray one beside
  * an `error` that is no string is dropped), nothing but paths and the command for a tool that touches a denylisted path or prints secrets, and a
- * PermissionDenied's `reason` redacted by the command rule, as it may quote the command it refused. Other fields pass unchanged; redaction runs on the
- * result.
+ * PermissionDenied's `reason` redacted by the command rule, as it may quote the command it refused (an MCP tool's
+ * other than Nurselog's only as its length, `reasonChars`). Other fields pass unchanged; redaction runs on the result.
  */
 export const minimizePayload = (payload) => {
   const failure = payload.error !== undefined || payload.errorChars !== undefined;
@@ -1179,14 +1206,16 @@ export const minimizePayload = (payload) => {
   }
   const input = isObject(payload.tool_input) ? payload.tool_input : {};
   const sensitive = touchesSecret(input);
+  const withheld = isOtherMcpTool(payload.tool_name);
   const slim = { ...payload };
+  delete slim.reasonChars;
   if (typeof payload.error === 'string') {
     slim.errorChars = payload.error.length;
   } else {
     delete slim.errorChars;
   }
   if (payload.error !== undefined) {
-    const error = slimFailureError(payload.error, sensitive);
+    const error = slimFailureError(payload.error, sensitive || withheld);
     if (error === undefined) {
       delete slim.error;
     } else {
@@ -1194,12 +1223,16 @@ export const minimizePayload = (payload) => {
     }
   }
   if (payload.tool_input !== undefined) {
-    slim.tool_input = slimInput(input, sensitive);
+    slim.tool_input = slimInput(input, sensitive, payload.tool_name);
   }
   if (payload.tool_response !== undefined) {
     slim.tool_response = slimResponse(payload.tool_response, typeof payload.tool_name === 'string' ? payload.tool_name : '', input, sensitive);
   }
-  if (denial) {
+  // An MCP tool's denial reason may quote the text it typed: only its length, as `errorChars` keeps an error's (decision 251).
+  if (denial && withheld) {
+    delete slim.reason;
+    slim.reasonChars = payload.reason.length;
+  } else if (denial) {
     slim.reason = redactString(payload.reason, true);
   }
   return slim;

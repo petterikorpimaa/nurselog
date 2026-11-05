@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.25 (2026-11-05)
+
+### New
+
+- The agent view in its session card, with a microscope zoom
+- The node card as the agent's hover preview, and moving between agents
+- The agent view's workspace tabs and role content
+- The agent view's tool nodes and beams
+- The agent view's zoom, core, loop phases, live line and calls row
+- Lines per edit and a browser call's target
+- An agent's task list and a check's result on its call
+- The agent view's shared types
+
 ## 0.1.24 (2026-11-05)
 
 ### New

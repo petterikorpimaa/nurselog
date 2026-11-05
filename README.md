@@ -672,9 +672,20 @@ writes between its tool calls (up to 2,000 characters each, read from its transc
 
 Dropped:
 
-- Edit and Write bodies (kept as character counts only).
+- Edit and Write bodies (kept as character counts only), and their response patch (kept as the counts of lines added
+  and removed, and whether a Write created the file, whose lines are counted from its content).
 - Tool output, except its length, a few scalars, the first error line (300 characters), a failed call's error cut
   to 500 characters and an AskUserQuestion call's answers and notes (above).
+- For MCP tools other than Nurselog's own: everything a call sends but a Confluence `pageId` and a Jira
+  `issueIdOrKey` (200 characters each), so text a tool types or fills, keys and scripts are never kept; and of its
+  error text and the reason of a denial only their lengths, of its response status nothing.
+- Of a browser tool call (any tool of a server named for a browser, such as Playwright, Puppeteer or Chrome DevTools,
+  or a tool named `browser_*`), it also keeps its target: a URL keeps only its origin and path (no query, fragment or
+  user name and password; one written without a scheme, such as `localhost:5173/cart`, keeps its host and path;
+  another scheme keeps only the scheme; a path that holds an encoded query keeps only the host, and a path segment of
+  8 or more characters with a digit, or of 6 or more digits, such as a reset token or a one-time code, becomes `…`,
+  while a shorter or letters-only segment such as `getting-started` or `v2` stays), and an element target (`element`,
+  `selector`, `uid`, `ref`) its first 120 characters, redacted.
 - Everything but the path and the command for calls that touch a secret (`.env*`, `.npmrc`, `.netrc`, `*.pem`,
   `*.key`, `id_*`, `credentials*`, `hosts.yml`, paths with `secret`, `printenv`, `env`, `gh auth token` ...); such calls
   are marked `sensitive` and keep no error.

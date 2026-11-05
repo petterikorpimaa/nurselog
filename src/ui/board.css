@@ -27,6 +27,9 @@
   --imp-cost: #c4b0ff; --imp-time: #8cb4ff; --imp-quality: var(--rev);
   /* what a suggested change gains: its effect and its added lines (the demo's --web green) */
   --gain: #8fe3b8;
+  /* the agent view's loop phases and tool colours (agent-view.css), the reference's where the board has none */
+  --c-observe: var(--imp-time); --c-think: var(--imp-cost); --c-act: var(--gain); --c-verify: var(--rev); --c-idle: var(--fg-3);
+  --c-run: #f7c99a; --c-browser: #f2a7dd; --c-handoff: #e9d28c;
   --f-ui: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -596,13 +599,14 @@ p { margin: 0; }
 @keyframes card-flash { 0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .55); } 100% { box-shadow: 0 0 0 16px rgba(255, 255, 255, 0); } }
 /* under reduced motion the target takes the demo's static .linked border for the flash's 1.3 s instead; the board link
    (a lane, a ranking row, a promotion dot or the session itself pointed at) gives its sessions' cards the same border */
-.card.linked, .card.board-link { border-color: rgba(255, 255, 255, .3); box-shadow: 0 0 0 3px rgba(255, 255, 255, .05); }
+/* a card whose agent view is open keeps its own border, as the reference's agent card */
+.card.linked:not(.av-open), .card.board-link:not(.av-open) { border-color: rgba(255, 255, 255, .3); box-shadow: 0 0 0 3px rgba(255, 255, 255, .05); }
 
 /* a card whose update or frame threw (cards.ts sets data-error): dimmed and stilled like the cards of a lost stream,
    with a note under the header to reload the page */
 .card-error { display: none; margin: 4px 16px 2px; font-size: 12px; color: var(--amber); }
 .card[data-error] .card-error { display: block; }
-.card[data-error] > :not(.card-error) { opacity: .6; }
+.card[data-error] .card-content > :not(.card-error), .card[data-error] > .agent-view { opacity: .6; }
 .card[data-error] *, .card[data-error] *::before, .card[data-error] *::after { animation-play-state: paused !important; }
 
 /* progress chip: the tone of SessionState.chip as data-tone; it bumps on a change (card.ts) and `you` pulses with a halo
@@ -826,21 +830,23 @@ p { margin: 0; }
 }
 .hand-off-show:hover { color: var(--fg); }
 
-/* the node card (node-card.ts, design section 15 "Node card"): the card a click on an agent's node opens beside it, in
-   the body and fixed to the window, under the sticky top bar; the head and the foot stay, the body scrolls and fades at
-   the edge that has more (the options page's .hc). Its width by kind; the motion is the script's. */
+/* the node card as a card node's hover preview (node-card.ts, design section 15 "Node card"; decisions 247 and 256):
+   beside the node, in the body and fixed to the window, under the sticky top bar, on the demo's tooltip surface (.gtip:
+   --card-3, radius 8, its shadow); a tooltip with nothing to click and nothing to scroll, hoverable while it shows. The
+   motion is the script's. */
 .node-card {
-  position: fixed; left: 0; top: 0; z-index: 35; display: flex; flex-direction: column; width: 350px;
-  max-width: calc(100vw - 16px); max-height: min(440px, 60vh); color: var(--fg); background: var(--card);
-  border: 1px solid var(--border-2); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); overflow: hidden;
-  outline: none; font-size: 14px; line-height: 1.45;
+  position: fixed; left: 0; top: 0; z-index: 35; display: flex; flex-direction: column; gap: 8px; width: 300px;
+  max-width: calc(100vw - 16px); padding: 11px 14px 12px; color: var(--fg); background: var(--card-3);
+  border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); overflow: hidden;
+  font-size: 14px; line-height: 1.45;
 }
-.node-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .node-card.closing { pointer-events: none; }
-.node-card[data-kind="fix"] { width: 370px; }
-.node-card:is([data-kind="reviewer"], [data-kind="pr"]) { width: 340px; }
-.node-card[data-kind="docs"] { width: 330px; }
-.nc-head { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px 8px; }
+/* the task on one line; the call two lines and the report three, a path breaking at its folders (wbr after "/") */
+.node-card .nc-task { margin: 0; font-size: 12.5px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-card .nc-pr-line { margin: 0; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
+.node-card .nc-now-text { overflow-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.node-card .nc-report { overflow-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.node-card .nc-quiet { margin: 0; font: 500 11px var(--f-mono); color: var(--fg-3); }
 .nc-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
 .nc-role { font: 600 12.5px var(--f-mono); overflow-wrap: anywhere; }
 .nc-chips { display: contents; }
@@ -849,19 +855,10 @@ p { margin: 0; }
   border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); color: var(--c);
 }
 .nc-chip.solid { color: var(--ink); background: var(--c); border-color: var(--c); }
-.nc-meta { margin: 0; font: 500 11px var(--f-mono); color: var(--fg-3); overflow-wrap: anywhere; }
-.nc-body {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column;
-  gap: 12px; padding: 2px 14px 12px; scrollbar-width: thin; scrollbar-color: var(--card-3) transparent;
-}
-.nc-body > * { flex: none; }
-.nc-body.more-below { mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
-.nc-body.more-above { mask-image: linear-gradient(to bottom, transparent, #000 18px); }
-.nc-body.more-above.more-below { mask-image: linear-gradient(to bottom, transparent, #000 18px, #000 calc(100% - 22px), transparent); }
-.nc-foot {
-  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px 7px 8px;
-  border-top: 1px solid var(--border);
-}
+.nc-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.nc-time { flex: none; margin-left: auto; font: 500 11px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.nc-progress { margin: 0; font: 500 11px var(--f-mono); color: var(--fg-2); overflow-wrap: anywhere; }
+.nc-fu { margin-top: 2px; }
 .nc-link {
   display: inline-flex; align-items: center; gap: 6px; min-height: 24px; border: 0; background: transparent; padding: 4px 6px; border-radius: 6px;
   font: inherit; font-size: 12px; color: var(--fg-2); text-decoration: none; cursor: pointer;
@@ -869,13 +866,6 @@ p { margin: 0; }
 .nc-link:hover { background: var(--card-2); color: var(--fg); }
 .nc-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .nc-link svg { width: 12px; height: 12px; flex: none; }
-.nc-task { margin: 0; font-size: 12.5px; color: var(--fg); overflow-wrap: anywhere; }
-.nc-note { margin: 0; font-size: 12px; color: var(--fg-3); }
-.nc-inline {
-  border: 0; background: transparent; padding: 0; font: inherit; color: var(--fg-2); text-decoration: underline;
-  text-underline-offset: 3px; cursor: pointer;
-}
-.nc-inline:hover { color: var(--fg); }
 .nc-now { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-size: 12px; color: var(--fg-2); }
 .nc-now-label { flex: none; font: 600 9.5px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
 .nc-now-text { min-width: 0; font-family: var(--f-mono); font-size: 11.5px; overflow-wrap: anywhere; }
@@ -883,7 +873,6 @@ p { margin: 0; }
 .nc-now-text.failed { color: var(--red); }
 /* how a leg ended reads as text, in the UI font; only the running call keeps the mono font */
 .nc-now-text.ended { font-family: var(--f-ui); font-size: 12px; color: var(--fg-2); }
-.nc-ended { display: flex; flex-direction: column; gap: 4px; }
 .nc-report { margin: 0; font-size: 12px; color: var(--fg-2); overflow-wrap: anywhere; }
 .nc-pr { display: flex; flex-direction: column; gap: 4px; }
 .nc-pr-title { margin: 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
@@ -894,32 +883,12 @@ p { margin: 0; }
 /* the stale approval's line of its own under the facts, the approval's time dim (decision 241) */
 .nc-stale { margin: 0; font: 500 11.5px var(--f-mono); color: var(--amber); overflow-wrap: anywhere; }
 .nc-stale span { color: var(--fg-3); white-space: nowrap; }
-.nc-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; }
-.nc-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.nc-metric-label { font: 600 9.5px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
-.nc-metric b { font: 600 12px var(--f-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
-.nc-metric b i { font-style: normal; font-weight: 500; color: var(--fg-3); }
-.nc-metric small { font: 500 10.5px var(--f-mono); color: var(--fg-3); }
-.nc-metric .verify-pips { justify-content: flex-start; }
-.nc-bar { display: block; height: 3px; border-radius: 2px; background: var(--card-3); overflow: hidden; }
-.nc-bar i { display: block; height: 100%; background: var(--st-implement); }
-.nc-metric[data-level="warn"] .nc-bar i { background: var(--amber); }
-.nc-metric[data-level="limit"] .nc-bar i { background: var(--red); }
 .nc-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .nc-section h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 600; color: var(--c, var(--fg-2)); }
 .nc-section h4 svg { width: 13px; height: 13px; flex: none; }
 .nc-count { margin-left: auto; font: 500 11px var(--f-mono); color: var(--fg-3); }
-.nc-list, .nc-files { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.nc-list { gap: 7px; }
-.nc-files { gap: 2px; font: 500 11.5px var(--f-mono); color: var(--fg-2); }
-.nc-files li { overflow-wrap: anywhere; }
-/* a file the trust map marks (decision 241): the name takes the colour, amber with one check missing, red with both,
-   dim when covered; a tag per missing check at the right */
-.nc-files li[data-trust] { display: flex; align-items: baseline; gap: 8px; }
-.nc-files li[data-trust="ok"] { color: var(--fg-3); }
-.nc-files li[data-trust="one"] { --c: var(--amber); color: var(--c); }
-.nc-files li[data-trust="both"] { --c: var(--red); color: var(--c); }
-.nc-trust-name { min-width: 0; overflow-wrap: anywhere; }
+.nc-list { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+/* the trust map's tags of a changed file (decision 241): a tag per missing check at the right */
 .nc-trust-tags { margin-left: auto; display: flex; gap: 4px; flex: none; }
 .nc-trust-tag {
   font: 600 9.5px var(--f-mono); letter-spacing: .03em; padding: 0 5px; border-radius: 4px;
@@ -936,15 +905,7 @@ p { margin: 0; }
 /* a reviewer's item: its file and category flow as one line of text, the path wrapping where it must */
 .nc-item .nc-file { display: block; }
 .nc-item .nc-file code + span::before { content: " · "; }
-/* the Fix card: the progress line over one segment per item, then a row per item with its mark (FX1) */
-.nc-progress { display: flex; flex-direction: column; gap: 5px; }
-.nc-progress p { margin: 0; display: flex; justify-content: space-between; gap: 8px; font: 500 11px var(--f-mono); color: var(--fg-2); }
-.nc-progress p span { color: var(--fg-3); }
-.nc-segs { display: flex; gap: 3px; }
-.nc-segs i { flex: 1; height: 4px; border-radius: 2px; background: var(--c); opacity: .2; }
-.nc-segs i[data-mark="edited"] { opacity: 1; }
-.nc-segs i[data-mark="working"] { animation: nc-pulse 1.4s ease-in-out infinite; }
-@keyframes nc-pulse { 0%, 100% { opacity: .25; } 50% { opacity: .75; } }
+/* a Fix's rows with their marks (FX1), in the agent view's Plan tab */
 .nc-row {
   display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 2px 8px; align-items: start; padding: 4px 6px;
   margin: 0 -6px; border-radius: 6px;

@@ -15,7 +15,7 @@ import {
   readReplayAnswer,
   runReplayJob,
   runWorkerJob
-} from "./chunk-OTGMYKOM.js";
+} from "./chunk-AOH2OHDW.js";
 import {
   FIELD_NAMES,
   FOLLOWUP_CATEGORIES,
@@ -93,7 +93,7 @@ import {
   validateMarkerInput,
   workflowSetupOf,
   writePrivate
-} from "./chunk-LKOSYIQD.js";
+} from "./chunk-65LEEKVG.js";
 
 // src/server/http.ts
 import { randomBytes } from "crypto";
@@ -139,10 +139,10 @@ var sessionSummary = (session) => {
 };
 var rowCalls = (agent) => {
   const last = agent.recent.length - 1;
-  return agent.recent.filter((call, index) => index === last || call.permission === "waiting" && !call.endedAt);
+  return agent.recent.filter((call, index) => index === last || call.endedAt === void 0 && call.outcome === void 0);
 };
 var trimAgent = (agent) => {
-  const { report, ...rest } = agent;
+  const { report, tasks, fileLines, ...rest } = agent;
   const trimmed = { ...rest, recent: rowCalls(agent), trimmed: true };
   if (report) {
     trimmed.report = { text: reportLine(report.text), via: report.via };
@@ -356,6 +356,7 @@ var UI_ASSETS = /* @__PURE__ */ new Map([
   ["/ui/overview.css", { file: "overview.css", type: CSS }],
   ["/ui/health.css", { file: "health.css", type: CSS }],
   ["/ui/branches.css", { file: "branches.css", type: CSS }],
+  ["/ui/agent-view.css", { file: "agent-view.css", type: CSS }],
   ["/ui/board.js", { file: "board.js", type: SCRIPT, built: true }],
   ["/ui/icon.svg", { file: "icon.svg", type: SVG }],
   ["/ui/icon-192.png", { file: "icon-192.png", type: PNG }],

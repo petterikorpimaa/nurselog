@@ -197,16 +197,16 @@
 /* a node's hit area, 5 wider than the node; its stroke is the linked ring: the nodes of one agent drawn more than once
    (its resumed legs, decision 187) ring each other while one is pointed at, and every node of an agent whose table row
    is pointed at rings, the main thread's Plan node and Fixes for its row (decision 229); the ring lies just outside a running node's progress ring, and no line joins the
-   nodes. Nothing dims. A node with a card (a button that opens a dialog, scene.ts) shows the hand pointer and fades its
+   nodes. Nothing dims. A node with a card (a button that zooms into its agent view, scene.ts) shows the hand pointer and fades its
    hit ring in at .75 in 120 ms while pointed at, with no change of size (C1), unless it rings already (open or
-   linked), which pointing leaves at its full opacity; the open card's node rings in --fg at 1.6
+   linked), which pointing leaves at its full opacity; the previewed node rings in --fg at 1.6
    (markCard), and the keyboard focus in --focus at 1.6, in place of the outline */
 .session-graph .node .node-hit { fill: transparent; stroke: var(--fg-2); stroke-width: 1.4; stroke-opacity: 0; transition: stroke-opacity .12s, stroke .12s; }
 .session-graph .node.linked .node-hit { stroke-opacity: 1; }
-.session-graph .node[aria-haspopup] { outline: none; }
-.session-graph .node[aria-haspopup]:hover:not(.open):not(.linked) .node-hit { stroke-opacity: .75; }
+.session-graph .node[role="button"] { outline: none; }
+.session-graph .node[role="button"]:hover:not(.open):not(.linked) .node-hit { stroke-opacity: .75; }
 .session-graph .node.open .node-hit { stroke: var(--fg); stroke-opacity: 1; stroke-width: 1.6; }
-.session-graph .node[aria-haspopup]:focus-visible .node-hit { stroke: var(--focus); stroke-opacity: 1; stroke-width: 1.6; }
+.session-graph .node[role="button"]:focus-visible .node-hit { stroke: var(--focus); stroke-opacity: 1; stroke-width: 1.6; }
 /* a folded pipeline's compact row: lighter pills with 10 px text */
 .session-graph .pill.compact rect { fill: color-mix(in srgb, var(--c) 8%, var(--card)); }
 .session-graph .pill.compact text { font-size: 10px; }
