@@ -11,8 +11,9 @@
 .card.av-open > .card-content { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
 .card-content.av-away { visibility: hidden; }
 .card.av-leaving > .agent-view { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
-/* the copy of the clicked node that travels with the core while a zoom runs */
-.av-ghost { position: absolute; z-index: 1; pointer-events: none; }
+/* the copy of the clicked node that travels with the core while a zoom runs: a .session-graph, so its parts draw as the
+   node's do (graph.css scopes the hit circle, the running orbit and the progress ring by it), without its padding */
+.av-ghost.session-graph { position: absolute; z-index: 1; padding: 0; pointer-events: none; }
 
 .agent-view {
   --seg-system: #aeb4bf; --seg-task: #e9d28c; --seg-files: var(--c-observe); --seg-tools: var(--c-run); --seg-reasoning: var(--c-think);
@@ -21,14 +22,16 @@
 
 /* head: the back button and the task, as the reference's title row, and the previous and next agent at its end */
 .av-head { display: flex; align-items: flex-start; gap: 14px; padding: 16px 22px 0; }
-.av-back {
+/* the main thread's Messages button (decision 258) takes the Board button's look, its icon alone at 560 px or narrower */
+.av-back, .av-messages {
   flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px 0 8px; border-radius: 8px;
   border: 1px solid var(--border-2); background: var(--card-2); color: var(--fg-2); font: 500 12.5px var(--f-ui); cursor: pointer;
   transition: color .2s, background-color .2s, border-color .2s;
 }
-.av-back .av-arrow { width: 15px; height: 15px; }
-.av-back:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
-.av-back:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.av-messages[hidden] { display: none; }
+.av-back .av-arrow, .av-messages .av-arrow { width: 15px; height: 15px; }
+.av-back:hover, .av-messages:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+.av-back:focus-visible, .av-messages:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* the previous and next agent: the board's icon-only chevron button (.icon-button, as the collapse button), its
    chevron turned to the side, disabled at an end as the board's .button is; hidden for a single card node */
 .av-nav { flex: none; display: inline-flex; gap: 6px; margin-left: auto; padding-top: 3px; }
@@ -69,15 +72,16 @@
 .av-glyph path { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .av-glyph.base path { stroke: var(--fg); }
 .av-glyph.onliq path { stroke: var(--ink); }
-.av-svg[data-state="starting"] .av-core-out { fill: var(--card); stroke: var(--fg-3); stroke-dasharray: .1 6; stroke-linecap: round; stroke-width: 2.2; }
-.av-svg[data-state="starting"] .av-liquid, .av-svg[data-state="wait"] .av-liquid { opacity: 0; }
-.av-svg[data-state="starting"] .av-glyph.base path { stroke: var(--fg-3); }
+/* starting, and the main thread at rest between turns (decision 258), take the reference's idle core */
+.av-svg:is([data-state="starting"], [data-state="agents"], [data-state="idle"]) .av-core-out { fill: var(--card); stroke: var(--fg-3); stroke-dasharray: .1 6; stroke-linecap: round; stroke-width: 2.2; }
+.av-svg:is([data-state="starting"], [data-state="agents"], [data-state="idle"], [data-state="wait"]) .av-liquid { opacity: 0; }
+.av-svg:is([data-state="starting"], [data-state="agents"], [data-state="idle"]) .av-glyph.base path { stroke: var(--fg-3); }
 .av-svg[data-state="wait"] .av-core-out { fill: color-mix(in srgb, var(--you) 7%, var(--card)); stroke-dasharray: 7 5; }
 .av-svg[data-state="wait"] .av-glyph.base path { stroke: var(--you); }
 .av-svg[data-state="stale"] .av-core-out { stroke-dasharray: .1 6; stroke-linecap: round; stroke-width: 2.2; }
 .av-svg[data-state="stale"] .av-liquid { opacity: .35; }
-.av-svg:is([data-state="starting"], [data-state="done"], [data-state="failed"], [data-state="handed"], [data-state="stale"], [data-state="wait"]) .av-core-orbit { animation: none; opacity: 0; }
-.av-svg:is([data-state="starting"], [data-state="done"], [data-state="failed"], [data-state="handed"], [data-state="stale"]) .av-core-ring { animation: none; opacity: 0; }
+.av-svg:is([data-state="starting"], [data-state="done"], [data-state="failed"], [data-state="handed"], [data-state="stale"], [data-state="wait"], [data-state="agents"], [data-state="idle"]) .av-core-orbit { animation: none; opacity: 0; }
+.av-svg:is([data-state="starting"], [data-state="done"], [data-state="failed"], [data-state="handed"], [data-state="stale"], [data-state="agents"], [data-state="idle"]) .av-core-ring { animation: none; opacity: 0; }
 .av-sheen { fill: var(--fg); opacity: 0; }
 .av-sheen.go { animation: av-sheen .9s ease-out; }
 @keyframes av-sheen { 0% { opacity: 0; transform: translateX(0); } 25% { opacity: .5; } 100% { opacity: 0; transform: translateX(150px); } }
@@ -213,6 +217,7 @@
 .av-segs i.run { opacity: 1; animation: av-pulse 1s ease-in-out infinite; }
 .av-segs i.wait { opacity: 1; background: transparent; box-shadow: inset 0 0 0 1.4px var(--you); }
 .av-segs i.fail { opacity: 1; background-color: var(--warm); background-image: linear-gradient(135deg, transparent 38%, var(--ink) 38% 62%, transparent 62%); background-size: 6px 6px; }
+.av-segs i.pending { opacity: 1; background: transparent; box-shadow: inset 0 0 0 1.4px var(--fg-3); }
 .av-segs i.denied { opacity: 1; background: repeating-linear-gradient(135deg, var(--red) 0 3px, transparent 3px 6px); }
 .av-trace-meta { display: inline-flex; align-items: center; gap: 14px; font: 500 11px var(--f-mono); color: var(--fg-3); white-space: nowrap; }
 .av-ctx { display: inline-flex; align-items: center; gap: 7px; }
@@ -312,6 +317,8 @@
 .av-tdot { width: 18px; height: 18px; border-radius: 50%; box-sizing: border-box; display: grid; place-items: center; margin-top: 1px; border: 1.6px solid var(--rev); background: var(--rev); color: var(--ink); }
 .av-tdot .av-ic { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .av-tr[data-st="fail"] .av-tdot { background: color-mix(in srgb, var(--warm) 18%, var(--card)); border-color: var(--warm); color: var(--warm); }
+/* a ci call whose check list holds a pending check and no failing one: an empty quiet ring (decision 257) */
+.av-tr[data-st="pending"] .av-tdot { background: transparent; border-color: var(--fg-3); }
 .av-tr[data-st="denied"] .av-tdot { background: color-mix(in srgb, var(--red) 14%, var(--card)); border-color: var(--red); color: var(--red); }
 .av-tr[data-st="run"] .av-tdot { background: var(--card); border: 2px solid color-mix(in srgb, var(--kc) 22%, transparent); border-top-color: var(--kc); animation: av-spin .9s linear infinite; }
 .av-tr[data-st="wait"] .av-tdot { background: color-mix(in srgb, var(--you) 7%, var(--card)); border: 1.6px dashed var(--you); }
@@ -330,6 +337,16 @@
 .av-tr[data-st="fail"] .av-tlab { color: color-mix(in srgb, var(--warm) 80%, var(--fg)); }
 .av-tfail { margin-top: 6px; padding: 5px 8px; border-left: 2px solid var(--warm); background: color-mix(in srgb, var(--warm) 7%, transparent); border-radius: 0 6px 6px 0; font: 500 10.5px var(--f-mono); color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .av-tfail div:first-child { color: color-mix(in srgb, var(--warm) 80%, var(--fg)); }
+/* a gh pr checks call's checks as chips (decision 257): a pass in the review colour, a fail in the warm one, a pending, skipped or cancelled one quiet */
+.av-tci { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font: 500 10.5px var(--f-mono); padding: 0 7px; border-radius: 999px; line-height: 17px; border: 1px solid color-mix(in srgb, var(--rev) 45%, transparent); color: color-mix(in srgb, var(--rev) 75%, var(--fg)); }
+.av-tci.fail { border-color: color-mix(in srgb, var(--warm) 50%, transparent); color: color-mix(in srgb, var(--warm) 80%, var(--fg)); }
+.av-tci.pending, .av-tci.skipping, .av-tci.cancel { border-color: color-mix(in srgb, var(--fg-3) 45%, transparent); color: var(--fg-2); }
+.av-tci.pending .av-tcim, .av-tci.skipping .av-tcim, .av-tci.cancel .av-tcim { color: var(--fg-3); }
+.av-tcim { flex: none; margin-right: calc(1ch - 4px); }
+.av-tcin { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av-tci .visually-hidden { -webkit-user-select: none; user-select: none; }
+.av-tci i { flex: none; font-style: normal; color: var(--fg-3); }
+.av-tcimore { color: var(--fg-3); }
 .av-trunbar { display: block; width: 120px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--kc), transparent) -60px 0 / 60px 100% no-repeat, var(--card-3); animation: av-scan 1.2s linear infinite; }
 @keyframes av-scan { to { background-position: 120px 0, 0 0; } }
 .av-tside { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; padding-top: 3px; }
@@ -364,6 +381,8 @@
   .av-title { font-size: 15.5px; }
   .av-back { width: 30px; padding: 0; justify-content: center; }
   .av-back span { display: none; }
+  .av-messages { width: 30px; padding: 0; justify-content: center; }
+  .av-messages-text { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .av-viz { padding: 10px 12px 2px; }
   .av-lower { padding: 4px 14px 4px; }
   .av-workspace { margin: 0 -14px; padding: 14px 14px 0; }
