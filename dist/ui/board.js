@@ -637,6 +637,19 @@ var dropFaded = (placements) => {
   return faded;
 };
 
+// hooks/browser-safe.mjs
+var BROWSER_SERVER = /playwright|puppeteer|browser|chrome|devtools|selenium|webdriver|stagehand/;
+var isBrowserTool = (tool) => {
+  if (typeof tool !== "string" || !tool.startsWith("mcp__")) {
+    return false;
+  }
+  const at = tool.indexOf("__", 5);
+  if (at <= 5) {
+    return false;
+  }
+  return BROWSER_SERVER.test(tool.slice(5, at).toLowerCase()) || tool.slice(at + 2).toLowerCase().startsWith("browser_");
+};
+
 // hooks/verification.mjs
 var VERIFICATION_RUNNERS = Object.freeze(["pnpm", "npm", "npx", "yarn", "bun", "node", "turbo", "make", "tsc", "eslint", "vitest"]);
 var VERIFICATION_KINDS = Object.freeze({ typecheck: "\\b(typecheck|tsc)\\b", lint: "\\b(lint|eslint)\\b", test: "\\b(vitest|test:run)\\b|\\b(pnpm|npm|yarn|bun|make)\\b[^&|;]*\\btest\\b" });
@@ -2315,16 +2328,16 @@ var enterRow = (element) => {
 var createRowList = (list, make) => {
   const rows = /* @__PURE__ */ new Map();
   let ids = [];
-  const leaving2 = /* @__PURE__ */ new Set();
+  const leaving3 = /* @__PURE__ */ new Set();
   const settled = (node) => {
     let current = node;
-    while (current && leaving2.has(current)) {
+    while (current && leaving3.has(current)) {
       current = current.nextElementSibling;
     }
     return current;
   };
   const leave = (element, index) => {
-    leaving2.add(element);
+    leaving3.add(element);
     element.inert = true;
     const height = `${element.offsetHeight}px`;
     const frames = [
@@ -2334,7 +2347,7 @@ var createRowList = (list, make) => {
     ];
     const slide2 = element.animate(frames, { duration: ROW_LEAVE_MS, delay: Math.min(index, 10) * 35, easing: ROW_LEAVE_EASE, fill: "forwards" });
     const end = () => {
-      leaving2.delete(element);
+      leaving3.delete(element);
       element.remove();
     };
     slide2.finished.then(end, end);
@@ -2403,7 +2416,7 @@ var createRowList = (list, make) => {
       if (options.animate) {
         for (const [element, top] of before) {
           const delta = top - element.offsetTop;
-          if (element.isConnected && !leaving2.has(element) && Math.abs(delta) > 1) {
+          if (element.isConnected && !leaving3.has(element) && Math.abs(delta) > 1) {
             element.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration: ROW_MOVE_MS, easing: EASE2 });
           }
         }
@@ -2680,11 +2693,11 @@ var createCardList = (list, context, item2, make) => {
      */
     sync(next, tops, foldIds) {
       const keep2 = new Set(next);
-      const leaving2 = [...cards].filter(([id]) => !keep2.has(id));
-      const places = leaving2.map(([, card]) => tops.get(card.element) ?? card.element.offsetTop);
+      const leaving3 = [...cards].filter(([id]) => !keep2.has(id));
+      const places = leaving3.map(([, card]) => tops.get(card.element) ?? card.element.offsetTop);
       const folded = [];
       let left = 0;
-      leaving2.forEach(([id, card], index) => {
+      leaving3.forEach(([id, card], index) => {
         cards.delete(id);
         if (foldIds.has(id)) {
           fold(id, card);
@@ -4821,7 +4834,7 @@ var createHealthReportView = (hooks) => {
   let focusables = /* @__PURE__ */ new Map();
   let promptTexts = /* @__PURE__ */ new Map();
   let summary = el("p");
-  let summaryText = el("span");
+  let summaryText2 = el("span");
   let clear = el("button");
   let none = el("p");
   let barGroups = [];
@@ -4850,7 +4863,7 @@ var createHealthReportView = (hooks) => {
       option.button.classList.toggle("z", count2 === 0 && option.value !== "all");
       setText(option.count, count2 === 0 ? "" : String(count2));
     }
-    setText(summaryText, view.summary);
+    setText(summaryText2, view.summary);
     summary.classList.toggle("on", view.filtered);
     clear.hidden = !view.filtered;
     none.hidden = view.shown.size > 0 || items.size === 0;
@@ -4906,14 +4919,14 @@ var createHealthReportView = (hooks) => {
     const impactValues = IMPACTS.map((impact2) => ({ value: impact2, name: IMPACT_NAMES[impact2], dot: true }));
     summary = el("p", "hfsum");
     summary.setAttribute("aria-live", "polite");
-    summaryText = el("span");
+    summaryText2 = el("span");
     clear = register("clear", el("button", "hclr", "Clear filters"));
     clear.type = "button";
     clear.addEventListener("click", () => {
       setFilter({ stage: "all", impact: "all" });
       focusables.get("stage:all")?.focus({ preventScroll: true });
     });
-    summary.append(summaryText, clear);
+    summary.append(summaryText2, clear);
     const stage = segmented("stage", "Step", [{ value: "all", name: "All", dot: false }, ...stageValues]);
     const impact = segmented("impact", "Impact", [{ value: "all", name: "All", dot: false }, ...impactValues]);
     block.append(stage, impact, summary);
@@ -10776,7 +10789,8 @@ var cardOrder = (layout, session) => {
       placed.push({ card, column: STAGE_IDS.indexOf(cardStage(session, card)), x: point2[0], y: point2[1] });
     }
   }
-  return placed.sort((a, b) => a.column - b.column || a.y - b.y || a.x - b.x).map((entry) => entry.card);
+  const lead = (card) => card.ref.kind === "plan" ? 0 : 1;
+  return placed.sort((a, b) => a.column - b.column || lead(a.card) - lead(b.card) || a.y - b.y || a.x - b.x).map((entry) => entry.card);
 };
 var cardOf = (item2) => {
   if (isCompactKey(item2.key) || item2.card === void 0 || item2.agentId === void 0) {
@@ -10884,6 +10898,10 @@ var drawsText = (session, ref) => {
   return ref.kind === "docs" ? "Docs" : void 0;
 };
 var nodeName = (session, item2, card) => {
+  const main = ownValue(session.agents, MAIN_AGENT);
+  if (card.ref.kind === "plan" && main !== void 0) {
+    return `main thread, ${sessionMainText(session, sessionRowState(session, main))}`;
+  }
   const agentId = item2.agentId ?? "";
   const role = ownValue(session.agents, agentId)?.role ?? agentId;
   const state = item2.stale === true && item2.state === "running" ? "stale" : STATE_WORDS[item2.state];
@@ -10989,8 +11007,8 @@ var loopSpecs = (row2, reOnly, sharedExit) => {
   });
 };
 var fixOffsets = (row2, loops) => {
-  const leaving2 = (index) => loops.filter((loop) => loop.fixIndex === index).length;
-  const pitches = row2.fixes.slice(1).map((_, index) => FIX_PITCH + Math.max(0, leaving2(index) - 1) * LANE_STEP);
+  const leaving3 = (index) => loops.filter((loop) => loop.fixIndex === index).length;
+  const pitches = row2.fixes.slice(1).map((_, index) => FIX_PITCH + Math.max(0, leaving3(index) - 1) * LANE_STEP);
   const span = pitches.reduce((sum, pitch) => sum + pitch, 0);
   return row2.fixes.map((_, index) => pitches.slice(0, index).reduce((sum, pitch) => sum + pitch, 0) - span / 2);
 };
@@ -11284,7 +11302,9 @@ var placeSession = (session, options, room) => {
   const planAt = { x: px4, y: midY };
   const planState = session.plan.state === "idle" ? "running" : session.plan.state;
   const idle = session.plan.state === "idle" ? { idle: true } : {};
-  add2({ kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R2, agentId: "main", ...idle, ...slide2("plan", planAt) });
+  const planCard = Object.hasOwn(session.agents, MAIN_AGENT) ? { card: { ref: { kind: "plan" } } } : {};
+  const planNode = { kind: "node", key: sessionKeys.plan, at: planAt, state: planState, color: "shared", mark: planMark, radius: NODE_R2, agentId: "main" };
+  add2({ ...planNode, ...idle, ...slide2("plan", planAt), ...planCard });
   add2({ kind: "text", key: "text:main", at: { key: sessionKeys.plan, dx: -(NODE_R2 + LABEL_GAP), dy: 3.5 }, text: "main", tone: "note", anchor: "end", agentId: "main" });
   const agentKeys = /* @__PURE__ */ new Map([["main", sessionKeys.plan]]);
   const keyRows = legRows(session, session.rows, homeRow, false);
@@ -13986,7 +14006,7 @@ var createQuestionsCore = (host, context, options) => {
   section2.append(heading2, list);
   host.append(section2);
   const entries = /* @__PURE__ */ new Map();
-  const leaving2 = /* @__PURE__ */ new Set();
+  const leaving3 = /* @__PURE__ */ new Set();
   let input = { questions: [], streamName: roleName, words: NO_WORDS, hasMessage: () => false, openMessage: () => void 0 };
   let highlighted = /* @__PURE__ */ new Set();
   let hovered;
@@ -14086,17 +14106,17 @@ var createQuestionsCore = (host, context, options) => {
       entry.slot.remove();
       return;
     }
-    leaving2.add(entry.slot);
+    leaving3.add(entry.slot);
     entry.slot.classList.add("leaving");
     const remove = () => {
-      leaving2.delete(entry.slot);
+      leaving3.delete(entry.slot);
       entry.slot.remove();
     };
     slide(entry.slot, false, true).finished.then(remove, remove);
   };
   const nextKept = (previous) => {
     let next = previous ? previous.nextElementSibling : list.firstElementChild;
-    while (next && leaving2.has(next)) {
+    while (next && leaving3.has(next)) {
       next = next.nextElementSibling;
     }
     return next;
@@ -14231,7 +14251,7 @@ var createQuestionsCore = (host, context, options) => {
     reveal(questionIds2) {
       const wanted = new Set(questionIds2);
       const isWanted = (child) => child instanceof HTMLElement && wanted.has(child.dataset.questionId ?? "");
-      const slot = [...list.children].find((child) => !leaving2.has(child) && isWanted(child));
+      const slot = [...list.children].find((child) => !leaving3.has(child) && isWanted(child));
       const item2 = slot?.firstElementChild;
       if (!(item2 instanceof HTMLElement) || section2.hidden) {
         return;
@@ -14739,24 +14759,17 @@ var glyphIcon = (name) => {
   }
   return icon2;
 };
+var messagesIcon = () => {
+  const icon2 = svgEl("svg", { class: "av-arrow", viewBox: "0 0 12 12", "aria-hidden": "true" });
+  const stroke2 = { stroke: "currentColor", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round", fill: "none" };
+  icon2.append(svgEl("path", { d: "M2.5 2.5h7a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5.5L3 10.5v-2h-.5a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z", ...stroke2 }));
+  return icon2;
+};
 var arrowIcon = () => {
   const icon2 = svgEl("svg", { class: "av-arrow", viewBox: "0 0 12 12", "aria-hidden": "true" });
   const stroke2 = { stroke: "currentColor", "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round", fill: "none" };
   icon2.append(svgEl("path", { d: "M9.5 6h-7M5.5 3l-3 3 3 3", ...stroke2 }));
   return icon2;
-};
-
-// hooks/browser-safe.mjs
-var BROWSER_SERVER = /playwright|puppeteer|browser|chrome|devtools|selenium|webdriver|stagehand/;
-var isBrowserTool = (tool) => {
-  if (typeof tool !== "string" || !tool.startsWith("mcp__")) {
-    return false;
-  }
-  const at = tool.indexOf("__", 5);
-  if (at <= 5) {
-    return false;
-  }
-  return BROWSER_SERVER.test(tool.slice(5, at).toLowerCase()) || tool.slice(at + 2).toLowerCase().startsWith("browser_");
 };
 
 // src/ui/agent-view/families.ts
@@ -14947,6 +14960,41 @@ var earlierByTool = (agent) => {
   return earlier.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 };
 
+// src/ui/agent-view/ci-checks.ts
+var CI_STATES = /* @__PURE__ */ new Set(["pass", "fail", "pending", "skipping", "cancel"]);
+var isCiState = (state) => CI_STATES.has(state);
+var MAX_CHECKS = 64;
+var MORE_LINE = /^\+(\d{1,6})$/;
+var ciChecks = (tail) => {
+  const list = { checks: [], more: 0 };
+  for (const line of tail.split("\n")) {
+    const [name = "", state = "", elapsed2 = ""] = line.split("	");
+    const more = MORE_LINE.exec(line);
+    if (name !== "" && isCiState(state) && list.checks.length < MAX_CHECKS) {
+      list.checks.push({ name, state, time: elapsed2 === "0" ? "" : elapsed2 });
+    } else if (more !== null) {
+      list.more = Number(more[1]);
+    }
+  }
+  return list;
+};
+var ciMark = (call) => {
+  if (call.tail === void 0 || callFamily(call) !== "check:ci") {
+    return void 0;
+  }
+  const { checks } = ciChecks(call.tail);
+  if (checks.length === 0) {
+    return void 0;
+  }
+  if (checks.some((check2) => check2.state === "fail")) {
+    return "fail";
+  }
+  if (checks.some((check2) => check2.state === "pending")) {
+    return "pending";
+  }
+  return call.outcome === "failed" ? "fail" : "ok";
+};
+
 // src/ui/agent-view/model.ts
 var CORE_STATES = {
   starting: { text: "Starting", color: "var(--c-idle)", glyph: "dot" },
@@ -14958,7 +15006,9 @@ var CORE_STATES = {
   done: { text: "Done", color: "var(--rev)", glyph: "check" },
   failed: { text: "Failed", color: "var(--red)", glyph: "x" },
   handed: { text: "Handed back", color: "var(--amber)", glyph: "undo" },
-  stale: { text: "Stale", color: "var(--fg-3)", glyph: "clock" }
+  stale: { text: "Stale", color: "var(--fg-3)", glyph: "clock" },
+  agents: { text: "Waiting on agents", color: "var(--c-idle)", glyph: "dot" },
+  idle: { text: "Idle", color: "var(--c-idle)", glyph: "dot" }
 };
 var PHASE_GLYPHS = { observe: "eye", think: "sparkle", act: "bolt", verify: "check" };
 var ENDED = { done: "done", approved: "done", changes: "done", failed: "failed", handed: "handed" };
@@ -14969,6 +15019,24 @@ var waitingCall = (agent) => {
     return void 0;
   }
   return openPermission(agent) ?? openCalls(agent).filter((call) => call.tool === "AskUserQuestion").at(-1);
+};
+var mainRest = (session, agent) => {
+  if (agent.id !== MAIN_AGENT) {
+    return void 0;
+  }
+  if (session.endedAt === void 0 && waitingCall(agent) !== void 0) {
+    return void 0;
+  }
+  if (sessionRowState(session, agent) === "waiting") {
+    return "wait";
+  }
+  if (session.endedAt !== void 0) {
+    return "done";
+  }
+  if (agent.idleSince === void 0) {
+    return void 0;
+  }
+  return sessionMainWords(session) === "waiting on agents" ? "agents" : "idle";
 };
 var coreState = (agent, phase) => {
   if (!isRunning(agent)) {
@@ -14997,13 +15065,18 @@ var coreFill = (agent, typical) => {
   }
   return running && agentCalls(agent).length === 0 ? { level: 0, still: true } : { level: 1, still: true };
 };
-var viewHead = (agent) => {
+var viewHead = (session, agent) => {
+  if (agent.id === MAIN_AGENT) {
+    const heading2 = sessionHeading(session);
+    return { title: modalTitle({ key: session.key, title: heading2, branch: heading2 }) };
+  }
   const description = agent.description?.trim() ?? "";
   return { title: description === "" ? agent.role : description.split("\n")[0] };
 };
 var LIVE_BASE = { tool: "", code: false, muted: false, more: 0, sub: "", title: "", chips: [], note: "", dots: false };
-var callText = (call) => call.tool === "Bash" ? bareCommand(call.summary) : call.summary;
-var callTitle = (call) => callText(call) === call.summary ? "" : call.summary;
+var summaryText = (call) => isBrowserTool(call.tool) && call.summary === call.tool ? "" : call.summary;
+var callText = (call) => call.tool === "Bash" ? bareCommand(call.summary) : summaryText(call);
+var callTitle = (call) => callText(call) === summaryText(call) ? "" : call.summary;
 var endedLine = (session, agent) => {
   const state = ENDED[agent.state] ?? "done";
   const tone = state === "failed" || state === "handed" ? state : "done";
@@ -15012,7 +15085,13 @@ var endedLine = (session, agent) => {
   const note = chips.length === 0 && isReviewer(session, agent) ? "No follow-ups" : "";
   return { ...LIVE_BASE, tone, text: report === "" ? CORE_STATES[state].text : report, chips, note };
 };
+var REST_TONES = { wait: "wait", done: "done" };
 var liveLine = (session, agent, clock) => {
+  const rest = mainRest(session, agent);
+  if (rest !== void 0) {
+    const words = sessionMainText(session, sessionRowState(session, agent));
+    return { ...LIVE_BASE, tone: REST_TONES[rest] ?? "idle", text: words, muted: rest !== "wait" };
+  }
   if (!isRunning(agent)) {
     return endedLine(session, agent);
   }
@@ -15020,7 +15099,8 @@ var liveLine = (session, agent, clock) => {
   if (waiting !== void 0) {
     const ask = waiting.tool === "AskUserQuestion";
     const sub = `${toolLabel(waiting.tool)} is waiting for you. Answer in the terminal.`;
-    return { ...LIVE_BASE, tone: "wait", text: callText(waiting), title: callTitle(waiting), code: !ask, sub };
+    const text2 = callText(waiting) || toolLabel(waiting.tool);
+    return { ...LIVE_BASE, tone: "wait", text: text2, title: callTitle(waiting), code: !ask, sub };
   }
   if (agent.staleSince !== void 0) {
     return { ...LIVE_BASE, tone: "stale", text: noEventText(agent, clock), muted: true };
@@ -15051,9 +15131,13 @@ var segmentMark = (call) => {
   if (isOpen(call)) {
     return call.permission === "waiting" || call.tool === "AskUserQuestion" ? "wait" : "run";
   }
+  const ci = ciMark(call);
+  if (ci !== void 0) {
+    return ci;
+  }
   return call.outcome === "failed" || checkStateOf(call) === "fail" ? "fail" : "ok";
 };
-var RESULT_WORDS = { run: "running", wait: "waiting for you", fail: "failed", denied: "denied", ok: "done" };
+var RESULT_WORDS = { run: "running", wait: "waiting for you", fail: "failed", pending: "pending", denied: "denied", ok: "done" };
 var callCaption = (call, clock) => {
   const mark = segmentMark(call);
   const check2 = checkStateOf(call);
@@ -16061,7 +16145,7 @@ var createTools = (groups2) => {
   let paused = false;
   let ring = newRing();
   const nodes = /* @__PURE__ */ new Map();
-  let leaving2 = [];
+  let leaving3 = [];
   let beams = newBeams();
   const parts = /* @__PURE__ */ new Map();
   let lit;
@@ -16106,7 +16190,7 @@ var createTools = (groups2) => {
     }
     node.group.classList.remove("in", "hl");
     node.group.classList.add("out");
-    leaving2.push({ group: node.group, at: time2 + LEAVE_MS });
+    leaving3.push({ group: node.group, at: time2 + LEAVE_MS });
   };
   const showCount = (node, calls) => {
     if (node.calls === calls) {
@@ -16226,10 +16310,10 @@ var createTools = (groups2) => {
       for (const node of nodes.values()) {
         node.group.remove();
       }
-      for (const entry of leaving2) {
+      for (const entry of leaving3) {
         entry.group.remove();
       }
-      leaving2 = [];
+      leaving3 = [];
       nodes.clear();
       ring = newRing();
       lit = void 0;
@@ -16292,8 +16376,8 @@ var createTools = (groups2) => {
       }
       const since = lastTime === void 0 ? FRAME_MS : Math.min(100, Math.max(0, time2 - lastTime));
       lastTime = time2;
-      if (leaving2.length > 0) {
-        leaving2 = leaving2.filter((entry) => {
+      if (leaving3.length > 0) {
+        leaving3 = leaving3.filter((entry) => {
           if (time2 < entry.at) {
             return true;
           }
@@ -16316,7 +16400,7 @@ var createTools = (groups2) => {
       showStates(time2);
     },
     busy() {
-      if (beams.list.length > 0 || leaving2.length > 0) {
+      if (beams.list.length > 0 || leaving3.length > 0) {
         return true;
       }
       for (const node of nodes.values()) {
@@ -17482,16 +17566,18 @@ var chipsOf = (session, agent, target, state, leg) => {
   }
   return [stateChip(state, nodeColorOf(session, agent, "agent")), ...legs];
 };
+var mainChip = (row2) => ({ text: row2.stateText, color: STATE_COLORS[row2.state] ?? "var(--st-plan)", solid: false });
 var nodePreview = (session, target, config, clock, typical) => {
   const agent = ownValue(session.agents, target.agentId);
-  if (agent === void 0 || agent.id === MAIN_AGENT) {
+  if (agent === void 0) {
     return void 0;
   }
+  const main = agent.id === MAIN_AGENT;
   const leg = legOf(session, target);
   const newest2 = isNewest(leg);
   const row2 = sessionAgentRow(session, agent, config);
   const state = newest2 ? row2.state : nodeState(session, target) ?? row2.state;
-  const chips = chipsOf(session, agent, target, state, leg);
+  const chips = main ? [mainChip(row2)] : chipsOf(session, agent, target, state, leg);
   if (chips === void 0) {
     return void 0;
   }
@@ -17499,7 +17585,7 @@ var nodePreview = (session, target, config, clock, typical) => {
   const start = leg === void 0 ? agent.startedAt : target.startedAt ?? agent.startedAt;
   const fixModel = target.ref.kind === "fix" ? fixOf(session, target.ref.branch, target.ref.fixId)?.model : void 0;
   const model = fixModel ?? agent.model;
-  const preview = { agentId: agent.id, role: agent.role, mark: modelMark(model, config.modelLetters), chips };
+  const preview = { agentId: agent.id, role: main ? "main thread" : agent.role, mark: modelMark(model, config.modelLetters), chips };
   if (model !== void 0) {
     preview.model = model;
   }
@@ -17510,6 +17596,13 @@ var nodePreview = (session, target, config, clock, typical) => {
   const pr = target.ref.kind === "pr" ? prOf(session, target.ref.branch) : void 0;
   if (pr !== void 0) {
     preview.pr = prBlock(pr, void 0).facts.filter((fact) => fact.tone !== "add" && fact.tone !== "del").map((fact) => fact.text).join(" \xB7 ");
+  }
+  if (main) {
+    const line2 = mainLine(session, agent, row2, clock);
+    if (line2 !== void 0) {
+      preview.line = line2;
+    }
+    return preview;
   }
   if (newest2 && row2.state === "pending") {
     return preview;
@@ -17538,6 +17631,18 @@ var nodePreview = (session, target, config, clock, typical) => {
   }
   preview.line = line;
   return preview;
+};
+var mainLine = (session, agent, row2, clock) => {
+  if (session.endedAt !== void 0) {
+    const at = timeOfDay(parseTime(session.endedAt));
+    return { kind: "ended", text: at === "" ? "" : `at ${at}`, chips: followupChips(session, agent.id) };
+  }
+  if (mainRest(session, agent) !== void 0 || !isRunning(agent)) {
+    return void 0;
+  }
+  const since = parseTime(agent.startedAt);
+  const time2 = since === void 0 ? "" : elapsed(clock - since);
+  return { kind: "now", tool: row2.now.tool, text: row2.now.text, failed: row2.now.failed, time: time2 };
 };
 var prOf = (session, branch) => session.rows.find((row2) => row2.branch === branch)?.pr?.pr;
 var lastCall = (agent) => {
@@ -17702,6 +17807,9 @@ var resultText = (state, ms) => {
   if (state === "denied") {
     return "denied";
   }
+  if (state === "pending") {
+    return `${secondsText(ms)} \xB7 pending`;
+  }
   return state === "fail" ? `${secondsText(ms)} \xB7 failed` : secondsText(ms);
 };
 var terminalRows = (agent, clock) => {
@@ -17722,8 +17830,15 @@ var terminalRows = (agent, clock) => {
       share: Math.min(1, times[index] / longest)
     };
     const check2 = termCheck(call);
+    const ended = state === "ok" || state === "fail" || state === "pending";
+    const ci = family === "check:ci" && call.tail !== void 0 && ended ? ciChecks(call.tail) : void 0;
     if (check2 !== void 0) {
       row2.check = check2;
+    } else if (ci !== void 0 && ci.checks.length > 0) {
+      row2.ci = ci.checks;
+      if (ci.more > 0) {
+        row2.ciMore = ci.more;
+      }
     } else if (call.responseChars !== void 0 && (state === "ok" || state === "fail")) {
       row2.size = `${sizeText(call.responseChars)} of output`;
     }
@@ -17739,7 +17854,7 @@ var browserRows = (agent) => {
   return agentCalls(agent).filter((call) => isBrowserTool(call.tool)).map((call) => ({
     id: call.toolUseId,
     action: browserAction(call.tool),
-    target: call.summary,
+    target: summaryText(call),
     time: clockText((parseTime(call.startedAt) ?? start) - start),
     running: call.endedAt === void 0 && call.outcome === void 0
   }));
@@ -17753,6 +17868,9 @@ var planSource = (session, agent, fix) => {
   return rows.length > 0 ? { kind: "fix", rows } : void 0;
 };
 var agentFix2 = (session, agentId, ref) => {
+  if (agentId === MAIN_AGENT) {
+    return void 0;
+  }
   if (ref.kind === "fix") {
     return session.rows.find((row2) => row2.branch === ref.branch)?.fixes.find((fix) => fix.id === ref.fixId);
   }
@@ -17784,6 +17902,9 @@ var prFacts = (session, agentId, ref) => {
 };
 var callTab = (call) => familyOf(callFamily(call)).tab;
 var trustOf = (session, agent, ref) => {
+  if (agent.id === MAIN_AGENT) {
+    return { trust: void 0, rowFiles: [] };
+  }
   const pr = prRow(session, agent.id, ref);
   if (pr?.pr !== void 0) {
     return { trust: pr.trust, rowFiles: pr.trust === void 0 ? [] : Object.keys(pr.trust.files) };
@@ -17960,6 +18081,30 @@ var checkSummary = (row2, check2, grow) => {
   }
   return [summary, failing];
 };
+var CI_MARKS = { pass: "\u2713", fail: "\u2715", pending: "*", skipping: "-", cancel: "-" };
+var CI_WORDS = { pass: "passed", fail: "failed", pending: "pending", skipping: "skipped", cancel: "cancelled" };
+var ciSummary = (checks, more) => {
+  const summary = el("div", "av-tsum");
+  for (const check2 of checks) {
+    const chip = el("span", `av-tci ${check2.state}`);
+    const mark = el("span", "av-tcim", CI_MARKS[check2.state]);
+    mark.setAttribute("aria-hidden", "true");
+    const name = el("span", "av-tcin", check2.name);
+    name.title = check2.state === "cancel" ? `${check2.name}: ${CI_WORDS.cancel}` : check2.name;
+    chip.append(mark, el("span", "visually-hidden", `${CI_WORDS[check2.state]}: `), name);
+    if (check2.state === "cancel") {
+      chip.title = name.title;
+    }
+    if (check2.time !== "") {
+      chip.append(el("span", "visually-hidden", "\xA0"), el("i", void 0, check2.time));
+    }
+    summary.append(chip);
+  }
+  if (more > 0) {
+    summary.append(el("span", "av-tcimore", `+${more} more`));
+  }
+  return summary;
+};
 var termRow = (row2, born, grow, parts) => {
   const item2 = el("div", "av-tr");
   if (born) {
@@ -17985,6 +18130,8 @@ var termRow = (row2, born, grow, parts) => {
   main.append(line);
   if (row2.check !== void 0) {
     main.append(...checkSummary(row2, row2.check, grow));
+  } else if (row2.ci !== void 0) {
+    main.append(ciSummary(row2.ci, row2.ciMore ?? 0));
   } else if (row2.state === "run") {
     const summary = el("div", "av-tsum");
     summary.append(el("span", "av-trunbar"));
@@ -18458,6 +18605,7 @@ var TICK_MS = 250;
 var SLIDE_MS3 = 240;
 var SLIDE_PX = 32;
 var shown;
+var leaving2;
 var ZOOM_OPENING = { pop: false, delay: SHARP_MS };
 var FADE_IN2 = [{ opacity: 0 }, { opacity: 1 }];
 var FADE_OUT = [{ opacity: 1 }, { opacity: 0 }];
@@ -18473,6 +18621,26 @@ var willChange = (parts, on) => {
     part?.style.setProperty("will-change", on ? "transform, opacity" : "");
   }
 };
+var keepMotion = (drawn, copy) => {
+  const own = drawn.getAnimations();
+  for (const motion of copy.getAnimations()) {
+    const name = motion.animationName;
+    const twin = name === void 0 ? void 0 : own.find((entry) => entry.animationName === name);
+    if (twin !== void 0) {
+      motion.currentTime = twin.currentTime;
+    } else if (Number.isFinite(motion.effect?.getComputedTiming().endTime)) {
+      motion.finish();
+    }
+  }
+  const parts = Math.min(drawn.children.length, copy.children.length);
+  for (let index = 0; index < parts; index += 1) {
+    keepMotion(drawn.children[index], copy.children[index]);
+  }
+};
+var scrollWindow = (by) => {
+  globalThis.scrollBy?.({ top: by, behavior: "instant" });
+};
+var heightOf = (box) => box.getBoundingClientRect().height;
 var after = (animation, then) => {
   const finished = animation?.finished;
   if (finished === void 0) {
@@ -18523,7 +18691,7 @@ var createLive = () => {
   return { root, body, icon: icon2, tool, text: text2, more, dots, sub, chips };
 };
 var liveIcon = (line) => {
-  if (line.tone === "run") {
+  if (line.tone === "run" || line.tone === "idle") {
     return el("i", "av-lm");
   }
   if (line.tone === "wait") {
@@ -18609,11 +18777,18 @@ var createAgentView = (context, options) => {
   const id = el("div", "av-id");
   const title = el("h4", "av-title");
   id.append(title);
+  const messages = el("button", "av-messages");
+  messages.type = "button";
+  messages.title = "Open the main-thread messages";
+  messages.setAttribute("aria-haspopup", "dialog");
+  messages.append(messagesIcon(), el("span", "av-messages-text", "Messages"));
+  messages.hidden = true;
+  messages.addEventListener("click", () => options.openMessages?.(messages));
   const nav = el("div", "av-nav");
   const prev = stepButton("Previous agent", "prev");
   const next = stepButton("Next agent", "next");
   nav.append(prev, next);
-  head.append(back, id, nav);
+  head.append(back, id, messages, nav);
   const viz = el("div", "av-viz");
   const core = createCore();
   const tools = createTools(core);
@@ -18840,7 +19015,7 @@ var createAgentView = (context, options) => {
     const items = [...segs.children];
     segments2.forEach((segment, index) => {
       const item2 = items[index];
-      item2.classList.remove("run", "wait", "fail", "denied", "ok");
+      item2.classList.remove("run", "wait", "fail", "pending", "denied", "ok");
       item2.classList.add(segment.mark);
       if (item2.getAttribute("aria-label") !== segment.caption) {
         item2.setAttribute("aria-label", segment.caption);
@@ -18859,7 +19034,7 @@ var createAgentView = (context, options) => {
     if (current === void 0 || target === void 0 || agent === void 0) {
       return;
     }
-    const headModel = viewHead(agent);
+    const headModel = viewHead(current, agent);
     setText(title, headModel.title);
     drawLive(live, liveLine(current, agent, clock), iconKey);
     prFactsView.draw(prFacts(current, agent.id, target.ref));
@@ -18927,9 +19102,11 @@ var createAgentView = (context, options) => {
     }
     dirty = false;
     const calls = agentCalls(agent);
-    const running = isRunning(agent);
+    const rest = current === void 0 ? void 0 : mainRest(current, agent);
+    const running = isRunning(agent) && rest === void 0;
     const opening = history;
-    const openIds = trackCalls(tracker, calls, time2, history);
+    const tracked = trackCalls(tracker, calls, time2, history);
+    const openIds = rest === void 0 ? tracked : /* @__PURE__ */ new Set();
     if (history) {
       phase = phaseStep(PHASE_IDLE, { open: openPhases(calls, openIds), running, time: time2 }).state;
       history = false;
@@ -18951,7 +19128,7 @@ var createAgentView = (context, options) => {
         }
       }
     }
-    showState(coreState(agent, phase.phase));
+    showState(rest ?? coreState(agent, phase.phase));
     const provisional = agentOf2()?.trimmed === true && load2.full === void 0;
     tools.sync(agent, openIds, time2, opening, provisional);
     dueAt = nextDue(time2);
@@ -18985,12 +19162,46 @@ var createAgentView = (context, options) => {
     const rect = outline?.getBoundingClientRect();
     return rect === void 0 || rect.width === 0 ? void 0 : rect;
   };
+  const keepPlace = (key, clicked) => {
+    const moved = nodeBox(key);
+    const shift = clicked === void 0 || moved === void 0 ? 0 : moved.top - clicked.top;
+    if (shift === 0) {
+      return moved;
+    }
+    scrollWindow(shift);
+    return nodeBox(key);
+  };
   let sizing;
-  const resize = (from, timing) => {
+  const swapHeld = (from, change, outgoing, incoming) => {
+    if (from <= 0) {
+      change();
+      return 0;
+    }
+    const before = heightOf(outgoing);
+    options.stage.card.style.height = `${from}px`;
+    change();
+    return from - before + heightOf(incoming);
+  };
+  const resize = (from, to, timing) => {
     sizing?.cancel();
-    const to = options.stage.card.offsetHeight;
-    sizing = from > 0 && to > 0 && from !== to ? options.stage.card.animate([{ height: `${from}px` }, { height: `${to}px` }], timing) : void 0;
+    const card = options.stage.card;
+    sizing = from > 0 && to > 0 && from !== to ? card.animate([{ height: `${from}px` }, { height: `${to}px` }], timing) : void 0;
+    card.style.height = "";
     return sizing;
+  };
+  const markLeaving = (tween) => {
+    const finished = tween?.finished;
+    if (tween === void 0 || finished === void 0) {
+      return;
+    }
+    const entry = { view, tween };
+    leaving2 = entry;
+    const clear = () => {
+      if (leaving2 === entry) {
+        leaving2 = void 0;
+      }
+    };
+    finished.then(clear, clear);
   };
   let diving = [];
   let ghost;
@@ -19027,8 +19238,9 @@ var createAgentView = (context, options) => {
     for (const name of ["transform", "tabindex", "role", "aria-describedby", "id"]) {
       copy.removeAttribute(name);
     }
+    copy.classList.remove("linked", "open");
     copy.style.setProperty("--c", getComputedStyle(drawn).getPropertyValue("--c"));
-    const svg = svgEl("svg", { class: "graph av-ghost", viewBox: `${box.x} ${box.y} ${box.width} ${box.height}`, "aria-hidden": "true" });
+    const svg = svgEl("svg", { class: "graph session-graph av-ghost", viewBox: `${box.x} ${box.y} ${box.width} ${box.height}`, "aria-hidden": "true" });
     const group = drawn.getBoundingClientRect();
     const rest = core.core.getBoundingClientRect();
     const frame = own.card.getBoundingClientRect();
@@ -19042,6 +19254,7 @@ var createAgentView = (context, options) => {
     setVars(svg, { left: `${left}px`, top: `${top}px`, ...size, "transform-origin": `${-offsetX}px ${-offsetY}px` });
     svg.append(copy);
     own.card.append(svg);
+    keepMotion(drawn, copy);
     return svg;
   };
   const zoomIn = (key, node) => {
@@ -19050,9 +19263,9 @@ var createAgentView = (context, options) => {
     const page = own.content;
     cancel([...parts(), page]);
     dropGhost();
-    const from = own.card.offsetHeight;
+    const from = heightOf(own.card);
     element.hidden = false;
-    own.enter(element);
+    const to = swapHeld(from, () => own.enter(element), page, element);
     const settle = () => {
       if (token !== zoomToken) {
         return;
@@ -19064,7 +19277,7 @@ var createAgentView = (context, options) => {
     };
     const shot = cameraTo(node, page);
     if (reduced() || node === void 0 || shot === void 0) {
-      resize(from, { duration: CROSSFADE_MS, easing: "ease" });
+      resize(from, to, { duration: CROSSFADE_MS, easing: "ease" });
       element.animate(FADE_IN2, { duration: CROSSFADE_MS, easing: "ease" });
       after(page.animate(FADE_OUT, { duration: CROSSFADE_MS, easing: "ease", fill: "forwards" }), settle);
       return;
@@ -19075,7 +19288,7 @@ var createAgentView = (context, options) => {
     const move2 = { duration: ZOOM_IN_MS, easing: ZOOM_EASE };
     const dive = page.animate([{ transform: "none" }, { transform: shot.board }], { ...move2, fill: "forwards" });
     diving = [dive, page.animate(FADE_OUT, inStep({ duration: ZOOM_IN_MS * BOARD_FADE, easing: "ease-in", fill: "forwards" }))];
-    const grow = resize(from, move2);
+    const grow = resize(from, to, move2);
     if (grow !== void 0) {
       diving.push(grow);
     }
@@ -19109,7 +19322,8 @@ var createAgentView = (context, options) => {
     const token = zoomToken;
     const page = own.content;
     const [dive] = diving;
-    const rewind = !fadeBack && dive?.playState === "running" ? diving : [];
+    const running = !fadeBack && dive?.playState === "running";
+    const rewind = running ? diving.filter((animation) => !collapsing || animation !== sizing) : [];
     diving = [];
     if (rewind.length === 0 || collapsing) {
       sizing?.cancel();
@@ -19119,10 +19333,10 @@ var createAgentView = (context, options) => {
       cancel([...parts(), page]);
       dropGhost();
     }
-    const from = collapsing ? 0 : own.card.offsetHeight;
+    const from = collapsing || rewind.length > 0 ? 0 : heightOf(own.card);
     const active = document.activeElement;
     const focusHere = active === null || active === document.body || element.contains(active);
-    own.restore();
+    const to = swapHeld(from, () => own.restore(), element, page);
     const node = nodeBox(key);
     if (returnFocus && focusHere) {
       nodeOf2(key)?.focus?.({ preventScroll: true });
@@ -19141,6 +19355,7 @@ var createAgentView = (context, options) => {
       for (const animation of rewind) {
         animation.reverse();
       }
+      markLeaving(rewind.find((animation) => animation === sizing));
       after(dive, done);
       return;
     }
@@ -19148,13 +19363,13 @@ var createAgentView = (context, options) => {
     if (reduced() || node === void 0 || shot === void 0) {
       willChange([page, core.svg], false);
       if (reduced()) {
-        resize(from, { duration: CROSSFADE_MS, easing: "ease" });
+        markLeaving(resize(from, to, { duration: CROSSFADE_MS, easing: "ease" }));
         page.animate(FADE_IN2, { duration: CROSSFADE_MS, easing: "ease" });
         after(element.animate(FADE_OUT, { duration: CROSSFADE_MS, easing: "ease", fill: "forwards" }), done);
         return;
       }
       const share2 = FADE_BACK_MS * BOARD_FADE;
-      resize(from, { duration: FADE_BACK_MS, easing: "ease" });
+      markLeaving(resize(from, to, { duration: FADE_BACK_MS, easing: "ease" }));
       element.animate(FADE_OUT, { duration: share2, easing: "ease", fill: "forwards" });
       after(page.animate(FADE_IN2, { duration: share2, delay: FADE_BACK_MS - share2, easing: "ease", fill: "backwards" }), done);
       return;
@@ -19163,7 +19378,7 @@ var createAgentView = (context, options) => {
     willChange([page, core.svg, ghost], true);
     page.style.transformOrigin = shot.boardOrigin;
     const move2 = { duration: ZOOM_OUT_MS, easing: ZOOM_EASE };
-    resize(from, move2);
+    markLeaving(resize(from, to, move2));
     page.animate([{ transform: shot.board }, { transform: "none" }], move2);
     page.animate(FADE_IN2, { duration: ZOOM_OUT_MS * BOARD_FADE, delay: ZOOM_OUT_MS * (1 - BOARD_FADE), easing: "ease-out", fill: "backwards" });
     core.svg.style.transformOrigin = shot.coreOrigin;
@@ -19218,7 +19433,8 @@ var createAgentView = (context, options) => {
         return;
       }
     }
-    if (active === null || !element.contains(active) || active.disabled === true) {
+    const hiddenMessages = active === messages && messages.hidden;
+    if (active === null || !element.contains(active) || active.disabled === true || hiddenMessages) {
       element.focus({ preventScroll: true });
     }
   };
@@ -19317,6 +19533,7 @@ var createAgentView = (context, options) => {
       step({ type: "open", at: performance.now() });
     }
     options.markCurrent(detail.agentId);
+    messages.hidden = detail.agentId !== MAIN_AGENT || options.openMessages === void 0;
     updateNav();
   };
   const open2 = (detail) => {
@@ -19327,10 +19544,12 @@ var createAgentView = (context, options) => {
     cancel([...parts(), options.stage.content]);
     sizing?.cancel();
     dropGhost();
-    const node = nodeBox(detail.key);
-    if (shown !== void 0 && shown !== view) {
-      shown.close(false);
-    }
+    const other = shown !== void 0 && shown !== view ? shown : void 0;
+    const shrinking = leaving2 !== void 0 && leaving2.view !== view ? leaving2.tween : void 0;
+    const clicked = other === void 0 && shrinking === void 0 ? void 0 : nodeBox(detail.key);
+    other?.close(false, true);
+    shrinking?.cancel();
+    const node = keepPlace(detail.key, clicked);
     if (target !== void 0) {
       options.markCurrent(void 0);
     }
@@ -19413,7 +19632,8 @@ var createAgentView = (context, options) => {
         return;
       }
       const agent = agentOf2();
-      if (agent !== void 0 && isRunning(agent) && Math.floor(clock / TICK_MS) !== Math.floor(lastDraw / TICK_MS)) {
+      const live2 = agent !== void 0 && isRunning(agent) && (current === void 0 || mainRest(current, agent) === void 0);
+      if (live2 && Math.floor(clock / TICK_MS) !== Math.floor(lastDraw / TICK_MS)) {
         draw2(clock);
       }
       if (dirty || time2 >= dueAt) {
@@ -19424,7 +19644,7 @@ var createAgentView = (context, options) => {
       tools.setPaused(lost);
       core.frame(time2);
       tools.frame(time2);
-      if (agent !== void 0 && !isRunning(agent) && !core.busy() && !tools.busy() && tracker.late.length === 0 && phase.phase === void 0) {
+      if (agent !== void 0 && !live2 && !core.busy() && !tools.busy() && tracker.late.length === 0 && phase.phase === void 0) {
         settled = true;
       }
     },
@@ -21665,6 +21885,13 @@ var createSessionCard = (context, onToggle, onHover) => {
     const ids = bubble?.dataset.questionIds ?? "";
     return ids === "" ? [] : ids.split(" ");
   };
+  const openModal = (opener, from, messageId) => {
+    if (!current) {
+      return;
+    }
+    modalSource ??= createSessionModalSource(() => context.sessions, current.id, () => current);
+    openMainThreadModal({ opener, from, source: modalSource, context, messageId });
+  };
   element.addEventListener(SESSION_MAIN, (event) => {
     nodeCard.hide();
     const from = event.target;
@@ -21673,9 +21900,8 @@ var createSessionCard = (context, onToggle, onHover) => {
     }
     const itemKey = from.dataset.key ?? "";
     const messageId = itemKey === sessionKeys.plan ? current.messages.at(-1)?.id : gateMessage(current, bubbleQuestions(itemKey));
-    modalSource ??= createSessionModalSource(() => context.sessions, current.id, () => current);
     const strip = hosts.strip.querySelector(".main-strip:not([hidden])");
-    openMainThreadModal({ opener: strip ?? heading2, from, source: modalSource, context, messageId });
+    openModal(strip ?? heading2, from, messageId);
   });
   const routeFocus = (target, source) => {
     linkFocus = void 0;
@@ -21716,6 +21942,9 @@ var createSessionCard = (context, onToggle, onHover) => {
       for (const view of views) {
         view.markCurrent?.(agentId);
       }
+    },
+    openMessages(from) {
+      openModal(from, from, current?.messages.at(-1)?.id);
     }
   });
   element.addEventListener(SESSION_CARD, (event) => {
@@ -22267,7 +22496,7 @@ var createUpdateButton = (options) => {
   let deferred = false;
   let shown3 = false;
   let open2 = false;
-  let leaving2;
+  let leaving3;
   let glides = [];
   let copyReset;
   const draw2 = (next) => {
@@ -22346,8 +22575,8 @@ var createUpdateButton = (options) => {
   };
   const enter = () => {
     shown3 = true;
-    leaving2?.cancel();
-    leaving2 = void 0;
+    leaving3?.cancel();
+    leaving3 = void 0;
     if (element.hidden) {
       place2(false, GLIDE_ENTER);
     }
@@ -22376,8 +22605,8 @@ var createUpdateButton = (options) => {
       gone();
       return;
     }
-    leaving2 = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS2, easing: "ease-in", fill: "forwards" });
-    leaving2.finished.then(gone, gone);
+    leaving3 = button.animate(LEAVE_FRAMES, { duration: LEAVE_MS2, easing: "ease-in", fill: "forwards" });
+    leaving3.finished.then(gone, gone);
   };
   const sync = () => {
     const wanted = notice !== null && !deferred && readValue(SKIP_KEY, true) !== notice.latest;
@@ -23164,7 +23393,7 @@ var startBoard = async (source, options = {}) => {
   let drawn;
   let drewStack = false;
   let travel = 1;
-  let leaving2;
+  let leaving3;
   let generation = 0;
   let events;
   let retry;
@@ -23362,7 +23591,7 @@ var startBoard = async (source, options = {}) => {
     }
     const frames = [from, { opacity: 0, transform: `translateX(${-travel * OUT_SHIFT}px)` }];
     const out = host.animate(frames, { duration: OUT_MS, easing: OUT_EASE, fill: "forwards" });
-    leaving2 = out;
+    leaving3 = out;
     const remove = () => host.remove();
     out.finished.then(remove, remove);
   };
@@ -23392,7 +23621,7 @@ var startBoard = async (source, options = {}) => {
   };
   const enter = (current, host) => {
     const own = generation;
-    const out = leaving2?.playState === "running" ? leaving2 : void 0;
+    const out = leaving3?.playState === "running" ? leaving3 : void 0;
     const moves = [];
     if (!reducedMotion()) {
       const slide2 = [{ opacity: 0, transform: `translateX(${travel * IN_SHIFT}px)` }, { opacity: 1, transform: "none" }];

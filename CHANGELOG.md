@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.26 (2026-11-06)
+
+### New
+
+- The main thread in the agent view
+- CI check chips in the agent view's Terminal
+
+### Fixed
+
+- The window stays put when the agent view zooms out
+- Agent view follow-ups: a target-less browser call, a view zooming out, the fixture's checks
+- The agent view's node copy without a ring, and one view at a time without a shift
+
 ## 0.1.25 (2026-11-05)
 
 ### New

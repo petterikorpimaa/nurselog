@@ -1,3 +1,146 @@
+// hooks/browser-safe.mjs
+var DEFAULT_ROLES = {
+  implementer: { stage: "implement" },
+  "conventions-checker": { stage: "review", short: "conv" },
+  "code-reviewer": { stage: "review", short: "code" },
+  "spec-reviewer": { stage: "review", short: "spec" },
+  "typescript-reviewer": { stage: "review", short: "ts" },
+  "silent-failure-hunter": { stage: "review", short: "silent" },
+  "security-reviewer": { stage: "review", short: "security" },
+  "design-reviewer": { stage: "review", short: "design" },
+  "database-reviewer": { stage: "review", short: "db" },
+  "pr-test-analyzer": { stage: "review", short: "tests" },
+  "pr-shepherd": { stage: "pr" },
+  planner: { stage: "other", step: "plan" },
+  architect: { stage: "other", step: "plan" },
+  // Claude Code's built-in Plan agent type.
+  Plan: { stage: "other", step: "plan" },
+  // A check runner runs the typecheck and the tests and returns their verdict: a check, no research (decision 190).
+  "check-runner": { stage: "other", step: "verify" },
+  "*": { stage: "other" }
+};
+var LEGACY_ROLE_STAGE = "build";
+var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var TASK_ID_CHARS = 39;
+var isTaskId = (value) => typeof value === "string" && value.length <= TASK_ID_CHARS && /^[A-Za-z][\w-]*$/.test(value);
+var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var PATCH_TOOLS = /* @__PURE__ */ new Set(["Edit", "MultiEdit", "Write"]);
+var lineCount = (text) => {
+  let lines = 0;
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) {
+    lines += 1;
+  }
+  return text === "" || text.endsWith("\n") ? lines : lines + 1;
+};
+var patchLines = (tool, response) => {
+  if (!PATCH_TOOLS.has(tool) || !isObject(response)) {
+    return void 0;
+  }
+  const created = tool === "Write" && response.type === "create";
+  if (created && typeof response.content === "string") {
+    return { linesAdded: lineCount(response.content), linesRemoved: 0, created: true };
+  }
+  if (!Array.isArray(response.structuredPatch)) {
+    return void 0;
+  }
+  let added = 0;
+  let removed = 0;
+  for (const hunk of response.structuredPatch) {
+    const lines = isObject(hunk) && Array.isArray(hunk.lines) ? hunk.lines : [];
+    for (const line of lines) {
+      if (typeof line === "string" && line.startsWith("+")) {
+        added += 1;
+      } else if (typeof line === "string" && line.startsWith("-")) {
+        removed += 1;
+      }
+    }
+  }
+  const counts = { linesAdded: added, linesRemoved: removed };
+  return created ? { ...counts, created: true } : counts;
+};
+var BROWSER_TARGET_CHARS = 120;
+var BROWSER_TARGET_FIELDS = ["element", "selector", "uid", "ref"];
+var BROWSER_SERVER = /playwright|puppeteer|browser|chrome|devtools|selenium|webdriver|stagehand/;
+var isBrowserTool = (tool) => {
+  if (typeof tool !== "string" || !tool.startsWith("mcp__")) {
+    return false;
+  }
+  const at = tool.indexOf("__", 5);
+  if (at <= 5) {
+    return false;
+  }
+  return BROWSER_SERVER.test(tool.slice(5, at).toLowerCase()) || tool.slice(at + 2).toLowerCase().startsWith("browser_");
+};
+var TOKEN_SEGMENT_CHARS = 8;
+var DIGIT_SEGMENT_CHARS = 6;
+var isTokenSegment = (segment) => segment.length >= TOKEN_SEGMENT_CHARS && /\d/.test(segment) || segment.length >= DIGIT_SEGMENT_CHARS && /^\d+$/.test(segment);
+var INVISIBLE = /[​-‏‪-‮⁦-⁩﻿]/g;
+var keptPath = (pathname) => {
+  let path;
+  try {
+    path = stripControl(decodeURIComponent(pathname)).replace(INVISIBLE, "");
+  } catch {
+    return "/";
+  }
+  if (/[?=&#%]|:\/\//.test(path)) {
+    return "/";
+  }
+  return path.split("/").map((segment) => isTokenSegment(segment) ? "\u2026" : segment).join("/");
+};
+var URL_SCHEME = /^([A-Za-z][A-Za-z0-9+.-]{0,31}):/;
+var ONLY_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]{0,31}:$/;
+var schemeOnly = (text) => {
+  const scheme = URL_SCHEME.exec(text)?.[1];
+  return scheme === void 0 ? void 0 : `${scheme.toLowerCase()}:`;
+};
+var parseUrl = (text) => {
+  try {
+    return new URL(text);
+  } catch {
+    return void 0;
+  }
+};
+var browserUrl = (url) => {
+  if (typeof url !== "string") {
+    return void 0;
+  }
+  const text = url.trim();
+  if (ONLY_SCHEME.test(text)) {
+    return text.toLowerCase();
+  }
+  if (!text.includes("://")) {
+    const authority = /^[^/\\?#]*/.exec(text)?.[0] ?? "";
+    if (authority.includes("@")) {
+      return void 0;
+    }
+    if (authority.endsWith(":")) {
+      return schemeOnly(text);
+    }
+    const bare = parseUrl(`http://${text}`);
+    return bare ? `${bare.host}${keptPath(bare.pathname)}` : void 0;
+  }
+  const parsed = parseUrl(text);
+  if (parsed && (parsed.protocol === "http:" || parsed.protocol === "https:")) {
+    return `${parsed.origin}${keptPath(parsed.pathname)}`;
+  }
+  return schemeOnly(text);
+};
+var browserInput = (input, prepare = (text) => text) => {
+  const kept = {};
+  const fields = isObject(input) ? input : {};
+  const url = browserUrl(fields.url);
+  if (url !== void 0) {
+    kept.url = url;
+  }
+  for (const field of BROWSER_TARGET_FIELDS) {
+    if (typeof fields[field] === "string") {
+      kept[field] = prepare(fields[field]).slice(0, BROWSER_TARGET_CHARS);
+    }
+  }
+  return kept;
+};
+
 // hooks/verification.mjs
 var VERIFICATION_RUNNERS = Object.freeze(["pnpm", "npm", "npx", "yarn", "bun", "node", "turbo", "make", "tsc", "eslint", "vitest"]);
 var VERIFICATION_KINDS = Object.freeze({ typecheck: "\\b(typecheck|tsc)\\b", lint: "\\b(lint|eslint)\\b", test: "\\b(vitest|test:run)\\b|\\b(pnpm|npm|yarn|bun|make)\\b[^&|;]*\\btest\\b" });
@@ -31,7 +174,7 @@ var WHERE_OPTIONS = /* @__PURE__ */ new Map([
   ["bun", whereOptions([], { "--filter": "name", "--cwd": "directory" })]
 ]);
 var PLAIN_WORD = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.:+-]*$/;
-var URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+var URL_SCHEME2 = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 var NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*\.[cm]?[jt]s$/;
 var PLAIN_DIRECTORY = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*$/;
 var SAFE_ASSIGNMENT_NAMES = Object.freeze(["CI", "NODE_ENV", "FORCE_COLOR", "NO_COLOR", "TZ", "DEBUG", "LANG", "LC_ALL"]);
@@ -45,6 +188,10 @@ var COUNT_OPTION = /^-(?:[nc]\d+|\d+)$/;
 var GREP_OPTION = /^-[ivEFcnwxoqshHa]+$/;
 var GH_PR_CREATE = /[ \t]*gh[ \t]+pr[ \t]+create(?=[ \t\n;&|]|$)/y;
 var PR_URL = /https:\/\/[A-Za-z0-9.-]{1,253}(?::\d{1,5})?\/[\w.-]{1,100}\/[\w.-]{1,100}\/pull\/\d{1,10}/g;
+var OTHER_OUTPUT = /^--(?:json|jq|template|web)(?:=|$)/;
+var OTHER_OUTPUT_SHORT = /^-[A-Za-z]*[qtw]/;
+var CHECK_STATES = /* @__PURE__ */ new Set(["pass", "fail", "pending", "skipping", "cancel"]);
+var ELAPSED = /^[0-9][0-9hmsuµn.]*$/;
 var PREFIX = /cd\s+\S+\s*(?:&&|;)\s*|command\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+/y;
 var defaults;
 var compiledDefaults = () => {
@@ -210,7 +357,7 @@ var toolWord = (runner, args) => {
     return void 0;
   }
   const fetches = !script || exec;
-  return fetches && URL_SCHEME.test(tool.text) ? void 0 : tool;
+  return fetches && URL_SCHEME2.test(tool.text) ? void 0 : tool;
 };
 var isVerification = (words) => {
   const [runner, ...args] = withoutPrefix(words, SAFE_ASSIGNMENT);
@@ -312,15 +459,111 @@ var createsPr = (command) => {
     return GH_PR_CREATE.test(text) && GH_PR_CREATE.lastIndex <= end;
   });
 };
+var prChecksArgs = (command) => {
+  if (command.length > MAX_COMMAND_CHARS) {
+    return void 0;
+  }
+  const { segments, unsafe } = parseChain(command);
+  let args;
+  for (const [index, stages] of unsafe ? [] : segments.entries()) {
+    if (isSilentPrefix(stages)) {
+      continue;
+    }
+    const piped = stages.length > 1;
+    if (args !== void 0 || piped && index !== segments.length - 1 || stages.some((stage) => stage.length === 0)) {
+      return void 0;
+    }
+    const [gh, pr, checks, ...rest] = withoutPrefix(stages[0], SAFE_ASSIGNMENT).map((word) => word.text);
+    const other = rest.some((arg) => OTHER_OUTPUT.test(arg) || OTHER_OUTPUT_SHORT.test(arg));
+    if (gh !== "gh" || pr !== "pr" || checks !== "checks" || other || !stages.slice(1).every(isFilter)) {
+      return void 0;
+    }
+    args = rest;
+  }
+  return args;
+};
+var isPrChecks = (command) => prChecksArgs(command) !== void 0;
+var checkRow = (line) => {
+  const [field, state, elapsed] = line.split("	").map((text) => text.trim());
+  const name = field === void 0 ? "" : stripControl(field).replace(INVISIBLE, "").trim();
+  if (elapsed === void 0 || name === "" || !CHECK_STATES.has(state) || !ELAPSED.test(elapsed)) {
+    return void 0;
+  }
+  return `${name}	${state}	${elapsed}`;
+};
+var nameOf = (row) => row.slice(0, row.indexOf("	"));
+var lastTable = (run) => {
+  const rows = run.rows;
+  for (let size = Math.floor(rows.length / 2); size > 0; size -= 1) {
+    const table = rows.slice(-size);
+    const before = rows.slice(0, -2 * size);
+    const twice = rows.slice(-2 * size, -size).every((row, index) => row === table[index]);
+    if (!twice || before.length > size) {
+      continue;
+    }
+    const names = new Set(table.map(nameOf));
+    if (before.every((row) => names.has(nameOf(row)))) {
+      return { rows: table, more: run.more };
+    }
+  }
+  return run;
+};
+var MORE_LINE = /^\+([1-9]\d{0,5})$/;
+var firstRows = (rows, more) => {
+  let count = 0;
+  let chars = -1;
+  while (count < rows.length && chars + rows[count].length + 1 <= STDOUT_TAIL) {
+    chars += rows[count].length + 1;
+    count += 1;
+  }
+  const dropped = () => more + rows.length - count;
+  while (count > 0 && dropped() > 0 && chars + 2 + String(dropped()).length > STDOUT_TAIL) {
+    count -= 1;
+    chars -= rows[count].length + 1;
+  }
+  if (count === 0) {
+    return void 0;
+  }
+  const kept = rows.slice(0, count);
+  return dropped() > 0 ? [...kept, `+${dropped()}`] : kept;
+};
+var checkList = (text, watch2) => {
+  const runs = [{ rows: [], more: 0 }];
+  for (const line of text.split("\n")) {
+    const row = checkRow(line);
+    const more = MORE_LINE.exec(line.trim());
+    const run = runs.at(-1);
+    if (row !== void 0) {
+      run.rows.push(row);
+    } else if (more !== null && run.rows.length > 0) {
+      run.more += Number(more[1]);
+      runs.push({ rows: [], more: 0 });
+    } else if (run.rows.length > 0) {
+      runs.push({ rows: [], more: 0 });
+    }
+  }
+  const tables = runs.filter((run) => run.rows.length > 0);
+  const flat = { rows: tables.flatMap((run) => run.rows), more: tables.reduce((sum, run) => sum + run.more, 0) };
+  const table = watch2 ? lastTable(tables.at(-1) ?? flat) : flat;
+  return firstRows(table.rows, table.more)?.join("\n");
+};
+var keptChecks = (command, output, prepare) => {
+  const args = prChecksArgs(command);
+  return args === void 0 ? void 0 : checkList(prepare(output), args.includes("--watch"));
+};
 var keptStdout = (command, stdout, prepare = (text) => text) => {
   if (isDefaultVerification(command)) {
     return prepare(stdout).slice(-STDOUT_TAIL);
+  }
+  if (prChecksArgs(command) !== void 0) {
+    return keptChecks(command, stdout, prepare);
   }
   if (!createsPr(command)) {
     return void 0;
   }
   return prepare(stdout).match(PR_URL)?.at(-1);
 };
+var keptErrorTail = (command, error, prepare = (text) => text) => keptChecks(command, error, prepare);
 
 // hooks/lib.mjs
 import { spawn } from "child_process";
@@ -331,151 +574,6 @@ import { connect } from "net";
 import { homedir } from "os";
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-
-// hooks/browser-safe.mjs
-var DEFAULT_ROLES = {
-  implementer: { stage: "implement" },
-  "conventions-checker": { stage: "review", short: "conv" },
-  "code-reviewer": { stage: "review", short: "code" },
-  "spec-reviewer": { stage: "review", short: "spec" },
-  "typescript-reviewer": { stage: "review", short: "ts" },
-  "silent-failure-hunter": { stage: "review", short: "silent" },
-  "security-reviewer": { stage: "review", short: "security" },
-  "design-reviewer": { stage: "review", short: "design" },
-  "database-reviewer": { stage: "review", short: "db" },
-  "pr-test-analyzer": { stage: "review", short: "tests" },
-  "pr-shepherd": { stage: "pr" },
-  planner: { stage: "other", step: "plan" },
-  architect: { stage: "other", step: "plan" },
-  // Claude Code's built-in Plan agent type.
-  Plan: { stage: "other", step: "plan" },
-  // A check runner runs the typecheck and the tests and returns their verdict: a check, no research (decision 190).
-  "check-runner": { stage: "other", step: "verify" },
-  "*": { stage: "other" }
-};
-var LEGACY_ROLE_STAGE = "build";
-var stripControl = (text) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
-var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var TASK_ID_CHARS = 39;
-var isTaskId = (value) => typeof value === "string" && value.length <= TASK_ID_CHARS && /^[A-Za-z][\w-]*$/.test(value);
-var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var PATCH_TOOLS = /* @__PURE__ */ new Set(["Edit", "MultiEdit", "Write"]);
-var lineCount = (text) => {
-  let lines = 0;
-  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) {
-    lines += 1;
-  }
-  return text === "" || text.endsWith("\n") ? lines : lines + 1;
-};
-var patchLines = (tool, response) => {
-  if (!PATCH_TOOLS.has(tool) || !isObject(response)) {
-    return void 0;
-  }
-  const created = tool === "Write" && response.type === "create";
-  if (created && typeof response.content === "string") {
-    return { linesAdded: lineCount(response.content), linesRemoved: 0, created: true };
-  }
-  if (!Array.isArray(response.structuredPatch)) {
-    return void 0;
-  }
-  let added = 0;
-  let removed = 0;
-  for (const hunk of response.structuredPatch) {
-    const lines = isObject(hunk) && Array.isArray(hunk.lines) ? hunk.lines : [];
-    for (const line of lines) {
-      if (typeof line === "string" && line.startsWith("+")) {
-        added += 1;
-      } else if (typeof line === "string" && line.startsWith("-")) {
-        removed += 1;
-      }
-    }
-  }
-  const counts = { linesAdded: added, linesRemoved: removed };
-  return created ? { ...counts, created: true } : counts;
-};
-var BROWSER_TARGET_CHARS = 120;
-var BROWSER_TARGET_FIELDS = ["element", "selector", "uid", "ref"];
-var BROWSER_SERVER = /playwright|puppeteer|browser|chrome|devtools|selenium|webdriver|stagehand/;
-var isBrowserTool = (tool) => {
-  if (typeof tool !== "string" || !tool.startsWith("mcp__")) {
-    return false;
-  }
-  const at = tool.indexOf("__", 5);
-  if (at <= 5) {
-    return false;
-  }
-  return BROWSER_SERVER.test(tool.slice(5, at).toLowerCase()) || tool.slice(at + 2).toLowerCase().startsWith("browser_");
-};
-var TOKEN_SEGMENT_CHARS = 8;
-var DIGIT_SEGMENT_CHARS = 6;
-var isTokenSegment = (segment) => segment.length >= TOKEN_SEGMENT_CHARS && /\d/.test(segment) || segment.length >= DIGIT_SEGMENT_CHARS && /^\d+$/.test(segment);
-var INVISIBLE = /[​-‏‪-‮⁦-⁩﻿]/g;
-var keptPath = (pathname) => {
-  let path;
-  try {
-    path = stripControl(decodeURIComponent(pathname)).replace(INVISIBLE, "");
-  } catch {
-    return "/";
-  }
-  if (/[?=&#%]|:\/\//.test(path)) {
-    return "/";
-  }
-  return path.split("/").map((segment) => isTokenSegment(segment) ? "\u2026" : segment).join("/");
-};
-var URL_SCHEME2 = /^([A-Za-z][A-Za-z0-9+.-]{0,31}):/;
-var ONLY_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]{0,31}:$/;
-var schemeOnly = (text) => {
-  const scheme = URL_SCHEME2.exec(text)?.[1];
-  return scheme === void 0 ? void 0 : `${scheme.toLowerCase()}:`;
-};
-var parseUrl = (text) => {
-  try {
-    return new URL(text);
-  } catch {
-    return void 0;
-  }
-};
-var browserUrl = (url) => {
-  if (typeof url !== "string") {
-    return void 0;
-  }
-  const text = url.trim();
-  if (ONLY_SCHEME.test(text)) {
-    return text.toLowerCase();
-  }
-  if (!text.includes("://")) {
-    const authority = /^[^/\\?#]*/.exec(text)?.[0] ?? "";
-    if (authority.includes("@")) {
-      return void 0;
-    }
-    if (authority.endsWith(":")) {
-      return schemeOnly(text);
-    }
-    const bare = parseUrl(`http://${text}`);
-    return bare ? `${bare.host}${keptPath(bare.pathname)}` : void 0;
-  }
-  const parsed = parseUrl(text);
-  if (parsed && (parsed.protocol === "http:" || parsed.protocol === "https:")) {
-    return `${parsed.origin}${keptPath(parsed.pathname)}`;
-  }
-  return schemeOnly(text);
-};
-var browserInput = (input, prepare = (text) => text) => {
-  const kept = {};
-  const fields = isObject(input) ? input : {};
-  const url = browserUrl(fields.url);
-  if (url !== void 0) {
-    kept.url = url;
-  }
-  for (const field of BROWSER_TARGET_FIELDS) {
-    if (typeof fields[field] === "string") {
-      kept[field] = prepare(fields[field]).slice(0, BROWSER_TARGET_CHARS);
-    }
-  }
-  return kept;
-};
-
-// hooks/lib.mjs
 var HOOK_DEFAULTS = { spool: { dir: "~/.local/share/nurselog", maxLineBytes: 65536, keepDays: 14 } };
 var CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "bin", "nurselog");
 var UNSAFE_PATH = /[\u0000-\u001f\u007f-\u009f\\]/;
@@ -1231,8 +1329,14 @@ var slimFailureError = (error, withheld) => {
   }
   return redactString(error).slice(0, FAILURE_ERROR_CHARS);
 };
+var slimErrorTail = (payload, input, sensitive) => {
+  if (sensitive || payload.tool_name !== "Bash" || typeof payload.error !== "string" || typeof input.command !== "string") {
+    return void 0;
+  }
+  return keptErrorTail(input.command, payload.error.slice(-MAX_REDACT_CHARS), redactString);
+};
 var minimizePayload = (payload) => {
-  const failure = payload.error !== void 0 || payload.errorChars !== void 0;
+  const failure = payload.error !== void 0 || payload.errorChars !== void 0 || payload.errorTail !== void 0;
   const denial = payload.hook_event_name === "PermissionDenied" && typeof payload.reason === "string";
   if (payload.tool_input === void 0 && payload.tool_response === void 0 && !failure && !denial) {
     return payload;
@@ -1254,6 +1358,12 @@ var minimizePayload = (payload) => {
     } else {
       slim.error = error;
     }
+  }
+  const errorTail = slimErrorTail(payload, input, sensitive);
+  if (errorTail === void 0) {
+    delete slim.errorTail;
+  } else {
+    slim.errorTail = errorTail;
   }
   if (payload.tool_input !== void 0) {
     slim.tool_input = slimInput(input, sensitive, payload.tool_name);
@@ -3111,7 +3221,7 @@ var DATA_CHECKS = {
   prompt: promptProblem,
   "tool.pre": (data) => stringFields(data, ["toolUseId", "tool"]) ?? toolInputProblem(data.input),
   "tool.post": toolPostProblem,
-  "tool.fail": (data) => stringFields(data, ["toolUseId", "tool"], ["error"]),
+  "tool.fail": (data) => stringFields(data, ["toolUseId", "tool"], ["error", "errorTail"]),
   permission: (data) => stringFields(data, ["tool"]) ?? toolInputProblem(data.input),
   "tool.denied": (data) => stringFields(data, ["toolUseId", "tool", "reason"]),
   "agent.stop": (data) => stringFields(data, ["lastMessage"], ["transcriptPath"]),
@@ -3232,9 +3342,9 @@ var fieldProblem = (input, known, strings, prefix = "") => {
   const wrong = known.find((key) => strings.includes(key) && isSet(input[key]) && typeof input[key] !== "string");
   return wrong === void 0 ? void 0 : `${prefix}${wrong} must be a string`;
 };
-var lengthProblem = (input, caps, nameOf) => {
+var lengthProblem = (input, caps, nameOf2) => {
   const long = Object.keys(caps).find((key) => typeof input[key] === "string" && input[key].length > caps[key]);
-  return long === void 0 ? void 0 : `${nameOf(long)} is longer than ${caps[long]} characters`;
+  return long === void 0 ? void 0 : `${nameOf2(long)} is longer than ${caps[long]} characters`;
 };
 var streamInput = (item, index, caps) => {
   const prefix = `streams[${index}]`;
@@ -3616,6 +3726,8 @@ var hookPayloadToEvent = (payload, options) => {
       return { ...envelope, src: "hook", event: "tool.post", data };
     }
     case "PostToolUseFailure": {
+      const raw = payload.errorChars === void 0 ? str(payload.error) : void 0;
+      const output = str(payload.errorTail) ?? (raw !== void 0 && raw.length < FAILURE_ERROR_CHARS ? raw : void 0);
       const data = {
         ...base,
         toolUseId: str(payload.tool_use_id) ?? "",
@@ -3623,7 +3735,8 @@ var hookPayloadToEvent = (payload, options) => {
         durationMs: num(payload.duration_ms),
         isInterrupt: payload.is_interrupt === true,
         error: cap(payload.error, FAILURE_ERROR_CHARS),
-        errorChars: num(payload.errorChars)
+        errorChars: num(payload.errorChars),
+        errorTail: tool === "Bash" && output !== void 0 ? keptErrorTail(str(input.command) ?? "", output) : void 0
       };
       return { ...envelope, src: "hook", event: "tool.fail", data };
     }
@@ -10189,12 +10302,22 @@ var markCallCheck = (copies, match) => {
     }
   }
 };
-var settleCallCheck = (call, event, config) => {
-  if (!call?.check || event.event === "tool.post" && event.data.backgroundTaskId !== void 0) {
+var keptTail = (call, event) => {
+  if (event.event === "tool.post") {
+    return event.data.stdoutTail;
+  }
+  return call.check === void 0 ? event.data.errorTail : void 0;
+};
+var settleCallCheck = (call, event, config, prChecks) => {
+  if (!call || event.event === "tool.post" && event.data.backgroundTaskId !== void 0) {
     return;
   }
-  call.check = { kind: call.check.kind, result: verifyResult(call.check.kind, event, config) };
-  const tail = event.event === "tool.post" ? stripSgr(event.data.stdoutTail ?? "") : "";
+  if (call.check) {
+    call.check = { kind: call.check.kind, result: verifyResult(call.check.kind, event, config) };
+  } else if (!prChecks) {
+    return;
+  }
+  const tail = stripSgr(keptTail(call, event) ?? "");
   if (tail === "") {
     delete call.tail;
   } else {
@@ -10467,7 +10590,8 @@ var onToolPre2 = (state, event, config, touched) => {
   const early = state.index.calls[toolUseId]?.early;
   const wholeRead = isWholeRead(tool, input) ? { wholeRead: true } : {};
   const coveredEdit = isCoveredEdit(tool, input.filePath) ? { coveredEdit: true } : {};
-  state.index.calls[toolUseId] = { runId: run.id, agentKey, at: event.at, atMs: time(event.at), ...wholeRead, ...coveredEdit };
+  const prChecks = tool === "Bash" && input.command !== void 0 && isPrChecks(input.command) ? { prChecks: true } : {};
+  state.index.calls[toolUseId] = { runId: run.id, agentKey, at: event.at, atMs: time(event.at), ...wholeRead, ...coveredEdit, ...prChecks };
   if (own) {
     noteReadback(state, event, state.index.calls[toolUseId]);
   }
@@ -10745,8 +10869,8 @@ var onToolEnd = (state, event, config, touched) => {
   }
   const runWaited = call ? endCall(call, event) : false;
   const ownWaited = ownCall ? endCall(ownCall, event) : false;
-  settleCallCheck(call, event, config);
-  settleCallCheck(ownCall, event, config);
+  settleCallCheck(call, event, config, index?.prChecks === true);
+  settleCallCheck(ownCall, event, config, index?.prChecks === true);
   const asked = runWaited || ownWaited ? run.questions.find((q) => q.id === `q-perm-${event.data.toolUseId}`) : void 0;
   if (asked?.state === "open") {
     closeQuestion(state, run, asked, "answered", event, "terminal");

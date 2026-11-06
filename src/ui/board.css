@@ -856,6 +856,8 @@ p { margin: 0; }
 }
 .nc-chip.solid { color: var(--ink); background: var(--c); border-color: var(--c); }
 .nc-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* a preview of a title only (the main thread between turns, a queued agent) takes no gap for its body */
+.nc-body:empty { display: none; }
 .nc-time { flex: none; margin-left: auto; font: 500 11px var(--f-mono); color: var(--fg-3); font-variant-numeric: tabular-nums; }
 .nc-progress { margin: 0; font: 500 11px var(--f-mono); color: var(--fg-2); overflow-wrap: anywhere; }
 .nc-fu { margin-top: 2px; }

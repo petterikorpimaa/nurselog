@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BROWSER_TARGET_CHARS, BROWSER_TARGET_FIELDS, browserInput, browserUrl, DEFAULT_ROLES, escapeRegExp, isBrowserTool, isTaskId, LEGACY_ROLE_STAGE, PATCH_TOOLS, patchLines, stripControl, TASK_ID_CHARS } from './browser-safe.mjs';
-import { FAILURE_ERROR_CHARS, keptStdout, SAFE_ASSIGNMENT_NAMES } from './verification.mjs';
+import { FAILURE_ERROR_CHARS, keptErrorTail, keptStdout, SAFE_ASSIGNMENT_NAMES } from './verification.mjs';
 
 // The default roles, the text helpers and the rules the mapping shares live in `browser-safe.mjs`, which the browser-safe core of `src/` imports.
 export { BROWSER_TARGET_CHARS, BROWSER_TARGET_FIELDS, browserInput, browserUrl, DEFAULT_ROLES, escapeRegExp, isBrowserTool, isTaskId, LEGACY_ROLE_STAGE, PATCH_TOOLS, patchLines, stripControl, TASK_ID_CHARS };
@@ -1189,17 +1189,25 @@ const slimFailureError = (error, withheld) => {
   return redactString(error).slice(0, FAILURE_ERROR_CHARS);
 };
 
+/** What `keptErrorTail` (`hooks/verification.mjs`) keeps of a failed Bash call's error after redaction: a `gh pr checks` command's check list; none for a sensitive call or another tool. */
+const slimErrorTail = (payload, input, sensitive) => {
+  if (sensitive || payload.tool_name !== 'Bash' || typeof payload.error !== 'string' || typeof input.command !== 'string') {
+    return undefined;
+  }
+  return keptErrorTail(input.command, payload.error.slice(-MAX_REDACT_CHARS), redactString);
+};
+
 /**
  * What the hook keeps of a payload (design section 2.2): tool inputs without file bodies (lengths instead), an MCP
  * tool's input as the fields the board reads and a browser call's target (`slimInput`, decision 251),
  * tool responses reduced to `slimResponse`, a failure's `error` cut to its start (none for a sensitive call or an MCP
  * tool other than Nurselog's) with `errorChars`, the length of the whole error text (kept for a sensitive call too, never the text; a stray one beside
- * an `error` that is no string is dropped), nothing but paths and the command for a tool that touches a denylisted path or prints secrets, and a
+ * an `error` that is no string is dropped), a failed `gh pr checks` command's check list as `errorTail` (`slimErrorTail`, a stray one dropped), nothing but paths and the command for a tool that touches a denylisted path or prints secrets, and a
  * PermissionDenied's `reason` redacted by the command rule, as it may quote the command it refused (an MCP tool's
  * other than Nurselog's only as its length, `reasonChars`). Other fields pass unchanged; redaction runs on the result.
  */
 export const minimizePayload = (payload) => {
-  const failure = payload.error !== undefined || payload.errorChars !== undefined;
+  const failure = payload.error !== undefined || payload.errorChars !== undefined || payload.errorTail !== undefined;
   const denial = payload.hook_event_name === 'PermissionDenied' && typeof payload.reason === 'string';
   if (payload.tool_input === undefined && payload.tool_response === undefined && !failure && !denial) {
     return payload;
@@ -1221,6 +1229,13 @@ export const minimizePayload = (payload) => {
     } else {
       slim.error = error;
     }
+  }
+  // A failed `gh pr checks` printed its table into the error, past the start `error` keeps: its check list (decision 257).
+  const errorTail = slimErrorTail(payload, input, sensitive);
+  if (errorTail === undefined) {
+    delete slim.errorTail;
+  } else {
+    slim.errorTail = errorTail;
   }
   if (payload.tool_input !== undefined) {
     slim.tool_input = slimInput(input, sensitive, payload.tool_name);

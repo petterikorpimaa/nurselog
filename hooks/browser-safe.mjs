@@ -127,7 +127,7 @@ const TOKEN_SEGMENT_CHARS = 8;
 const DIGIT_SEGMENT_CHARS = 6;
 const isTokenSegment = (segment) => (segment.length >= TOKEN_SEGMENT_CHARS && /\d/.test(segment)) || (segment.length >= DIGIT_SEGMENT_CHARS && /^\d+$/.test(segment));
 /** Bidi controls and zero-width characters, removed from a kept path as control characters are. */
-const INVISIBLE = /[​-‏‪-‮⁦-⁩﻿]/g;
+export const INVISIBLE = /[​-‏‪-‮⁦-⁩﻿]/g;
 
 /**
  * The path a kept URL shows (decision 251): its pathname percent-decoded once, control, bidi and zero-width characters

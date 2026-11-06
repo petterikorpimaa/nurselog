@@ -1,8 +1,10 @@
-// The verification defaults and the rule of what a Bash `tool.post` keeps of its stdout (design sections 2.2, 2.3 and
-// 7), shared by the hook (`hooks/lib.mjs`, which keeps it), the mapping (`src/model/hook-payload.ts`, which cuts it
-// from a raw payload) and the config defaults (`src/config-core.ts`, `DEFAULT_CONFIG.verification`). Plain ESM without
-// imports, so it runs anywhere without a build and stays safe in the board's browser bundle (`src/model/paths.ts`
-// re-exports `stripPrefix`); `verification.d.mts` types it for TypeScript.
+// The verification defaults and the rule of what a Bash `tool.post` keeps of its stdout and a `tool.fail` of its error
+// (design sections 2.2, 2.3 and 7), shared by the hook (`hooks/lib.mjs`, which keeps it), the mapping (`src/model/hook-payload.ts`, which cuts it
+// from a raw payload) and the config defaults (`src/config-core.ts`, `DEFAULT_CONFIG.verification`). Plain ESM that
+// imports only the text helpers of `hooks/browser-safe.mjs`, so it runs anywhere without a build and stays safe in the
+// board's browser bundle (`src/model/paths.ts` re-exports `stripPrefix`); `verification.d.mts` types it for TypeScript.
+
+import { INVISIBLE, stripControl } from './browser-safe.mjs';
 
 /** The default runners: the first word of a verification command once `stripPrefix` removed its prefixes. */
 export const VERIFICATION_RUNNERS = Object.freeze(['pnpm', 'npm', 'npx', 'yarn', 'bun', 'node', 'turbo', 'make', 'tsc', 'eslint', 'vitest']);
@@ -81,7 +83,7 @@ const NODE_SCRIPT = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]
 const PLAIN_DIRECTORY = /^(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9@._+][A-Za-z0-9@/._+-]*$/;
 /** The names of the environment assignments a verification command may carry; redaction (`hooks/lib.mjs`) also leaves their empty value (`CI= pnpm lint`) as it is. */
 export const SAFE_ASSIGNMENT_NAMES = Object.freeze(['CI', 'NODE_ENV', 'FORCE_COLOR', 'NO_COLOR', 'TZ', 'DEBUG', 'LANG', 'LC_ALL']);
-/** The names as the alternatives of a pattern, each escaped (this file imports nothing, so `escapeRegExp` is not at hand). */
+/** The names as the alternatives of a pattern, each escaped (`escapeRegExp` of `hooks/lib.mjs` is not at hand here). */
 const SAFE_NAME_ALTERNATIVES = SAFE_ASSIGNMENT_NAMES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /**
  * The environment assignments a verification command may carry: an allowlisted name and a plain value, or the
@@ -103,6 +105,14 @@ const GREP_OPTION = /^-[ivEFcnwxoqshHa]+$/;
 const GH_PR_CREATE = /[ \t]*gh[ \t]+pr[ \t]+create(?=[ \t\n;&|]|$)/y;
 /** A pull request URL, as `gh pr create` prints it. */
 const PR_URL = /https:\/\/[A-Za-z0-9.-]{1,253}(?::\d{1,5})?\/[\w.-]{1,100}\/[\w.-]{1,100}\/pull\/\d{1,10}/g;
+/** The long options of `gh pr checks` whose output is no table of checks: JSON, a jq filter, a template, the web browser. */
+const OTHER_OUTPUT = /^--(?:json|jq|template|web)(?:=|$)/;
+/** Their short forms (`-q`, `-t`, `-w`), alone or in a group of short options. */
+const OTHER_OUTPUT_SHORT = /^-[A-Za-z]*[qtw]/;
+/** The state words of a check in `gh pr checks`'s table without a TTY (its `bucket`). */
+const CHECK_STATES = new Set(['pass', 'fail', 'pending', 'skipping', 'cancel']);
+/** A check's elapsed time as `gh pr checks` prints it: a Go duration (`1m12s`, `850ms`) or `0` for none. */
+const ELAPSED = /^[0-9][0-9hmsuµn.]*$/;
 /** The prefixes `stripPrefix` removes, one per match at the sticky position. */
 const PREFIX = /cd\s+\S+\s*(?:&&|;)\s*|command\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+/y;
 
@@ -437,17 +447,162 @@ const createsPr = (command) => {
 };
 
 /**
+ * The arguments of the one `gh pr checks` a command runs whose stdout is that table (decision 257), by the grammar of
+ * `isDefaultVerification`: at most `MAX_COMMAND_CHARS`, no `unsafe` syntax, every chain segment a silent prefix but one
+ * `gh pr checks` (after `command` and allowlisted `NAME=value` prefixes) with no `OTHER_OUTPUT` option, and only that
+ * segment piped, as the last one, into filters only; none for another command.
+ */
+const prChecksArgs = (command) => {
+  if (command.length > MAX_COMMAND_CHARS) {
+    return undefined;
+  }
+  const { segments, unsafe } = parseChain(command);
+  let args;
+  for (const [index, stages] of unsafe ? [] : segments.entries()) {
+    if (isSilentPrefix(stages)) {
+      continue;
+    }
+    const piped = stages.length > 1;
+    if (args !== undefined || (piped && index !== segments.length - 1) || stages.some((stage) => stage.length === 0)) {
+      return undefined;
+    }
+    const [gh, pr, checks, ...rest] = withoutPrefix(stages[0], SAFE_ASSIGNMENT).map((word) => word.text);
+    const other = rest.some((arg) => OTHER_OUTPUT.test(arg) || OTHER_OUTPUT_SHORT.test(arg));
+    if (gh !== 'gh' || pr !== 'pr' || checks !== 'checks' || other || !stages.slice(1).every(isFilter)) {
+      return undefined;
+    }
+    args = rest;
+  }
+  return args;
+};
+
+/** A command whose stdout is `gh pr checks`'s table (`prChecksArgs`, decision 257); the reducer keeps such a call's check list as its tail. */
+export const isPrChecks = (command) => prChecksArgs(command) !== undefined;
+
+/** A line of the table as its name, state and elapsed time: tab-separated, at least those three columns; none for another line. */
+const checkRow = (line) => {
+  const [field, state, elapsed] = line.split('\t').map((text) => text.trim());
+  // A name keeps no control, bidi or zero-width character, which could reorder or hide the text of its chip.
+  const name = field === undefined ? '' : stripControl(field).replace(INVISIBLE, '').trim();
+  if (elapsed === undefined || name === '' || !CHECK_STATES.has(state) || !ELAPSED.test(elapsed)) {
+    return undefined;
+  }
+  return `${name}\t${state}\t${elapsed}`;
+};
+
+/** The check name of a check line. */
+const nameOf = (row) => row.slice(0, row.indexOf('\t'));
+
+/**
+ * The last table of a `--watch` output's last run of rows. `gh` prints a header line before each refresh while a check
+ * is pending, then the finished table without one, and the same table once more at its end, so the last run is the
+ * finished table twice, after the last pending table when there was one. A run that is two equal halves keeps one;
+ * a run of a table and the same later table twice keeps that later table, when every name of the first is one of it
+ * and the first is no longer (so a table whose own last rows repeat, `a b c D D`, stays whole); any other run (an
+ * interrupted watch) stays whole.
+ */
+const lastTable = (run) => {
+  const rows = run.rows;
+  for (let size = Math.floor(rows.length / 2); size > 0; size -= 1) {
+    const table = rows.slice(-size);
+    const before = rows.slice(0, -2 * size);
+    const twice = rows.slice(-2 * size, -size).every((row, index) => row === table[index]);
+    if (!twice || before.length > size) {
+      continue;
+    }
+    const names = new Set(table.map(nameOf));
+    if (before.every((row) => names.has(nameOf(row)))) {
+      return { rows: table, more: run.more };
+    }
+  }
+  return run;
+};
+
+/** The line of a check list that counts the checks the cap dropped: `+3`. */
+const MORE_LINE = /^\+([1-9]\d{0,5})$/;
+
+/**
+ * The first rows of a table that fit in `STDOUT_TAIL` characters, whole lines only, with a last line `+N` of the
+ * checks dropped (`more` of them dropped before) when there are any, counted into the characters; none when no row fits.
+ */
+const firstRows = (rows, more) => {
+  let count = 0;
+  let chars = -1;
+  while (count < rows.length && chars + rows[count].length + 1 <= STDOUT_TAIL) {
+    chars += rows[count].length + 1;
+    count += 1;
+  }
+  const dropped = () => more + rows.length - count;
+  while (count > 0 && dropped() > 0 && chars + 2 + String(dropped()).length > STDOUT_TAIL) {
+    count -= 1;
+    chars -= rows[count].length + 1;
+  }
+  if (count === 0) {
+    return undefined;
+  }
+  const kept = rows.slice(0, count);
+  return dropped() > 0 ? [...kept, `+${dropped()}`] : kept;
+};
+
+/**
+ * The check list of a `gh pr checks` output (decision 257): one `name<TAB>state<TAB>elapsed` line per check of its
+ * table, the link and description columns dropped and every other line skipped, of `--watch` only the last table, the
+ * first lines that fit in `STDOUT_TAIL` characters, whole lines only, and a last line `+N` with the count of the checks
+ * the cap dropped; none without a check line that fits. `gh` sorts the failing checks first, then the pending ones,
+ * then the rest by name, so a list over the cap keeps its failures. A `+N` line after a table adds to that table's
+ * count, so the mapping reading a kept list again keeps the same list.
+ */
+const checkList = (text, watch) => {
+  const runs = [{ rows: [], more: 0 }];
+  for (const line of text.split('\n')) {
+    const row = checkRow(line);
+    const more = MORE_LINE.exec(line.trim());
+    const run = runs.at(-1);
+    if (row !== undefined) {
+      run.rows.push(row);
+    } else if (more !== null && run.rows.length > 0) {
+      run.more += Number(more[1]);
+      runs.push({ rows: [], more: 0 });
+    } else if (run.rows.length > 0) {
+      runs.push({ rows: [], more: 0 });
+    }
+  }
+  const tables = runs.filter((run) => run.rows.length > 0);
+  const flat = { rows: tables.flatMap((run) => run.rows), more: tables.reduce((sum, run) => sum + run.more, 0) };
+  const table = watch ? lastTable(tables.at(-1) ?? flat) : flat;
+  return firstRows(table.rows, table.more)?.join('\n');
+};
+
+/** The check list of a `gh pr checks` command's output (`prChecksArgs`, `checkList`), `prepare` run on the output first; none for another command. */
+const keptChecks = (command, output, prepare) => {
+  const args = prChecksArgs(command);
+  return args === undefined ? undefined : checkList(prepare(output), args.includes('--watch'));
+};
+
+/**
  * What a Bash `tool.post` keeps of its stdout (design sections 2.2, 2.3 and 7), the one rule of the hook and the
- * mapping: the last `STDOUT_TAIL` characters for a default verification command (`isDefaultVerification`), the last
- * pull request URL for a command that runs `gh pr create` (nothing without one), else nothing. `prepare` runs on the
- * stdout first and only when something is kept: the hook's redaction.
+ * mapping: the last `STDOUT_TAIL` characters for a default verification command (`isDefaultVerification`), the check
+ * list of a `gh pr checks` command (`keptChecks`, decision 257), the last pull request URL for a command that runs
+ * `gh pr create` (nothing without one), else nothing. `prepare` runs on the stdout first and only when something may
+ * be kept: the hook's redaction.
  */
 export const keptStdout = (command, stdout, prepare = (text) => text) => {
   if (isDefaultVerification(command)) {
     return prepare(stdout).slice(-STDOUT_TAIL);
+  }
+  if (prChecksArgs(command) !== undefined) {
+    return keptChecks(command, stdout, prepare);
   }
   if (!createsPr(command)) {
     return undefined;
   }
   return prepare(stdout).match(PR_URL)?.at(-1);
 };
+
+/**
+ * What a Bash `tool.fail` keeps of its error beside the error's start (decision 257), the one rule of the hook and the
+ * mapping: the check list of a `gh pr checks` command, whose failed or pending check exits non-zero so its table
+ * arrives in the error ("Exit code 1" and the output), else nothing. `prepare` runs on the error first: the hook's
+ * redaction.
+ */
+export const keptErrorTail = (command, error, prepare = (text) => text) => keptChecks(command, error, prepare);
