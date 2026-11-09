@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.27 (2026-11-09)
+
+### New
+
+- Replay speed selector
+
 ## 0.1.26 (2026-11-06)
 
 ### New

@@ -60,7 +60,10 @@ var createClock = () => {
   let anchor;
   const replayNow = (wall) => anchor === void 0 ? wall : anchor.at + Math.max(0, wall - anchor.wall) * speed;
   return {
-    configure(mode) {
+    configure(mode, wall) {
+      if (anchor !== void 0 && wall !== void 0) {
+        anchor = { at: replayNow(wall), wall };
+      }
       replay = mode.replay;
       speed = Number.isFinite(mode.speed) && mode.speed > 0 ? mode.speed : 1;
     },
@@ -772,14 +775,17 @@ var githubStatus = (github) => {
   }
   return { text: github.activeAccount ? `gh ok: ${github.activeAccount}` : "gh ok", tone: "ok" };
 };
-var connectionLabel = (state, replay, speed) => {
+var connectionLabel = (state, replay, speed, speedShown = false) => {
   if (state === "disconnected") {
     return state;
   }
   if (state !== "connected") {
     return `${state}\u2026`;
   }
-  return replay ? `replay x${speed}` : "live";
+  if (!replay) {
+    return "live";
+  }
+  return speedShown ? "replay" : `replay x${speed}`;
 };
 var escapeRegExp = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var cardTitle = (run) => {
@@ -22827,6 +22833,25 @@ var createTopBar = (host, options) => {
   const connectionDot = el("i");
   const connectionText = el("span");
   connection.append(connectionDot, connectionText);
+  let speed = options.speed;
+  let connectionState;
+  const speedGroup = el("div", "topbar-speed");
+  speedGroup.setAttribute("role", "group");
+  speedGroup.setAttribute("aria-label", "Replay speed");
+  const speedButtons = /* @__PURE__ */ new Map();
+  for (const choice of options.speeds ?? []) {
+    const choiceButton = el("button", "topbar-speed-button", `${choice}\xD7`);
+    choiceButton.type = "button";
+    choiceButton.setAttribute("aria-pressed", String(choice === speed));
+    choiceButton.addEventListener("click", () => {
+      if (choice !== speed) {
+        options.onSpeed?.(choice);
+      }
+    });
+    speedButtons.set(choice, choiceButton);
+    speedGroup.append(choiceButton);
+  }
+  const speedItems = speedButtons.size > 0 ? [speedGroup] : [];
   const github = el("span", "topbar-github");
   const warnings = el("div", "topbar-warnings");
   const button = el("button", "button warnings-button", plural(0, "warning"));
@@ -22840,7 +22865,7 @@ var createTopBar = (host, options) => {
   list.setAttribute("aria-label", "Newest warnings");
   list.hidden = true;
   warnings.append(button, list);
-  status.append(connection, github, warnings);
+  status.append(connection, ...speedItems, github, warnings);
   appendLegend(status, host);
   const changelog = createChangelogButton({ reducedMotion: options.reducedMotion });
   const update = createUpdateButton({
@@ -23227,15 +23252,28 @@ var createTopBar = (host, options) => {
       setOpen2(false);
     }
   });
+  const drawConnection = (state) => {
+    const label = connectionLabel(state, options.replay, speed, speedButtons.size > 0);
+    setText(connectionText, label);
+    host.dataset.connection = state;
+    if (state === "connected") {
+      connection.dataset.state = options.replay ? "replay" : "live";
+    } else {
+      connection.dataset.state = state;
+    }
+  };
   return {
     setConnection(state) {
-      const label = connectionLabel(state, options.replay, options.speed);
-      setText(connectionText, label);
-      host.dataset.connection = state;
-      if (state === "connected") {
-        connection.dataset.state = options.replay ? "replay" : "live";
-      } else {
-        connection.dataset.state = state;
+      connectionState = state;
+      drawConnection(state);
+    },
+    setSpeed(next) {
+      speed = next;
+      for (const [choice, choiceButton] of speedButtons) {
+        choiceButton.setAttribute("aria-pressed", String(choice === next));
+      }
+      if (connectionState !== void 0) {
+        drawConnection(connectionState);
       }
     },
     update(board) {
@@ -23427,7 +23465,13 @@ var startBoard = async (source, options = {}) => {
       void show(next);
     }
   };
-  const topBar = createTopBar(topBarHost, { now, reducedMotion, replay, speed, onSelect: select, panelId: boardHost.id });
+  const changeSpeed = (next) => {
+    source.setSpeed?.(next);
+    topBar.setSpeed(next);
+    clock.configure({ replay, speed: next }, Date.now());
+  };
+  const speedOptions = source.speeds && source.setSpeed ? { speeds: source.speeds, onSpeed: changeSpeed } : {};
+  const topBar = createTopBar(topBarHost, { now, reducedMotion, replay, speed, ...speedOptions, onSelect: select, panelId: boardHost.id });
   const connection = createConnectionState((state) => {
     topBar.setConnection(state);
     boardHost.dataset.connection = state;

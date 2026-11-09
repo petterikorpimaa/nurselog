@@ -982,7 +982,9 @@ var replayStartAt = (texts) => {
 var replayFixtureTexts = (texts, speed, onLine) => {
   const contents = texts.map(fixtureLines);
   const lines = contents.length === 1 ? contents[0].map((text) => ({ text, time: timeOf(text) })) : mergeFixtures(contents);
+  let pace = speed;
   let timer;
+  let pending;
   let finish = () => {
   };
   const done = new Promise((resolve5) => {
@@ -990,15 +992,20 @@ var replayFixtureTexts = (texts, speed, onLine) => {
   });
   let index = 0;
   let previous;
+  const schedule = (feed, wait) => {
+    pending = { from: Date.now(), wait, feed };
+    timer = setTimeout(feed, wait);
+  };
   const next = () => {
     if (index >= lines.length) {
       finish();
       return;
     }
     const { text, time: time2 } = lines[index];
-    const gap = previous !== void 0 && time2 !== void 0 ? Math.max(0, time2 - previous) / speed : 0;
+    const gap = previous !== void 0 && time2 !== void 0 ? Math.max(0, time2 - previous) / pace : 0;
     previous = time2 ?? previous;
-    timer = setTimeout(() => {
+    schedule(() => {
+      pending = void 0;
       index += 1;
       onLine(text);
       next();
@@ -1009,7 +1016,21 @@ var replayFixtureTexts = (texts, speed, onLine) => {
     done,
     stop() {
       clearTimeout(timer);
+      pending = void 0;
       finish();
+    },
+    setSpeed(newSpeed) {
+      if (!Number.isFinite(newSpeed) || newSpeed <= 0) {
+        return;
+      }
+      const oldSpeed = pace;
+      pace = newSpeed;
+      if (pending === void 0) {
+        return;
+      }
+      const remaining = Math.max(0, pending.from + pending.wait - Date.now());
+      clearTimeout(timer);
+      schedule(pending.feed, remaining * oldSpeed / newSpeed);
     }
   };
 };
