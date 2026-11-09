@@ -11874,7 +11874,9 @@ var replayStartAt = (texts) => {
 var replayFixtureTexts = (texts, speed, onLine) => {
   const contents = texts.map(fixtureLines);
   const lines = contents.length === 1 ? contents[0].map((text2) => ({ text: text2, time: timeOf2(text2) })) : mergeFixtures(contents);
+  let pace = speed;
   let timer;
+  let pending;
   let finish = () => {
   };
   const done = new Promise((resolve) => {
@@ -11882,15 +11884,20 @@ var replayFixtureTexts = (texts, speed, onLine) => {
   });
   let index = 0;
   let previous;
+  const schedule = (feed, wait) => {
+    pending = { from: Date.now(), wait, feed };
+    timer = setTimeout(feed, wait);
+  };
   const next = () => {
     if (index >= lines.length) {
       finish();
       return;
     }
     const { text: text2, time: time2 } = lines[index];
-    const gap = previous !== void 0 && time2 !== void 0 ? Math.max(0, time2 - previous) / speed : 0;
+    const gap = previous !== void 0 && time2 !== void 0 ? Math.max(0, time2 - previous) / pace : 0;
     previous = time2 ?? previous;
-    timer = setTimeout(() => {
+    schedule(() => {
+      pending = void 0;
       index += 1;
       onLine(text2);
       next();
@@ -11901,7 +11908,21 @@ var replayFixtureTexts = (texts, speed, onLine) => {
     done,
     stop() {
       clearTimeout(timer);
+      pending = void 0;
       finish();
+    },
+    setSpeed(newSpeed) {
+      if (!Number.isFinite(newSpeed) || newSpeed <= 0) {
+        return;
+      }
+      const oldSpeed = pace;
+      pace = newSpeed;
+      if (pending === void 0) {
+        return;
+      }
+      const remaining = Math.max(0, pending.from + pending.wait - Date.now());
+      clearTimeout(timer);
+      schedule(pending.feed, remaining * oldSpeed / newSpeed);
     }
   };
 };
@@ -11989,14 +12010,17 @@ var githubStatus = (github) => {
   }
   return { text: github.activeAccount ? `gh ok: ${github.activeAccount}` : "gh ok", tone: "ok" };
 };
-var connectionLabel = (state, replay, speed) => {
+var connectionLabel = (state, replay, speed, speedShown = false) => {
   if (state === "disconnected") {
     return state;
   }
   if (state !== "connected") {
     return `${state}\u2026`;
   }
-  return replay ? `replay x${speed}` : "live";
+  if (!replay) {
+    return "live";
+  }
+  return speedShown ? "replay" : `replay x${speed}`;
 };
 var escapeRegExp4 = (text2) => text2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var cardTitle = (run) => {
@@ -13809,7 +13833,10 @@ var createClock = () => {
   let anchor;
   const replayNow = (wall) => anchor === void 0 ? wall : anchor.at + Math.max(0, wall - anchor.wall) * speed;
   return {
-    configure(mode) {
+    configure(mode, wall) {
+      if (anchor !== void 0 && wall !== void 0) {
+        anchor = { at: replayNow(wall), wall };
+      }
       replay = mode.replay;
       speed = Number.isFinite(mode.speed) && mode.speed > 0 ? mode.speed : 1;
     },
@@ -36140,6 +36167,25 @@ var createTopBar = (host, options) => {
   const connectionDot = el("i");
   const connectionText = el("span");
   connection.append(connectionDot, connectionText);
+  let speed = options.speed;
+  let connectionState;
+  const speedGroup = el("div", "topbar-speed");
+  speedGroup.setAttribute("role", "group");
+  speedGroup.setAttribute("aria-label", "Replay speed");
+  const speedButtons = /* @__PURE__ */ new Map();
+  for (const choice of options.speeds ?? []) {
+    const choiceButton = el("button", "topbar-speed-button", `${choice}\xD7`);
+    choiceButton.type = "button";
+    choiceButton.setAttribute("aria-pressed", String(choice === speed));
+    choiceButton.addEventListener("click", () => {
+      if (choice !== speed) {
+        options.onSpeed?.(choice);
+      }
+    });
+    speedButtons.set(choice, choiceButton);
+    speedGroup.append(choiceButton);
+  }
+  const speedItems = speedButtons.size > 0 ? [speedGroup] : [];
   const github = el("span", "topbar-github");
   const warnings = el("div", "topbar-warnings");
   const button = el("button", "button warnings-button", plural(0, "warning"));
@@ -36153,7 +36199,7 @@ var createTopBar = (host, options) => {
   list.setAttribute("aria-label", "Newest warnings");
   list.hidden = true;
   warnings.append(button, list);
-  status.append(connection, github, warnings);
+  status.append(connection, ...speedItems, github, warnings);
   appendLegend(status, host);
   const changelog = createChangelogButton({ reducedMotion: options.reducedMotion });
   const update = createUpdateButton({
@@ -36540,15 +36586,28 @@ var createTopBar = (host, options) => {
       setOpen2(false);
     }
   });
+  const drawConnection = (state) => {
+    const label = connectionLabel(state, options.replay, speed, speedButtons.size > 0);
+    setText(connectionText, label);
+    host.dataset.connection = state;
+    if (state === "connected") {
+      connection.dataset.state = options.replay ? "replay" : "live";
+    } else {
+      connection.dataset.state = state;
+    }
+  };
   return {
     setConnection(state) {
-      const label = connectionLabel(state, options.replay, options.speed);
-      setText(connectionText, label);
-      host.dataset.connection = state;
-      if (state === "connected") {
-        connection.dataset.state = options.replay ? "replay" : "live";
-      } else {
-        connection.dataset.state = state;
+      connectionState = state;
+      drawConnection(state);
+    },
+    setSpeed(next) {
+      speed = next;
+      for (const [choice, choiceButton] of speedButtons) {
+        choiceButton.setAttribute("aria-pressed", String(choice === next));
+      }
+      if (connectionState !== void 0) {
+        drawConnection(connectionState);
       }
     },
     update(board) {
@@ -36740,7 +36799,13 @@ var startBoard = async (source, options = {}) => {
       void show(next);
     }
   };
-  const topBar = createTopBar(topBarHost, { now, reducedMotion, replay, speed, onSelect: select, panelId: boardHost.id });
+  const changeSpeed = (next) => {
+    source.setSpeed?.(next);
+    topBar.setSpeed(next);
+    clock.configure({ replay, speed: next }, Date.now());
+  };
+  const speedOptions = source.speeds && source.setSpeed ? { speeds: source.speeds, onSpeed: changeSpeed } : {};
+  const topBar = createTopBar(topBarHost, { now, reducedMotion, replay, speed, ...speedOptions, onSelect: select, panelId: boardHost.id });
   const connection = createConnectionState((state) => {
     topBar.setConnection(state);
     boardHost.dataset.connection = state;
@@ -37306,6 +37371,8 @@ var DEMO_FIXTURES = ["web-only", "api-first", "handed-back"];
 var DEMO_CONFIG_PATH = "fixtures/nurselog.config.json";
 var DEMO_AGGREGATES_PATH = "fixtures/aggregates.ndjson";
 var DEMO_SPEED = 50;
+var DEMO_SPEEDS = [10, 25, 50];
+var SPEED_STORAGE_KEY = "nurselog.demoSpeed";
 var RELOAD_AFTER_MS = 2e4;
 var THROTTLE_MS = 100;
 var DEMO_REPOSITORY_ID = "demo";
@@ -37331,11 +37398,21 @@ var createLiveDemo = (texts, options = {}) => {
     sample2.noteLine(lineAt(text2), store);
   });
   const health = { mode: "replay", speed, startedAt };
+  const setSpeed = (speed2) => {
+    if (!DEMO_SPEEDS.includes(speed2)) {
+      return;
+    }
+    replay.setSpeed(speed2);
+    health.speed = speed2;
+    options.onSpeed?.(speed2);
+  };
   const ours = (repositoryId) => repositoryId === DEMO_REPOSITORY_ID;
   const readable = (repositoryId, signal) => ours(repositoryId) && !signal?.aborted;
   const source = {
     label: DEMO_LABEL,
     health: async () => ({ ...health }),
+    speeds: DEMO_SPEEDS,
+    setSpeed,
     repositories: async () => [repositorySummary(repository)],
     config: async (repositoryId) => ours(repositoryId) ? structuredClone(ui) : void 0,
     openStream(repositoryId, handlers) {
@@ -37401,7 +37478,22 @@ var createLiveDemo = (texts, options = {}) => {
       return report === null ? null : throughJson({ report, setup: sampleSetup(config) });
     }
   };
-  return { source, done: replay.done, stop: () => replay.stop() };
+  return { source, done: replay.done, stop: () => replay.stop(), setSpeed };
+};
+var pageStorage = () => window.localStorage;
+var readStoredSpeed = (storage = pageStorage) => {
+  try {
+    const stored = storage().getItem(SPEED_STORAGE_KEY);
+    return DEMO_SPEEDS.find((speed) => String(speed) === stored) ?? DEMO_SPEED;
+  } catch {
+    return DEMO_SPEED;
+  }
+};
+var storeSpeed = (speed, storage = pageStorage) => {
+  try {
+    storage().setItem(SPEED_STORAGE_KEY, String(speed));
+  } catch {
+  }
 };
 var reloadAfter = (done, reload, delayMs = RELOAD_AFTER_MS) => {
   void done.then(() => {
@@ -37434,7 +37526,8 @@ var showFailure = (text2) => {
 };
 var startLiveDemo = async () => {
   try {
-    const demo = createLiveDemo(await fetchDemoTexts(), { warn: (message) => console.warn(`nurselog demo: ${message}`) });
+    const warn2 = (message) => console.warn(`nurselog demo: ${message}`);
+    const demo = createLiveDemo(await fetchDemoTexts(), { speed: readStoredSpeed(), onSpeed: (speed) => storeSpeed(speed), warn: warn2 });
     reloadAfter(demo.done, () => window.location.reload());
     await startBoard(demo.source);
   } catch (error) {

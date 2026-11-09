@@ -175,6 +175,18 @@ p { margin: 0; }
 .topbar-connection[data-state="reconnecting"] i { background: var(--amber); }
 .topbar-connection[data-state="disconnected"] { color: var(--red); }
 .topbar-connection[data-state="disconnected"] i { background: var(--red); }
+/* the replay speed selector after the connection state while the source offers speeds (topbar.ts; design section 15,
+   "Live demo"), the reference's segmented control `.seg`; the focus ring is the one of every button, drawn inset as the
+   health strip's segments do, and the ::before widens the 21 px button to a 24 px hit area */
+.topbar-speed { display: flex; gap: 2px; border: 1px solid var(--border-2); border-radius: 8px; padding: 2px; background: var(--card); }
+.topbar-speed-button {
+  position: relative; border: 0; background: transparent; padding: 3px 9px; border-radius: 6px; cursor: pointer; color: var(--fg-3);
+  font: 500 11.5px var(--f-mono); white-space: nowrap; transition: background .2s, color .2s;
+}
+.topbar-speed-button::before { content: ""; position: absolute; inset: -2px -1px; }
+.topbar-speed-button:not([aria-pressed="true"]):hover { color: var(--fg-2); }
+.topbar-speed-button:focus-visible { outline-offset: -2px; }
+.topbar-speed-button[aria-pressed="true"] { background: var(--card-3); color: var(--fg); cursor: default; }
 .topbar-github { font: 500 11.5px var(--f-mono); max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-github[data-tone="off"] { color: var(--fg-3); }
 .topbar-github[data-tone="bad"] { color: var(--amber); }
